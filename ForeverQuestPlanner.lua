@@ -74,7 +74,10 @@ local K = {} -- tuning constants (avoids the 200 local variables limit)
 -- Transport mode names (internal ids -> displayed text).
 K.MODE_NAME = { vol = L["flight"], zeppelin = L["zeppelin"], bateau = L["boat"] }
 K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above yours (+1 for quests already in the log)
-K.LOOKAHEAD_LEVELS = 3 -- the Roadbook considers quests up to 3 levels above (expected level)
+-- Technical search bound: quests whose required level is up to this many levels above yours are
+-- examined, but a quest only enters the Roadbook from the step where the expected level reaches its
+-- required level (see Geo.StartIndex).
+K.LOOKAHEAD_LEVELS = 5
 
 local CLASS_SORTS = { [-395] = true, [-372] = true, [-263] = true, [-262] = true, [-261] = true, [-162] = true,
   [-161] = true, [-141] = true, [-82] = true, [-81] = true, [-61] = true }
@@ -5175,7 +5178,6 @@ K.PARAMS = {
   { key = "PRIO_BAG", label = L["Reward: bag"], pct = true, min = 0, max = 1, step = 0.01 },
   { key = "READY_BONUS", label = L["Quest ready to turn in"], pct = true, min = 0, max = 0.5, step = 0.01 },
   { section = L["Look-ahead (quest chains and expected level)"] },
-  { key = "LOOKAHEAD_LEVELS", label = L["Quests above your level"], unit = L[" lvl"], min = 0, max = 5, step = 1, rescan = true },
   { key = "LOOKAHEAD_WEIGHT", label = L["Weight of what a quest unlocks"], pct = true, min = 0, max = 1, step = 0.05 },
   { key = "MAX_LEVEL_GAP", label = L["Max quest level above yours (difficulty)"], unit = L[" lvl"], min = 0, max = 10, step = 1 },
   { section = L["Time estimates"] },
@@ -5320,7 +5322,7 @@ function Geo.CreateSettingsPanel(f)
   end)
 
   -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
-  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 548)
+  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 500)
   Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -26,
     function() return not Settings().noHearth end,
     function(v)
@@ -5340,8 +5342,8 @@ function Geo.CreateSettingsPanel(f)
   center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   local boxes = {
     Geo.SettingsBox(rb, L["Priorities (bonus in % of your level's XP)"], 8, -114, 776, 262),
-    Geo.SettingsBox(rb, L["Look-ahead"], 8, -382, 384, 160),
-    Geo.SettingsBox(rb, L["Time estimates"], 400, -382, 384, 160),
+    Geo.SettingsBox(rb, L["Look-ahead"], 8, -382, 384, 112),
+    Geo.SettingsBox(rb, L["Time estimates"], 400, -382, 384, 112),
   }
   local sec, n = 0, 0
   for _, d in ipairs(K.PARAMS) do
@@ -5443,7 +5445,7 @@ function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
     w = CreateFrame("Frame", "ForeverQuestPlannerSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    w:SetSize(820, 720)
+    w:SetSize(820, 672)
     w:SetPoint("CENTER", 40, -20)
     w:SetFrameStrata("DIALOG")
     w:SetToplevel(true)

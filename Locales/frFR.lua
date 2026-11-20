@@ -232,7 +232,6 @@ L["QuestieDB is not loaded: this tab needs the locations and XP from its databas
 L["QuestieDB is not loaded: this tab needs the locations from its database."] = "QuestieDB n'est pas chargé : cet onglet a besoin des positions de sa base de données."
 L["QuestieDB: active"] = "QuestieDB : actif"
 L["QuestieDB: missing"] = "QuestieDB : absent"
-L["Quests above your level"] = "Quêtes au-dessus de ton niveau"
 L["Quests:"] = "Quêtes :"
 L["Quick win added to the Roadbook: turn in \""] = "Gain rapide ajouté au Roadbook : rendre « "
 L["Radius:"] = "Rayon :"
