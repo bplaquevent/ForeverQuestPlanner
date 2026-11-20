@@ -91,6 +91,8 @@ local PROF_SORTS = { [-398] = true, [-377] = true, [-373] = true, [-371] = true,
 local EVENT_SORTS = { [-1000] = true, [-404] = true, [-402] = true, [-378] = true, [-376] = true, [-375] = true,
   [-374] = true, [-370] = true, [-369] = true, [-366] = true, [-364] = true, [-41] = true, [-22] = true,
   [-21] = true, [-368] = true, [-365] = true, [-241] = true }
+-- Battleground quest areas: Alterac Valley, Warsong Gulch, Arathi Basin, Darkspear Islands (Forever).
+K.PVP_SORTS = { [-25] = true, [2597] = true, [3277] = true, [3358] = true, [16606] = true }
 local PROF_HEADERS = { ["Artisanat"] = true, ["Métiers"] = true, ["Professions"] = true, ["Crafting"] = true }
 
 local function QGet(entity, id, key)
@@ -948,6 +950,7 @@ local function CheckAvailable(id, ctx)
     starterZone = starterZone,
     isClass = m and IsClassMeta(m) or false,
     isProf = m and IsProfMeta(m) or false,
+    pvp = K.PVP_SORTS[sort] or nil,
     opensChain = m and #NextQuests(m) > 0 or false,
     repMissing = MissingReputation(QGet(Q, id, "requiredMinRep")),
     missing = #missing.texts > 0 and missing or nil,
@@ -3421,6 +3424,7 @@ local CAT_COLORS = {
   dungeon = { 0.62, 0.45, 0.90 },
   singles = { 0.80, 0.70, 0.40 },
   later = { 0.85, 0.35, 0.35 },
+  pvp = { 0.95, 0.55, 0.45 },
   take = { 0.40, 0.65, 0.95 },
   step = { 0.90, 0.75, 0.20 },
   abandon = { 0.90, 0.50, 0.25 },
@@ -4412,12 +4416,22 @@ local function RenderAvailable()
         groups[#groups + 1] = g
       end
       g.list[#g.list + 1] = e
+      if e.pvp then g.pvp, g.kind = true, "pvp" end
     end
   end
 
+  -- Order of the categories: class, professions, dungeons, standard zones, PvP; then alphabetical.
+  local function Rank(g)
+    if g.name == L["Class"] then return 1 end
+    if g.name == L["Professions"] then return 2 end
+    if g.pvp then return 5 end
+    if g.kind == "dungeon" then return 3 end
+    return 4
+  end
   table.sort(groups, function(a, b)
-    if #a.list ~= #b.list then return #a.list > #b.list end
-    return a.name < b.name
+    local ra, rb = Rank(a), Rank(b)
+    if ra ~= rb then return ra < rb end
+    return Normalize(a.name) < Normalize(b.name)
   end)
 
   local total = 0
