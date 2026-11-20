@@ -74,7 +74,8 @@ local QDB = { ok = false }
 local K = {} -- tuning constants (avoids the 200 local variables limit)
 -- Transport mode names (internal ids -> displayed text).
 K.MODE_NAME = { vol = L["flight"], zeppelin = L["zeppelin"], bateau = L["boat"] }
-K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above yours (+1 for quests already in the log)
+K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above (or below) yours (+1 for quests already in the log)
+K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your level
 -- Technical search bound: quests whose required level is up to this many levels above yours are
 -- examined, but a quest only enters the Roadbook from the step where the expected level reaches its
 -- required level (see Geo.StartIndex).
@@ -1606,15 +1607,21 @@ end
 
 -- Time (s) for one objective unit.
 K.MOB_TIME = 30          -- seconds per monster killed
+K.ELITE_MOB_TIME = 75    -- seconds per elite monster killed (alone)
 K.KILLS_NO_RATE = 2      -- monsters per item to collect when QuestieDB does not know the drop rate
 -- Monsters to kill per item: from the QuestieDB drop rate, otherwise the configured value.
 function Geo.KillsPerItem(tg)
   if tg.rate and tg.rate > 0 then return 100 / math.max(tg.rate, 1) end
   return K.KILLS_NO_RATE
 end
+-- Fight time per monster of an objective: longer for elites.
+function Geo.MobTime(tg)
+  return tg.elite and K.ELITE_MOB_TIME or K.MOB_TIME
+end
+
 local function UnitTime(tg)
-  if tg.kind == "kill" then return K.MOB_TIME end
-  if tg.kind == "item" then return K.MOB_TIME * Geo.KillsPerItem(tg) end
+  if tg.kind == "kill" then return Geo.MobTime(tg) end
+  if tg.kind == "item" then return Geo.MobTime(tg) * Geo.KillsPerItem(tg) end
   if tg.kind == "object" then return 20 end
   return 10
 end
@@ -1889,7 +1896,7 @@ function Geo.BestSpot(r, from)
   for _, sp in ipairs(spots) do
     local d = Dist(from, sp.p)
     local travel = d and (d * K.PATH_FACTOR / speed) or K.CROSS_CONTINENT
-    local cost = travel + kills * K.MOB_TIME * Geo.SpotFactor(sp, kills)
+    local cost = travel + kills * Geo.MobTime(r.tg) * Geo.SpotFactor(sp, kills)
     if not bc or cost < bc then best, bc = sp, cost end
   end
   return best, #spots, kills
@@ -2042,7 +2049,7 @@ function Geo.Followers(task, ctx, plevel)
       local ok, en = pcall(CheckAvailable, b, c)
       if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
-        and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + K.MAX_LEVEL_GAP then
+        and (en.level or 0) <= Geo.MaxQuestLevel(en.id, plevel, en.reqLevel) then
         local f = Geo.TakeTask(en, plevel, from)
         if f then
           f.dep, f.depth, f.done = task, (task.depth or 0) + 1, done
@@ -2269,6 +2276,46 @@ function Geo.RecordLater(task)
   Geo.laterList[#Geo.laterList + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
 end
 
+-- Elite quest: tagged "Elite" by the game (quest log), otherwise most of the monsters of its
+-- objectives (to kill, or dropping the requested items) are elites in QuestieDB.
+Geo.elite = {}
+function Geo.IsEliteQuest(id, tag)
+  if tag then return tag == ELITE or tag:find("[EÉ]lite") ~= nil end
+  if not id then return false end
+  local v = Geo.elite[id]
+  if v ~= nil then return v end
+  local mobs = {}
+  local obj = QGet(QDB.Quest, id, "objectives")
+  if type(obj) == "table" then
+    for _, o in ipairs(obj[1] or {}) do
+      local icon = o[3]
+      if not (icon == 3 or icon == 5 or icon == 17) then mobs[#mobs + 1] = o[1] end
+    end
+    for _, o in ipairs(obj[3] or {}) do
+      local drops = QGet(QDB.Item, o[1], "npcDrops")
+      for _, n in ipairs(type(drops) == "table" and drops or {}) do mobs[#mobs + 1] = n end
+    end
+    for _, o in ipairs(obj[5] or {}) do
+      if type(o) == "table" and type(o[1]) == "table" then
+        for _, n in ipairs(o[1]) do mobs[#mobs + 1] = n end
+      end
+    end
+  end
+  local elites = 0
+  for _, n in ipairs(mobs) do
+    local rank = QGet(QDB.Npc, n, "rank")
+    if rank == 1 or rank == 2 or rank == 3 then elites = elites + 1 end
+  end
+  v = elites > 0 and elites * 2 >= #mobs
+  Geo.elite[id] = v
+  return v
+end
+
+-- Highest quest level the Roadbook takes on, from your level (or the required level, if higher).
+function Geo.MaxQuestLevel(id, plevel, reqLevel, tag)
+  return math.max(plevel, reqLevel or 0) + (Geo.IsEliteQuest(id, tag) and K.MAX_ELITE_GAP or K.MAX_LEVEL_GAP)
+end
+
 -- XP of an average quest among the Roadbook candidates (set by BuildTasks), the unit of priorities.
 function Geo.AverageXP()
   return Geo.avgXP or K.MAX_LEVEL_UNIT
@@ -2314,7 +2361,7 @@ local function BuildTasks(pos, plevel)
     local ready = q.complete and not q.failed
     if Settings().excluded[q.id] then
       skipped = skipped + 1 -- removed from the Roadbook by the player
-    elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= plevel + K.MAX_LEVEL_GAP + 1) then
+    elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel, nil, q.tag or "") + 1) then -- log: the game tag is authoritative
       local t = QuestTargets(q.id)
       local remaining, unmatched = {}, 0
       if not q.complete then remaining, unmatched = RemainingTargets(q, t) end
@@ -2350,7 +2397,7 @@ local function BuildTasks(pos, plevel)
   for _, en in ipairs(scan.entries or {}) do
     if not en.lowLevel and not en.repMissing and not en.missing and not en.repeatable
       and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
-      and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + K.MAX_LEVEL_GAP then
+      and (en.level or 0) <= Geo.MaxQuestLevel(en.id, plevel, en.reqLevel) then
       local p, d = Nearest(StartPoints(en.id), pos)
       if p then near[#near + 1] = { en = en, d = d or math.huge } end
     end
@@ -5457,9 +5504,11 @@ K.PARAMS = {
   { key = "PRIO_BAG", label = L["Reward: bag"], pct = true, min = 0, max = 1, step = 0.05 },
   { key = "READY_BONUS", label = L["Quest ready to turn in"], pct = true, min = 0, max = 1, step = 0.05 },
   { section = L["Difficulty"] },
-  { key = "MAX_LEVEL_GAP", label = L["Max quest level above yours (difficulty)"], unit = L[" lvl"], min = 0, max = 10, step = 1 },
+  { key = "MAX_LEVEL_GAP", label = L["Max quest level"], unit = L[" lvl"], min = -5, max = 5, step = 1, signed = true },
+  { key = "MAX_ELITE_GAP", label = L["Max elite quest level"], unit = L[" lvl"], min = -5, max = 5, step = 1, signed = true },
   { section = L["Time estimates"] },
   { key = "MOB_TIME", label = L["Time per monster"], unit = L[" s"], min = 10, max = 90, step = 5 },
+  { key = "ELITE_MOB_TIME", label = L["Time per elite monster"], unit = L[" s"], min = 20, max = 240, step = 5 },
   { key = "KILLS_NO_RATE", label = L["Monsters per item (unknown drop rate)"], unit = "", min = 1, max = 20, step = 1 },
 }
 for _, d in ipairs(K.PARAMS) do
@@ -5480,7 +5529,7 @@ function Geo.ApplyParams()
   for _, d in ipairs(K.PARAMS) do
     if d.key then
       local v = saved[d.key]
-      K[d.key] = (type(v) == "number") and v or d.default
+      K[d.key] = (type(v) == "number") and math.min(d.max, math.max(d.min, v)) or d.default
     end
   end
   Geo.paramsVersion = (Geo.paramsVersion or 0) + 1
@@ -5497,6 +5546,7 @@ end
 
 function Geo.ParamText(d, v)
   if d.pct then return string.format("%d %%", math.floor(v * 100 + 0.5)) end
+  if d.signed then return string.format("%+d", v) .. (d.unit or "") end
   return tostring(v) .. (d.unit or "")
 end
 
