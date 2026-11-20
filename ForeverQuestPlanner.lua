@@ -2128,31 +2128,61 @@ function Geo.SpecIndex()
 end
 
 -- Index "quest -> reward items" (QuestieDB), built once per session.
+function Geo.ItemIdList()
+  local okIds, ids = false, nil
+  if QDB.Item and QDB.Item.GetAllIds then okIds, ids = pcall(QDB.Item.GetAllIds) end
+  if not okIds or type(ids) ~= "table" then return {} end
+  if #ids == 0 and next(ids) then
+    local list = {}
+    for k in pairs(ids) do list[#list + 1] = k end
+    ids = list
+  end
+  return ids
+end
+
+function Geo.IndexItemRewards(idx, id)
+  local qs = QGet(QDB.Item, id, "questRewards")
+  if type(qs) == "table" then
+    for _, q in ipairs(qs) do
+      idx[q] = idx[q] or {}
+      table.insert(idx[q], id)
+    end
+  end
+end
+
+-- Built in one go (spread over frames inside the Roadbook computation).
 function Geo.RewardIndex()
   if Geo.rewards then return Geo.rewards end
   local idx = {}
-  if QDB.Item and QDB.Item.GetAllIds then
-    local okIds, ids = pcall(QDB.Item.GetAllIds)
-    if okIds and type(ids) == "table" then
-      if #ids == 0 and next(ids) then
-        local list = {}
-        for k in pairs(ids) do list[#list + 1] = k end
-        ids = list
-      end
-      for n, id in ipairs(ids) do
-        local qs = QGet(QDB.Item, id, "questRewards")
-        if type(qs) == "table" then
-          for _, q in ipairs(qs) do
-            idx[q] = idx[q] or {}
-            table.insert(idx[q], id)
-          end
-        end
-        if n % 500 == 0 then Geo.Yield() end
-      end
-    end
+  for n, id in ipairs(Geo.ItemIdList()) do
+    Geo.IndexItemRewards(idx, id)
+    if n % 500 == 0 then Geo.Yield() end
   end
   Geo.rewards = idx
   return idx
+end
+
+-- Built in the background (500 items per frame) for the "Available" tab, then the list is refreshed.
+function Geo.BuildRewardIndexAsync()
+  if Geo.rewards or Geo.rewardsBuilding or not QDB.ok then return end
+  local ids, idx, i = Geo.ItemIdList(), {}, 1
+  Geo.rewardsBuilding = true
+  local function step()
+    if Geo.rewards then -- built meanwhile by the Roadbook computation
+      Geo.rewardsBuilding = nil
+      return
+    end
+    local stop = math.min(i + 499, #ids)
+    for k = i, stop do Geo.IndexItemRewards(idx, ids[k]) end
+    i = stop + 1
+    if i <= #ids then
+      C_Timer.After(0, step)
+    else
+      Geo.rewards, Geo.rewardsBuilding = idx, nil
+      if Refresh then Refresh() end
+    end
+  end
+  step()
 end
 
 -- Recipe item (class 9) subclass -> profession skill line (Classic). Subclass 0 = book.
@@ -3368,12 +3398,20 @@ local CAT_COLORS = {
   info = { 0.55, 0.55, 0.55 },
 }
 
+-- Item tooltip opened from a list line: hidden when the lines are redrawn or the window closes
+-- (the line under the cursor may be hidden or reused without any "leave" event).
+function Geo.HideRowTooltip()
+  local owner = GameTooltip:IsShown() and GameTooltip:GetOwner()
+  if owner and owner.isListRow then GameTooltip:Hide() end
+end
+
 local function ListRow(panel, i)
   panel.rows = panel.rows or {}
   local r = panel.rows[i]
   if r then return r end
   r = CreateFrame("Frame", nil, panel.scroll.child)
   r:SetWidth(CONTENT_WIDTH)
+  r.isListRow = true
   r.bg = r:CreateTexture(nil, "BACKGROUND")
   r.bg:SetAllPoints()
   r.hl = r:CreateTexture(nil, "BACKGROUND", nil, 1)
@@ -3388,6 +3426,16 @@ local function ListRow(panel, i)
   r.text:SetPoint("TOPLEFT", 10, -6)
   r.text:SetJustifyH("LEFT")
   r.text:SetSpacing(2)
+  -- Item names of a line (rewards): game tooltip on hover.
+  if r.SetHyperlinksEnabled then
+    r:SetHyperlinksEnabled(true)
+    r:SetScript("OnHyperlinkEnter", function(self, link)
+      GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+      pcall(GameTooltip.SetHyperlink, GameTooltip, link)
+      GameTooltip:Show()
+    end)
+    r:SetScript("OnHyperlinkLeave", function() GameTooltip:Hide() end)
+  end
   -- Three button columns (b1, b2, b3), placed by RenderList according to the tab's grid.
   r.b1 = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.b2 = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
@@ -3451,6 +3499,7 @@ K.MAX_VISIBLE_ROWS = 400
 local OpenQuestDetails -- defined with quest tracking, further down
 
 local function RenderList(panel, tabKey, items, forceOpen)
+  Geo.HideRowTooltip()
   -- Two grids: quest lines and category bars, each aligned to the right.
   local rowItems, headerItems = {}, {}
   for _, it in ipairs(items) do
@@ -3521,7 +3570,7 @@ local function RenderList(panel, tabKey, items, forceOpen)
           r:SetScript("OnEnter", function(self) self.hl:Show() end)
           r:SetScript("OnLeave", function(self) self.hl:Hide() end)
         else
-          r:EnableMouse(false)
+          r:EnableMouse(it.links and true or false) -- item names: tooltips need the mouse
           r:SetScript("OnMouseUp", nil)
           r:SetScript("OnEnter", nil)
           r:SetScript("OnLeave", nil)
@@ -4194,6 +4243,76 @@ local function CurrentZoneNames()
 end
 
 
+---------------------------------------------------------------------------
+-- Quest rewards: line of the "Available" tab (item names, game tooltip on hover)
+---------------------------------------------------------------------------
+-- Reward item: name from QuestieDB; the game's link (quality color) when already in its cache.
+-- No request to the server: the tooltip loads the item on hover.
+Geo.itemCache = {}
+function Geo.ItemInGameCache(id)
+  if C_Item and C_Item.IsItemDataCachedByID then
+    local ok, v = pcall(C_Item.IsItemDataCachedByID, id)
+    return ok and v and true or false
+  end
+  return false
+end
+
+function Geo.RewardItem(itemId)
+  local it = Geo.itemCache[itemId]
+  if not it then
+    it = { id = itemId, name = QGet(QDB.Item, itemId, "name") or ("#" .. itemId) }
+    Geo.itemCache[itemId] = it
+  end
+  if not it.link and Geo.ItemInGameCache(itemId) then -- e.g. loaded by a tooltip since
+    local name, link = GetItemInfoCompat(itemId)
+    if name then it.name, it.link = name, link end
+  end
+  return it
+end
+
+-- Rewards of a quest: item ids and reputations.
+Geo.rewardCache = {}
+function Geo.QuestRewards(id)
+  local r = Geo.rewardCache[id]
+  if r then return r end
+  r = { items = Geo.RewardIndex()[id] or {}, rep = {} }
+  local rep = QGet(QDB.Quest, id, "reputationReward")
+  if type(rep) == "table" then
+    for _, p in ipairs(rep) do
+      if type(p) == "table" and p[1] and (p[2] or 0) > 0 then r.rep[#r.rep + 1] = { faction = p[1], value = p[2] } end
+    end
+  end
+  Geo.rewardCache[id] = r
+  return r
+end
+
+function Geo.FactionName(fid)
+  if GetFactionInfoByID then
+    local ok, name = pcall(GetFactionInfoByID, fid)
+    if ok and name then return name end
+  end
+  return L["Faction "] .. fid
+end
+
+-- "Possible rewards: [Item] · [Item] · Reputation: Orgrimmar +250"
+function Geo.RewardLine(id)
+  if not Geo.rewards then -- index still being built in the background: the list is refreshed when ready
+    Geo.BuildRewardIndexAsync()
+    return nil
+  end
+  local r = Geo.QuestRewards(id)
+  local parts = {}
+  for _, itemId in ipairs(r.items) do
+    local it = Geo.RewardItem(itemId)
+    parts[#parts + 1] = it.link or ("|cffffffff|Hitem:" .. it.id .. "|h[" .. it.name .. "]|h|r")
+  end
+  for _, p in ipairs(r.rep) do
+    parts[#parts + 1] = Color("aaaaaa", L["Reputation: "]) .. Geo.FactionName(p.faction) .. " +" .. p.value
+  end
+  if #parts == 0 then return nil end
+  return Color("bbbbbb", L["Possible rewards: "]) .. table.concat(parts, Color("888888", " · "))
+end
+
 local function RenderAvailable()
   local panel = panels.avail
   if not QDB.ok then
@@ -4265,7 +4384,8 @@ local function RenderAvailable()
 
   local total = 0
   for _, g in ipairs(groups) do total = total + #g.list end
-  local items = { { text = Color("aaaaaa", Plural(total, L["quest"]) .. L[" available"] .. (Settings().showLowLevel and L[", low level included"] or L[" (low level excluded)"]) .. L[", according to QuestieDB. Quests specific to Forever may be missing."]) } }
+  local head = Plural(total, L["quest"]) .. L[" available"] .. (Settings().showLowLevel and L[", low level included"] or L[" (low level excluded)"]) .. L[", according to QuestieDB. Quests specific to Forever may be missing."]
+  local items = { { text = Color("aaaaaa", head) } }
   local pos = PlayerPos()
   for _, g in ipairs(groups) do
     table.sort(g.list, function(a, b) return (a.level or 0) < (b.level or 0) end)
@@ -4286,8 +4406,10 @@ local function RenderAvailable()
         text = text .. "\n       " .. Color("ff6060", L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", "))
       end
       if e.starter then text = text .. "\n       " .. Color("bbbbbb", L["Given by: "] .. e.starter) end
+      local rewards = Geo.RewardLine(e.id)
+      if rewards then text = text .. "\n       " .. rewards end
       local p = GeoReady() and Nearest(StartPoints(e.id), pos) or nil
-      items[#items + 1] = { text = text, b2 = PinButton(p, e.name, L["pick up the quest"], e.id) }
+      items[#items + 1] = { text = text, b2 = PinButton(p, e.name, L["pick up the quest"], e.id), links = rewards ~= nil }
     end
   end
   if total == 0 then items[#items + 1] = { text = searching and L["No quest matches the search."] or L["No quest available for this filter."] } end
@@ -6223,6 +6345,7 @@ local function CreateMainFrame()
   end)
   f:SetScript("OnHide", function()
     StopNearTicker()
+    Geo.HideRowTooltip()
     if PlaySound then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_QUEST_LOG_CLOSE) or 845) end
   end)
   tinsert(UISpecialFrames, "ForeverQuestPlannerFrame")
