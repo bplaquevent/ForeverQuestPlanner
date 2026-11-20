@@ -4994,6 +4994,7 @@ function CP.RefreshButton()
   local s = CP.CurrentFocus()
   if s then
     local t, d = CP.StepSummary(s)
+    if s.task and s.task.id and s.task.level then t = t .. " " .. Geo.LevelBadge(s.task.level) end -- quest level
     b.title:SetText(t)
     b.sub:SetText(d)
     b.current = s
