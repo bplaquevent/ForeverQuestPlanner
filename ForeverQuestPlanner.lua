@@ -5636,7 +5636,7 @@ function Geo.CreateSettingsPanel(f)
   panel.sliders, panel.updaters = {}, {}
 
   -- General
-  local gen = Geo.SettingsBox(panel, L["General"], 14, -32, 390, 62)
+  local gen = Geo.SettingsBox(panel, L["General"], 14, -32, 392, 62)
   Geo.SettingsCheck(gen, L["Minimap icon"], 10, -28,
     function() return not Settings().hideMinimap end,
     function(v)
@@ -5646,7 +5646,7 @@ function Geo.CreateSettingsPanel(f)
     end, panel)
 
   -- Quest log
-  local journal = Geo.SettingsBox(panel, L["Quest log"], 416, -32, 390, 62)
+  local journal = Geo.SettingsBox(panel, L["Quest log"], 414, -32, 392, 62)
   local keep = CreateFrame("Button", nil, journal, "UIPanelButtonTemplate")
   keep:SetSize(240, 22)
   keep:SetPoint("TOPLEFT", 10, -28)
@@ -5658,8 +5658,10 @@ function Geo.CreateSettingsPanel(f)
   end)
 
   -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
-  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 500)
-  Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -26,
+  -- Layout: boxes 8 px apart; content 10 px from the left edge, first row 28-30 px below the
+  -- top edge, 12 px of padding under the last row (slider row = 46 px).
+  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -102, 792, 526)
+  Geo.SettingsCheck(rb, L["Use the hearthstone"], 18, -28,
     function() return not Settings().noHearth end,
     function(v)
       Settings().noHearth = not v or nil
@@ -5667,7 +5669,7 @@ function Geo.CreateSettingsPanel(f)
     end, panel)
   local restore = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
   restore:SetSize(260, 22)
-  restore:SetPoint("TOPRIGHT", -10, -24)
+  restore:SetPoint("TOPRIGHT", -18, -28) -- aligned with "Center horizontally" below
   restore:SetText(L["Restore removed quests"])
   restore:SetScript("OnClick", function()
     local n = 0
@@ -5678,12 +5680,12 @@ function Geo.CreateSettingsPanel(f)
     if Refresh then Refresh() end
   end)
   -- Objective button: shown, locked, compass, centered.
-  local obj = Geo.SettingsBox(rb, L["Objective"], 8, -52, 776, 56)
-  Geo.SettingsCheck(obj, L["Show"], 10, -26, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
-  Geo.SettingsCheck(obj, L["Lock"], 220, -26,
+  local obj = Geo.SettingsBox(rb, L["Objective"], 8, -58, 776, 62)
+  Geo.SettingsCheck(obj, L["Show"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
+  Geo.SettingsCheck(obj, L["Lock"], 220, -28,
     function() return Settings().checkpointLocked end,
     function(v) Settings().checkpointLocked = v or nil end, panel)
-  Geo.SettingsCheck(obj, L["Compass"], 380, -26,
+  Geo.SettingsCheck(obj, L["Compass"], 380, -28,
     function() return Settings().compass ~= false end,
     function(v)
       if v then Settings().compass = nil else Settings().compass = false end -- shown by default
@@ -5692,13 +5694,13 @@ function Geo.CreateSettingsPanel(f)
     end, panel)
   local center = CreateFrame("Button", nil, obj, "UIPanelButtonTemplate")
   center:SetSize(260, 22)
-  center:SetPoint("TOPRIGHT", -10, -26)
+  center:SetPoint("TOPRIGHT", -10, -28)
   center:SetText(L["Center horizontally"])
   center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   local boxes = {
-    Geo.SettingsBox(rb, L["Priorities (100 % = adds the XP of an average Roadbook quest)"], 8, -114, 776, 262),
-    Geo.SettingsBox(rb, L["Difficulty"], 8, -382, 384, 112),
-    Geo.SettingsBox(rb, L["Time estimates"], 400, -382, 384, 112),
+    Geo.SettingsBox(rb, L["Priorities (100 % = adds the XP of an average Roadbook quest)"], 8, -128, 776, 214),
+    Geo.SettingsBox(rb, L["Difficulty"], 8, -350, 384, 168),
+    Geo.SettingsBox(rb, L["Time estimates"], 400, -350, 384, 168),
   }
   local sec, n = 0, 0
   for _, d in ipairs(K.PARAMS) do
@@ -5707,7 +5709,7 @@ function Geo.CreateSettingsPanel(f)
     elseif boxes[sec] then
       local cols = (sec == 1) and 2 or 1
       local col, row = n % cols, math.floor(n / cols)
-      Geo.SettingsSlider(boxes[sec], d, 10 + col * 384, -30 - row * 46, panel)
+      Geo.SettingsSlider(boxes[sec], d, 10 + col * 392, -30 - row * 46, panel)
       n = n + 1
     end
   end
@@ -5800,7 +5802,7 @@ function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
     w = CreateFrame("Frame", "ForeverQuestPlannerSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    w:SetSize(820, 672)
+    w:SetSize(820, 700)
     w:SetPoint("CENTER", 40, -20)
     w:SetFrameStrata("DIALOG")
     w:SetToplevel(true)
