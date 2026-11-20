@@ -4110,7 +4110,7 @@ end
 -- done in the game (see CP.ValidateUnsafe).
 ---------------------------------------------------------------------------
 -- Saved Roadbook: once computed, the plan no longer changes until its end, or until a
--- recompute request (Refresh, duration change, Recalculate button, Ctrl-click on the button).
+-- recompute request (duration change, Recalculate button, Ctrl-click on the button).
 ---------------------------------------------------------------------------
 function Geo.CopyPoint(p)
   if not p then return nil end
