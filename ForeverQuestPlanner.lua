@@ -3027,7 +3027,36 @@ function Geo.Improve(route, travel)
   return route
 end
 
+-- Reward items of the quests (log and available) asked to the game before planning, up to
+-- K.ITEM_WAIT seconds: otherwise an item not cached yet counts as "no interest" and the next
+-- computation, with the data, gives another Roadbook.
+K.ITEM_WAIT = 3
+function Geo.PreloadRewardItems()
+  local idx, missing = Geo.RewardIndex(), {}
+  local function want(qid)
+    for _, itemId in ipairs(idx[qid] or {}) do
+      if not GetItemInfoCompat(itemId) then -- asks the server when not cached
+        missing[#missing + 1] = itemId
+        if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemId) end
+      end
+    end
+  end
+  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
+  for _, q in ipairs(e and e.quests or {}) do want(q.id) end
+  for _, en in ipairs(scan.entries or {}) do want(en.id) end
+  local start = GetTime and GetTime() or 0
+  while #missing > 0 and Geo.co and coroutine.running() == Geo.co and (GetTime() - start) < K.ITEM_WAIT do
+    coroutine.yield() -- next frame
+    local still = {}
+    for _, itemId in ipairs(missing) do
+      if not GetItemInfoCompat(itemId) then still[#still + 1] = itemId end
+    end
+    missing = still
+  end
+end
+
 local function PlanXP(horizon)
+  Geo.PreloadRewardItems()
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
   Geo.xpScale = nil
@@ -6330,7 +6359,7 @@ local function CreateMainFrame()
     if v ~= xpHorizon then
       xpHorizon = v
       Settings().horizon = v
-      Geo.ClearFrozen() -- new duration: new Roadbook
+      CP.Recompute() -- new duration: new Roadbook, same as the "Recalculate" button
     end
   end, function(text)
     xpQuery = ParseQuery(text)
