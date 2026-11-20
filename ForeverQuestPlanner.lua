@@ -3072,7 +3072,7 @@ local mainFrame
 local panels, tabButtons = {}, {}
 local currentTab = "near"
 local availFilter = "zone"
-local CONTENT_WIDTH = 760
+local CONTENT_WIDTH = 770 -- same gap on the right (to the scroll bar) as on the left
 
 -- Scroll bar of a UIPanelScrollFrameTemplate frame (key, name, or Slider child).
 local function ScrollBarOf(scroll)
