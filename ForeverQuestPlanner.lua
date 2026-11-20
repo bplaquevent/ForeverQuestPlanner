@@ -615,7 +615,7 @@ local function RemainingObjectives(q)
   for _, o in ipairs(q.objectives or {}) do
     if not o.finished and o.text then parts[#parts + 1] = o.text end
   end
-  return table.concat(parts, " ; ")
+  return table.concat(parts, " · ")
 end
 
 ---------------------------------------------------------------------------
@@ -3439,6 +3439,29 @@ function Geo.HideRowTooltip()
   if owner and owner.isListRow then GameTooltip:Hide() end
 end
 
+-- Quest link for the chat, the same for every player (with or without addons): the game's link for
+-- a quest of the log; otherwise a link in the same format, built from QuestieDB (name, level).
+function Geo.QuestChatLink(id)
+  if IsInLog(id) then
+    for _, f in ipairs({ C_QuestLog and C_QuestLog.GetQuestLink or false, GetQuestLink or false }) do
+      if f then
+        local ok, link = pcall(f, id)
+        if ok and type(link) == "string" and link ~= "" then return link end
+      end
+    end
+  end
+  local name = QGet(QDB.Quest, id, "name")
+  if not name and C_QuestLog.GetTitleForQuestID then name = C_QuestLog.GetTitleForQuestID(id) end
+  local level = tonumber(QGet(QDB.Quest, id, "questLevel")) or 0
+  return string.format("|cffffff00|Hquest:%d:%d|h[%s]|h|r", id, level, name or "?")
+end
+
+-- Shift-click on a quest line: its link goes into the chat input (opened if needed).
+function Geo.LinkQuestInChat(id)
+  local link = Geo.QuestChatLink(id)
+  if not (ChatEdit_InsertLink and ChatEdit_InsertLink(link)) and ChatFrame_OpenChat then ChatFrame_OpenChat(link) end
+end
+
 -- Lines wider than the text area: wrapped here, each continuation starting with the same indent
 -- (the game wraps at the left edge). Item links and textures are never cut; an open color goes on.
 function Geo.IndentWrap(text, width)
@@ -3643,12 +3666,20 @@ local function RenderList(panel, tabKey, items, forceOpen)
         else
           r.bg:SetColorTexture(1, 1, 1, (zebra % 2 == 0) and 0.05 or 0)
         end
-        if it.questID and IsInLog(it.questID) then
-          local qid = it.questID
+        local qid = it.questID or it.linkQuest
+        if qid then
+          -- Click: quest details (quest of the log); Shift-click: quest link in the chat.
+          local inLog = it.questID and IsInLog(it.questID)
           r:EnableMouse(true)
-          r:SetScript("OnMouseUp", function() OpenQuestDetails(qid) end)
-          r:SetScript("OnEnter", function(self) self.hl:Show() end)
-          r:SetScript("OnLeave", function(self) self.hl:Hide() end)
+          r:SetScript("OnMouseUp", function()
+            if IsShiftKeyDown and IsShiftKeyDown() then
+              Geo.LinkQuestInChat(qid)
+            elseif inLog then
+              OpenQuestDetails(qid)
+            end
+          end)
+          r:SetScript("OnEnter", inLog and function(self) self.hl:Show() end or nil)
+          r:SetScript("OnLeave", inLog and function(self) self.hl:Hide() end or nil)
         else
           r:EnableMouse(it.links and true or false) -- item names: tooltips need the mouse
           r:SetScript("OnMouseUp", nil)
@@ -3994,6 +4025,46 @@ function Geo.QuestBadges(o)
   return "  " .. badge .. (#parts > 0 and (" " .. Color("80c0ff", table.concat(parts, " · "))) or "")
 end
 
+-- Quest descriptions: the same layout and colors in every tab and on the Objective button.
+--   line 1: state or step icons, [kind], white title, badges (colored level, elite, types);
+--   next lines, indented, one subject each: what to do and where (light gray), figures (XP and
+--   follow-ups in color, the rest in gray), warnings (orange), blockers (red), rewards.
+--   Informations on one line are separated by " · ".
+K.DESC = { action = "bbbbbb", meta = "888888", xp = "80c0ff", warn = "ffb060", bad = "ff6060",
+  good = "40ff40", chain = "c080ff", prio = "ffd100" }
+K.DESC_LINE = "\n       "
+K.DESC_SEP = " · "
+
+-- White title + badges (o: options of Geo.QuestBadges; none for a step that is not a quest).
+function Geo.QuestTitle(title, o)
+  return Color("ffffff", title or "?") .. ((o and o.id) and Geo.QuestBadges(o) or "")
+end
+
+-- Next description line: the non-empty parts (already colored), separated by a gray " · ".
+function Geo.DescLine(...)
+  local kept = {}
+  for i = 1, select("#", ...) do
+    local p = select(i, ...)
+    if p and p ~= "" then kept[#kept + 1] = p end
+  end
+  if #kept == 0 then return "" end
+  return K.DESC_LINE .. table.concat(kept, Color(K.DESC.meta, K.DESC_SEP))
+end
+
+-- XP of a quest or a step: "+1 200 XP" (exact) or "~1 200 XP" (estimate).
+function Geo.XPText(xp, approx, suffix)
+  if not (xp and xp > 0) then return nil end
+  return Color(K.DESC.xp, (approx and "~" or "+") .. FormatNumber(xp) .. " XP" .. (suffix or ""))
+end
+
+-- Kind of step, the same labels and colors in the Roadbook and the Nearby tab.
+function Geo.KindTag(kind)
+  if kind == "take" then return Color("80c0ff", L["[Pick up]"]) end
+  if kind == "obj" then return Color("ffd100", L["[Objective]"]) end
+  if kind == "turnin" then return Color("40ff40", L["[Turn in]"]) end
+  return ""
+end
+
 local function IconLegend(withAvailable)
   return Color("aaaaaa", ICON.turnin .. L[" to turn in   "] .. ICON.inprogress .. L[" in progress   "] .. ICON.watched ..
     L[" tracked   "] .. PinIcon() .. L["pin"] .. (withAvailable and ("   " .. ICON.available .. L[" to pick up"]) or ""))
@@ -4175,13 +4246,15 @@ local function AbandonButton(q)
 end
 
 local function QuestLine(q)
-  local extras = {}
-  if q._itemReason then extras[#extras + 1] = q._itemReason end
-  if q.xp and q.xp > 0 then extras[#extras + 1] = q.xp .. " XP" end
-  if q.money and q.money > 0 then extras[#extras + 1] = MoneyText(q.money) end
-  if q.suggestedGroup and q.suggestedGroup > 1 then extras[#extras + 1] = L["group "] .. q.suggestedGroup end
-  local badges = Geo.QuestBadges({ id = q.id, level = q.level, tag = q.tag or "", isClass = q._isClass, isProf = q._isProf })
-  return (q.title or "?") .. badges .. (#extras > 0 and Color("aaaaaa", "  " .. table.concat(extras, ", ")) or "")
+  return Geo.QuestTitle(q.title, { id = q.id, level = q.level, tag = q.tag or "", isClass = q._isClass, isProf = q._isProf })
+end
+
+-- Figures of a quest of the log: XP, money, group, interesting reward.
+local function QuestFigures(q)
+  return Geo.DescLine(Geo.XPText(q.xp),
+    (q.money and q.money > 0) and MoneyText(q.money) or nil,
+    (q.suggestedGroup and q.suggestedGroup > 1) and Color(K.DESC.warn, L["group "] .. q.suggestedGroup) or nil,
+    q._itemReason and Color(K.DESC.good, q._itemReason) or nil)
 end
 
 local function RenderTodo(a)
@@ -4221,8 +4294,9 @@ local function RenderTodo(a)
     }
     for _, q in ipairs(quests) do
       local body = "  " .. StateIcons(q.id) .. (q._abandon and Color("ff8040", L["[To abandon] "]) or "") .. QuestLine(q)
-      if q._abandon then body = body .. "\n       " .. Color("ff8040", L["Reason: "] .. q._abandon) end
-      for _, l in ipairs(detail(q)) do body = body .. "\n       " .. l end
+      if q._abandon then body = body .. Geo.DescLine(Color("ff8040", L["Reason: "] .. q._abandon)) end
+      body = body .. detail(q) .. QuestFigures(q)
+      if q._chain then body = body .. Geo.DescLine(Color(K.DESC.chain, q._chain)) end
       local watchedQ = IsWatched(q.id)
       local b1
       if q._abandon then
@@ -4248,12 +4322,16 @@ local function RenderTodo(a)
     end
   end
 
-  local function normalDetail(q)
-    local lines = {}
+  -- Line under the title: what is left to do (objectives), and where for a quest outside a zone group.
+  local function objectivesText(q)
     local rest = RemainingObjectives(q)
-    if rest ~= "" then lines[#lines + 1] = Color("bbbbbb", rest) end
-    if q._chain then lines[#lines + 1] = Color("c080ff", q._chain) end
-    return lines
+    return rest ~= "" and Color(K.DESC.action, rest) or nil
+  end
+  local function normalDetail(q)
+    return Geo.DescLine(objectivesText(q))
+  end
+  local function placeDetail(q)
+    return Geo.DescLine(objectivesText(q), Color(K.DESC.meta, q.instanceName or q.mapZone or q.zone or "?"))
   end
 
   if #a.abandon > 0 and not searching then
@@ -4266,7 +4344,7 @@ local function RenderTodo(a)
 
   if #a.turnIn > 0 then
     category("turnin", "turnin", L["To turn in"], a.turnIn, function(q)
-      return { Color("888888", "-> " .. (q._turnIn or q.zone or "?")) }
+      return Geo.DescLine(Color(K.DESC.action, L["Turn in to: "] .. (q._turnIn or q.zone or "?")))
     end)
   end
 
@@ -4284,17 +4362,11 @@ local function RenderTodo(a)
   end
 
   if #singles > 0 then
-    category("singles", "singles", L["Doable single quests"], singles, function(q)
-      local lines = { Color("888888", q.instanceName or q.mapZone or q.zone or "?") }
-      if q._chain then lines[#lines + 1] = Color("c080ff", q._chain) end
-      return lines
-    end)
+    category("singles", "singles", L["Doable single quests"], singles, placeDetail)
   end
 
   if #a.later > 0 then
-    category("later", "later", L["Later - level too high"], a.later, function(q)
-      return { Color("888888", q.instanceName or q.mapZone or q.zone or "?") }
-    end)
+    category("later", "later", L["Later - level too high"], a.later, placeDetail)
   end
 
   local hasQuests = false
@@ -4492,25 +4564,22 @@ local function RenderAvailable()
     table.sort(g.list, function(a, b) return (a.level or 0) < (b.level or 0) end)
     items[#items + 1] = { header = true, kind = g.kind, key = g.name, label = g.name .. " - " .. Plural(#g.list, L["quest"]) }
     for _, e in ipairs(g.list) do
-      local tags = {}
-      if e.xp and e.xp > 0 then tags[#tags + 1] = "~" .. e.xp .. " XP" end
-      if e.opensChain then tags[#tags + 1] = L["opens a chain"] end
-      if e.repeatable then tags[#tags + 1] = L["repeatable"] end
-      if e.lowLevel then tags[#tags + 1] = L["low level"] end
-      local info = Color("aaaaaa", L["requires level "] .. e.reqLevel) ..
-        (#tags > 0 and Color("80c0ff", "  " .. table.concat(tags, ", ")) or "")
-      local text = "  " .. StateIcons(e.id) .. e.name ..
-        Geo.QuestBadges({ id = e.id, level = e.level, isClass = e.isClass, isProf = e.isProf, dungeon = e.dungeon }) ..
-        "\n       " .. info
-      if e.repMissing then text = text .. "\n       " .. Color("ff6060", e.repMissing) end
+      local D = K.DESC
+      local text = "  " .. StateIcons(e.id) ..
+        Geo.QuestTitle(e.name, { id = e.id, level = e.level, isClass = e.isClass, isProf = e.isProf, dungeon = e.dungeon }) ..
+        Geo.DescLine(e.starter and Color(D.action, L["Given by: "] .. e.starter) or nil) ..
+        Geo.DescLine(Geo.XPText(e.xp, true), Color(D.meta, L["requires level "] .. e.reqLevel),
+          e.lowLevel and Color(D.meta, L["low level"]) or nil, e.repeatable and Color(D.meta, L["repeatable"]) or nil,
+          e.opensChain and Color(D.chain, L["opens a chain"]) or nil)
+      if e.repMissing then text = text .. Geo.DescLine(Color(D.bad, e.repMissing)) end
       if e.missing then
-        text = text .. "\n       " .. Color("ff6060", L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", "))
+        text = text .. Geo.DescLine(Color(D.bad, L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", ")))
       end
-      if e.starter then text = text .. "\n       " .. Color("bbbbbb", L["Given by: "] .. e.starter) end
       local rewards = Geo.RewardLine(e.id)
-      if rewards then text = text .. "\n       " .. rewards end
+      if rewards then text = text .. Geo.DescLine(rewards) end
       local p = GeoReady() and Nearest(StartPoints(e.id), pos) or nil
-      items[#items + 1] = { text = text, b2 = PinButton(p, e.name, L["pick up the quest"], e.id), links = rewards ~= nil }
+      items[#items + 1] = { text = text, b2 = PinButton(p, e.name, L["pick up the quest"], e.id), links = rewards ~= nil,
+        linkQuest = e.id }
     end
   end
   if total == 0 then items[#items + 1] = { text = searching and L["No quest matches the search."] or L["No quest available for this filter."] } end
@@ -4545,8 +4614,6 @@ local function RenderNear()
   if scan.running then info = info .. "\n" .. Color("ff8040", L["Scanning available quests: \"Available quests\" will fill in."]) end
   local items = { { text = Color("aaaaaa", info) } }
 
-  local KIND_TAG = { turnin = Color("40ff40", L["[Turn in] "]), step = Color("ffd100", L["[Step] "]), take = Color("80c0ff", L["[Available] "]) }
-
   local function matches(it)
     if not PassStates(it.id, nearStates) then return false end
     if #nearQuery == 0 then return true end
@@ -4554,13 +4621,10 @@ local function RenderNear()
   end
 
   local function row(it, withKind)
-    local info = string.format("%.0f m", it.d)
-    if it.kind == "take" then
-      local tags = {}
-      if it.lowLevel then tags[#tags + 1] = L["low level"] end
-      if it.xp and it.xp > 0 then tags[#tags + 1] = "~" .. it.xp .. " XP" end
-      if #tags > 0 then info = info .. Color("80c0ff", "  " .. table.concat(tags, ", ")) end
-    end
+    local D = K.DESC
+    local take = it.kind == "take"
+    local figures = Geo.DescLine(take and Geo.XPText(it.xp, true) or nil, Color(D.meta, string.format("%.0f m", it.d)),
+      (take and it.lowLevel) and Color(D.meta, L["low level"]) or nil)
     local who
     if it.kind == "take" then
       who = L["Given by: "] .. (it.giver or "?")
@@ -4569,10 +4633,10 @@ local function RenderNear()
     else
       who = L["Objective: "] .. (it.extra or "?")
     end
-    local text = "  " .. StateIcons(it.id) .. (withKind and KIND_TAG[it.kind] or "") .. it.label ..
-      (it.id and Geo.QuestBadges({ id = it.id, level = it.level }) or "") ..
-      "\n       " .. Color("aaaaaa", info) .. "\n       " .. Color("bbbbbb", who .. " - " .. PointText(it.p))
-    if it.rep then text = text .. "\n       " .. Color("ff6060", it.rep) end
+    local text = "  " .. StateIcons(it.id) .. (withKind and (Geo.KindTag(it.kind == "step" and "obj" or it.kind) .. " ") or "") ..
+      Geo.QuestTitle(it.label, it.id and { id = it.id, level = it.level } or nil) ..
+      Geo.DescLine(Color(D.action, who .. K.DESC_SEP .. PointText(it.p))) .. figures
+    if it.rep then text = text .. Geo.DescLine(Color(D.bad, it.rep)) end
     local b1
     if it.kind ~= "take" and it.id then
       local watched = IsWatched(it.id)
@@ -4582,7 +4646,7 @@ local function RenderNear()
         C_Timer.After(0.2, Refresh)
       end }
     end
-    return { text = text, b1 = b1, questID = it.kind ~= "take" and it.id or nil,
+    return { text = text, b1 = b1, questID = it.kind ~= "take" and it.id or nil, linkQuest = it.id,
       b2 = PinButton(it.p, it.label, it.kind == "step" and it.extra or (it.kind == "turnin" and L["turn in the quest"] or L["pick up the quest"]), it.id) }
   end
 
@@ -4998,7 +5062,7 @@ function CP.ValidateUnsafe(recompute)
   CP.FocusNext(false, cur) -- no tracking yet, or step done: first step left to do
 end
 
--- Shift-click: stops following the objective (focus, addon pin and compass); click resumes it.
+-- Ctrl-click: stops following the objective (focus, addon pin and compass); click resumes it.
 function CP.StopTracking()
   if not CP.CurrentFocus() then
     Print(L["No objective tracked."])
@@ -5009,6 +5073,13 @@ function CP.StopTracking()
   CP.RefreshButton()
   Print(L["Objective tracking stopped: click the Objective button to resume it."])
   if Refresh then Refresh() end
+end
+
+-- Shift-click: link of the quest of the followed step in the chat.
+function CP.LinkCurrentQuest()
+  local cur = CP.CurrentFocus()
+  local id = cur and cur.task and cur.task.id
+  if id then Geo.LinkQuestInChat(id) else Print(L["No quest for this objective."]) end
 end
 
 -- Ctrl-Alt-click: removes the current step. A quest step removes the whole quest (confirmation,
@@ -5192,14 +5263,16 @@ function CP.StepSummary(s)
       L["Talk to "] .. (task.npc or "?") .. " · " .. place
   elseif s.escort and CP.IsFailed(task.id) then
     return K.ESCORT_ICON .. " " .. (task.title or "?"),
-      Color("ff6060", L["Escort failed: abandon the quest and pick it up again"])
+      Color(K.DESC.bad, L["Escort failed: abandon the quest and pick it up again"])
   elseif s.escort then
     local dest = s.kind == "turnin" and (L[", then turn in to "] .. (nameOnly(TurnInText(task.id)) or "?")) or ""
+    local xp = s.kind == "turnin" and Geo.XPText(task.xp) or nil
     return K.ESCORT_ICON .. " " .. L["Escort: "] .. (task.title or "?"),
-      L["Stay close to "] .. CP.EscortNpc(task) .. dest .. " · " .. place
+      L["Stay close to "] .. CP.EscortNpc(task) .. dest .. " · " .. place .. (xp and (" · " .. xp) or "")
   elseif s.kind == "take" then
-    local esc = Geo.IsEscort(task.id) and (" · " .. Color("ffb060", L["escort"])) or ""
-    if CP.IsFailed(task.id) then esc = " · " .. Color("ff6060", L["failed: abandon it first"]) end
+    local esc = Geo.IsEscort(task.id) and (" · " .. Color(K.DESC.warn, L["escort"])) or ""
+    if CP.IsFailed(task.id) then esc = " · " .. Color(K.DESC.bad, L["failed: abandon it first"]) end
+    if task.reqLevel then esc = esc .. " · " .. Color(K.DESC.warn, string.format(L["level %d required"], task.reqLevel)) end
     return ICON.available .. " " .. (task.title or "?"),
       L["Pick up from "] .. (nameOnly(task.starter) or "?") .. " · " .. place .. esc
   elseif s.kind == "obj" then
@@ -5215,8 +5288,9 @@ function CP.StepSummary(s)
     local multi = (s.spots and s.spots > 1) and (L[" · multiple spots ("] .. s.spots .. ")") or ""
     return ICON.inprogress .. " " .. (task.title or "?"), name .. " " .. prog .. " · " .. place .. multi
   end
+  local xp = Geo.XPText(task.xp)
   return ICON.turnin .. " " .. (task.title or "?"),
-    L["Turn in to "] .. (nameOnly(TurnInText(task.id)) or "?") .. " · " .. place
+    L["Turn in to "] .. (nameOnly(TurnInText(task.id)) or "?") .. " · " .. place .. (xp and (" · " .. xp) or "")
 end
 
 function CP.RefreshButton()
@@ -5225,20 +5299,71 @@ function CP.RefreshButton()
   local s = CP.CurrentFocus()
   if s then
     local t, d = CP.StepSummary(s)
-    -- Quest step: white title, then the same badges as in the tabs (colored level, elite, types).
-    if s.task and s.task.id then t = Color("ffffff", t) .. Geo.QuestBadges({ id = s.task.id, level = s.task.level }) end
+    local maxW = K.OBJECTIVE_MAX_WIDTH - K.OBJECTIVE_TEXT_X - 10
+    -- White title, as in the tabs; quest step: then the same badges (colored level, elite, types);
+    -- too wide: the badges go to the next line.
+    if not (s.task and s.task.id) then
+      t = Color("ffffff", t)
+    else
+      local badges = Geo.QuestBadges({ id = s.task.id, level = s.task.level })
+      local full = Color("ffffff", t) .. badges
+      if CP.TextWidth(b.title, full) > maxW then full = Color("ffffff", t) .. "\n" .. badges:gsub("^%s+", "") end
+      t = full
+    end
     b.title:SetText(t)
-    b.sub:SetText(d)
+    b.sub:SetText(CP.PackInfos(b.sub, d, maxW))
     b.current = s
   else
     b.title:SetText(L["Objective"])
     b.sub:SetText(L["No objective tracked · click to follow it"])
     b.current = nil
   end
-  -- Width fitted to the text, within reasonable limits.
-  local w = math.max(b.title:GetStringWidth() or 0, b.sub:GetStringWidth() or 0)
-  b:SetWidth(math.min(math.max(47 + w + 14, 214), 480))
+  -- Width fitted to the widest line, at most K.OBJECTIVE_MAX_WIDTH; the height follows the number of
+  -- lines (at least 56 px, text vertically centered).
+  local function Natural(fs) return CP.TextWidth(fs, fs:GetText() or "") end
+  local w = math.max(Natural(b.title), Natural(b.sub))
+  local width = math.min(math.max(K.OBJECTIVE_TEXT_X + w + 14, 230), K.OBJECTIVE_MAX_WIDTH)
+  local textW = width - K.OBJECTIVE_TEXT_X - 10
+  b.title:SetWidth(textW)
+  b.sub:SetWidth(textW)
+  local textH = (b.title:GetStringHeight() or 12) + 3 + (b.sub:GetStringHeight() or 10)
+  local height = math.max(56, textH + 16)
+  b:SetSize(width, height)
+  b.title:ClearAllPoints()
+  b.title:SetPoint("TOPLEFT", b, "TOPLEFT", K.OBJECTIVE_TEXT_X, -math.floor((height - textH) / 2))
   b.compassTarget = CP.CompassTarget()
+end
+
+K.OBJECTIVE_TEXT_X = 59       -- text of the Objective button, right of the compass square
+K.OBJECTIVE_MAX_WIDTH = 380   -- widest Objective button (beyond, one information per line)
+
+-- Width of a text in a font string, on one line.
+function CP.TextWidth(fs, text)
+  fs:SetWidth(2000)
+  fs:SetText(text)
+  return fs:GetStringWidth() or 0
+end
+
+-- Upper case first letter (ASCII or accented French letter, after any color code).
+K.UPPER_ACCENTS = { ["é"] = "É", ["è"] = "È", ["ê"] = "Ê", ["à"] = "À", ["â"] = "Â", ["î"] = "Î", ["ô"] = "Ô",
+  ["û"] = "Û", ["ç"] = "Ç" }
+function CP.Capitalize(line)
+  local prefix, rest = "", line
+  while rest:find("^|c%x%x%x%x%x%x%x%x") do -- Lua patterns cannot repeat a group
+    prefix, rest = prefix .. rest:sub(1, 10), rest:sub(11)
+  end
+  local first, tail = rest:match("^([%z\1-\127\194-\244][\128-\191]*)(.*)$")
+  if not first then return line end
+  return prefix .. (K.UPPER_ACCENTS[first] or first:upper()) .. tail
+end
+
+-- "info · info · info" wider than maxW: one information per line (never cut inside one), each
+-- line starting with an upper case letter.
+function CP.PackInfos(fs, text, maxW)
+  if not text or CP.TextWidth(fs, text) <= maxW then return text end
+  local lines = {}
+  for info in (text .. " · "):gmatch("(.-) · ") do lines[#lines + 1] = CP.Capitalize(info) end
+  return table.concat(lines, "\n")
 end
 
 -- Compass target, in world coordinates: the active pin, otherwise the focused step.
@@ -5305,7 +5430,7 @@ end
 function CP.CreateCheckpointButton()
   if CP.checkpointButton then return end
   local b = CreateFrame("Button", "ForeverQuestPlannerCheckpoint", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-  b:SetSize(214, 44)
+  b:SetSize(230, 56)
   -- Dark tooltip-like frame, golden border.
   local GOLD = { 1, 0.82, 0 }
   if b.SetBackdrop then
@@ -5322,13 +5447,12 @@ function CP.CreateCheckpointButton()
     bg:SetAllPoints()
     bg:SetColorTexture(0.09, 0.07, 0.04, 0.92)
   end
-  -- Framed icon, anchored at the top AND bottom to stay vertically centered.
+  -- Framed icon (compass square), vertically centered whatever the height of the button.
   local frameTex = b:CreateTexture(nil, "ARTWORK")
-  frameTex:SetWidth(32)
+  frameTex:SetSize(44, 44)
   local function PlaceIcon(dx, dy)
     frameTex:ClearAllPoints()
-    frameTex:SetPoint("TOPLEFT", b, "TOPLEFT", 7 + dx, -6 + dy)
-    frameTex:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 7 + dx, 6 + dy)
+    frameTex:SetPoint("LEFT", b, "LEFT", 7 + dx, dy)
   end
   PlaceIcon(0, 0)
   frameTex:SetColorTexture(0, 0, 0, 0.8)
@@ -5340,14 +5464,14 @@ function CP.CreateCheckpointButton()
   b.icon = icon
   -- Compass: arrow pointing at the active marker, with the distance below.
   local arrow = b:CreateTexture(nil, "OVERLAY")
-  arrow:SetSize(30, 30)
-  arrow:SetPoint("CENTER", frameTex, "CENTER", 0, 3)
+  arrow:SetSize(36, 36)
+  arrow:SetPoint("CENTER", frameTex, "CENTER", 0, 4)
   arrow:SetTexture("Interface\\Minimap\\MinimapArrow")
   arrow:SetVertexColor(1, 0.82, 0)
   arrow:Hide()
   local dist = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   dist:SetPoint("BOTTOM", frameTex, "BOTTOM", 0, 1)
-  dist:SetScale(0.8)
+  dist:SetScale(0.85)
   dist:Hide()
   b.arrow, b.dist = arrow, dist
   local elapsed = 1
@@ -5361,18 +5485,16 @@ function CP.CreateCheckpointButton()
   end)
   -- Golden title + gray subtitle.
   local title = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  title:SetPoint("BOTTOMLEFT", b, "LEFT", 47, 1)
-  title:SetPoint("RIGHT", b, "RIGHT", -8, 0)
+  title:SetPoint("TOPLEFT", b, "TOPLEFT", K.OBJECTIVE_TEXT_X, -8)
   title:SetJustifyH("LEFT")
   title:SetText(L["Objective"])
   local sub = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  sub:SetPoint("TOPLEFT", b, "LEFT", 47, -2)
-  sub:SetPoint("RIGHT", b, "RIGHT", -8, 0)
+  sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
   sub:SetJustifyH("LEFT")
   sub:SetTextColor(0.75, 0.75, 0.75)
   sub:SetText(L["No objective tracked · click to follow it"])
-  title:SetWordWrap(false)
-  sub:SetWordWrap(false)
+  title:SetWordWrap(true)
+  sub:SetWordWrap(true)
   b.label, b.title, b.sub = L["Objective"], title, sub
   -- Hover: soft highlight and lighter border; click: slight press.
   local hl = b:CreateTexture(nil, "HIGHLIGHT")
@@ -5400,7 +5522,7 @@ function CP.CreateCheckpointButton()
   end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
-    self.dragEnd = GetTime and GetTime() or 0 -- the release of a Shift-drag must not count as a Shift-click
+    self.dragEnd = GetTime and GetTime() or 0 -- the release of a Shift-drag must not count as a Shift-click (link)
     local point, _, _, x, y = self:GetPoint()
     Settings().checkpointPos = { point, x, y }
   end)
@@ -5421,8 +5543,10 @@ function CP.CreateCheckpointButton()
         CP.RemoveCurrentStep()   -- Ctrl-Alt-click: remove the step from the Roadbook
       elseif alt then
         CP.Validate(true)        -- Alt-click: compute a new Roadbook
+      elseif ctrl then
+        CP.StopTracking()        -- Ctrl-click: stop following the objective
       elseif shift then
-        CP.StopTracking()        -- Shift-click: stop following the objective
+        CP.LinkCurrentQuest()    -- Shift-click: link of the objective's quest in the chat
       else
         CP.Validate(false)       -- click: follow the objective
       end
@@ -5439,7 +5563,8 @@ function CP.CreateCheckpointButton()
     end
     GameTooltip:AddLine(L["The focus moves to the next step on its own when this one is done."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Click: follow the objective (step to do, pin, compass)."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Shift-click: stop following the objective."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Ctrl-click: stop following the objective."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Shift-click: link of the quest in the chat."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Alt-click: compute a new Roadbook."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Ctrl-Alt-click: remove the step from the Roadbook (a quest: the whole quest, then a new Roadbook)."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Shift-right-click: center the button horizontally."], 0.7, 0.7, 0.7, true)
@@ -5581,55 +5706,60 @@ local function RenderXP()
       local s, task = st.s, st.s.task
       n = n + 1
       local function nameOnly(t) return t and (t:match("^(.-) %- ") or t) or nil end
+      -- action: what to do and where (light gray); figures: XP, time, notes (each in its color).
+      local D = K.DESC
       local kindLabel, action, pinLabel, spotLine
+      local xp, notes = nil, {}
+      local function add(hex, s) notes[#notes + 1] = Color(hex, s) end
       if s.kind == "bind" then
         kindLabel = "|TInterface\\Minimap\\Tracking\\Innkeeper:14:14|t" .. Color("ffb060", L["[Innkeeper]"])
-        action = L["Talk to "] .. (task.npc or "?") .. L[" and choose \"Make this inn your home\" - "] .. PointText(s.p)
+        action = L["Talk to "] .. (task.npc or "?") .. L[" and choose \"Make this inn your home\""] .. K.DESC_SEP .. PointText(s.p)
         pinLabel = L["bind the hearthstone"]
       elseif s.kind == "hearth" then
         kindLabel = "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t" .. Color("ffb060", L["[Hearthstone]"])
-        action = L["Use the hearthstone - saves ~"] .. FormatTime(s.gain or 0)
+        action = L["Use the hearthstone · saves ~"] .. FormatTime(s.gain or 0)
         pinLabel = L["hearthstone"]
       elseif s.kind == "travel" then
         kindLabel = "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t" .. Color("80c0ff", L["[Transport]"])
         action = (task.mode == "vol" and (L["Talk to the flight master at "] .. (task.from or "?") .. L[", destination "] .. (task.dest or "?"))
-          or (L["Board at "] .. (task.from or "?") .. L[" for "] .. (task.dest or "?"))) .. " - " .. PointText(s.p)
+          or (L["Board at "] .. (task.from or "?") .. L[" for "] .. (task.dest or "?"))) .. K.DESC_SEP .. PointText(s.p)
         pinLabel = L["transport"]
       elseif s.kind == "fm" then
         kindLabel = "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t" .. Color("c890ff", L["[Flight master]"])
-        action = L["Talk to "] .. (task.npc or "?") .. L[" to activate the flight path - "] .. PointText(s.p)
+        action = L["Talk to "] .. (task.npc or "?") .. L[" to activate the flight path"] .. K.DESC_SEP .. PointText(s.p)
         pinLabel = L["activate the flight master"]
       elseif s.escort then
         kindLabel = K.ESCORT_ICON .. Color("ffb060", L["[Escort]"])
         action = L["Stay close to "] .. CP.EscortNpc(task) ..
           (s.kind == "turnin" and (L[", then turn in to "] .. (nameOnly(TurnInText(task.id)) or "?")) or "") ..
-          " - " .. PointText(s.p) .. Color("ffb060", "  ~" .. FormatTime(s.work or 0) .. L[", do not interrupt"])
-        if s.kind == "turnin" then action = action .. Color("80c0ff", "  +" .. FormatNumber(task.xp or 0) .. " XP") end
+          K.DESC_SEP .. PointText(s.p)
+        if s.kind == "turnin" then xp = Geo.XPText(task.xp) end
+        add(D.warn, "~" .. FormatTime(s.work or 0) .. L[", do not interrupt"])
         pinLabel = s.kind == "obj" and s.r and s.r.tg.name or L["turn in the quest"]
       elseif s.kind == "take" then
         kindLabel = Color("80c0ff", L["[Pick up]"])
-        action = L["Pick up from "] .. (nameOnly(task.starter) or "?") .. " - " .. PointText(s.p)
-        if Geo.IsEscort(task.id) then action = action .. Color("ffb060", L["  (escort: starts right after)"]) end
-        if task.reqLevel then action = action .. Color("ffb060", L["  (level "] .. task.reqLevel .. L[" required)"]) end
-        if task.dep then action = action .. Color("c0a0ff", L["  (follow-up of \""] .. (task.dep.title or "?") .. L["\")"]) end
+        action = L["Pick up from "] .. (nameOnly(task.starter) or "?") .. K.DESC_SEP .. PointText(s.p)
+        if Geo.IsEscort(task.id) then add(D.warn, L["escort: starts right after"]) end
+        if task.reqLevel then add(D.warn, string.format(L["level %d required"], task.reqLevel)) end
+        if task.dep then add(D.chain, string.format(L["follow-up of \"%s\""], task.dep.title or "?")) end
         pinLabel = L["pick up the quest"]
       elseif s.kind == "obj" then
         kindLabel = Color("ffd100", L["[Objective]"])
-        action = (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count .. " - " .. PointText(s.p)
-        if (s.xp or 0) > 0 then action = action .. Color("80c0ff", "  ~" .. FormatNumber(s.xp) .. L[" XP (monsters)"]) end
+        action = (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count .. K.DESC_SEP .. PointText(s.p)
+        xp = Geo.XPText(s.xp, true, L[" (monsters)"])
         if s.spots and s.spots > 1 then
-          spotLine = Color("ffb060", L["Multiple spots ("] .. s.spots .. L["): chosen spot has "] ..
+          spotLine = Color(D.warn, L["Multiple spots ("] .. s.spots .. L["): chosen spot has "] ..
             (s.spot and s.spot.n or "?") .. L[" monsters, the most efficient (travel + density)"])
         elseif s.spot then
-          action = action .. Color("888888", L["  (spot of "] .. s.spot.n .. L[" monsters)"])
+          add(D.meta, string.format(L["spot of %d monsters"], s.spot.n))
         end
         pinLabel = s.r.tg.name
       else
         kindLabel = Color("40ff40", L["[Turn in]"])
-        action = L["Turn in to "] .. (nameOnly(TurnInText(task.id)) or "?") .. " - " .. PointText(s.p) ..
-          Color("80c0ff", "  +" .. FormatNumber(task.xp or 0) .. " XP")
-        if s.quick then action = action .. Color("40ff40", L["  (quick win: added on the way)"])
-        elseif task.quick then action = action .. Color("40ff40", L["  (ready to turn in)"]) end
+        action = L["Turn in to "] .. (nameOnly(TurnInText(task.id)) or "?") .. K.DESC_SEP .. PointText(s.p)
+        xp = Geo.XPText(task.xp)
+        if s.quick then add(D.good, L["quick win: added on the way"])
+        elseif task.quick then add(D.good, L["ready to turn in"]) end
         pinLabel = L["turn in the quest"]
       end
       -- Step icon (not the quest's current state): ! to pick up, gray ? objective, yellow ? to turn in.
@@ -5640,18 +5770,19 @@ local function RenderXP()
       if task.id and IsWatched(task.id) then icon = icon .. ICON.watched end
       if task.id and IsPinned(task.id) then icon = icon .. PinIcon() end
       if icon ~= "" then icon = icon .. " " end
-      local text = string.format("  %d. %s%s %s%s", n, icon, kindLabel, task.title or "?",
-        task.id and Geo.QuestBadges({ id = task.id, level = task.level }) or "")
-      text = text .. "\n       " .. Color("bbbbbb", action) .. Color("888888", "  [" .. FormatTime(s.at) .. "]")
-      if spotLine then text = text .. "\n       " .. spotLine end
+      local text = string.format("  %d. %s%s %s", n, icon, kindLabel,
+        Geo.QuestTitle(task.title, task.id and { id = task.id, level = task.level } or nil))
+      text = text .. Geo.DescLine(Color(D.action, action)) ..
+        Geo.DescLine(xp, Color(D.meta, "[" .. FormatTime(s.at) .. "]"), unpack(notes))
+      if spotLine then text = text .. Geo.DescLine(spotLine) end
       local way = s.kind ~= "hearth" and RouteText(st.prev.p, s.p, net, plevel) or nil
-      if way and way ~= L["right here"] then text = text .. "\n       " .. Color("ffffff", L["Route: "]) .. way end
+      if way and way ~= L["right here"] then text = text .. Geo.DescLine(Color("ffffff", L["Route: "]) .. way) end
       if task.tags and task.stops and s == task.stops[1] then
-        text = text .. "\n       " .. "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:12:12|t " .. Color("ffd100", L["Priority: "] .. table.concat(task.tags, " · "))
+        text = text .. Geo.DescLine("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:12:12|t " .. Color(D.prio, L["Priority: "] .. table.concat(task.tags, K.DESC_SEP)))
       end
       local lvs = info.levels
       if lvs and st.i and lvs[st.i] and lvs[st.i - 1] and lvs[st.i] > lvs[st.i - 1] then
-        text = text .. "\n       " .. Color("40ff40", L["---- level "] .. lvs[st.i] .. L[" reached (~"] .. FormatTime(s.at) .. ") ----")
+        text = text .. Geo.DescLine(Color(D.good, L["---- level "] .. lvs[st.i] .. L[" reached (~"] .. FormatTime(s.at) .. ") ----"))
       end
       if #xpQuery == 0 or MatchWords(Normalize(text), xpQuery) then
         -- Only button: remove the quest from the Roadbook. Tracking and the pin follow the
@@ -5677,8 +5808,8 @@ local function RenderXP()
     local laterItems = {}
     table.sort(info.later, function(a, b) return (a.level or 0) < (b.level or 0) end)
     for _, e in ipairs(info.later) do
-      local text = "  " .. StateIcons(e.id) .. (e.title or "?") .. Color("aaaaaa", L[" (level "] .. tostring(e.level or "?") .. ")") ..
-        "\n       " .. Color("ffb060", L["To do at level "] .. Geo.MaxLevel() .. L[": "] .. (e.reason or "?"))
+      local text = "  " .. StateIcons(e.id) .. Geo.QuestTitle(e.title, { id = e.id, level = e.level }) ..
+        Geo.DescLine(Color(K.DESC.warn, L["To do at level "] .. Geo.MaxLevel() .. L[": "] .. (e.reason or "?")))
       if #xpQuery == 0 or MatchWords(Normalize(text), xpQuery) then
         laterItems[#laterItems + 1] = { text = text, questID = e.id }
       end

@@ -25,7 +25,8 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - Automatically moves to the next step (quest picked up, objective done, quest turned in, flight master activated, take-off, zeppelin or boat arrival, hearthstone…).
 - Movable floating button showing a summary of the current step:
   - **click**: follow the objective;
-  - **Shift-click**: stop following the objective;
+  - **Ctrl-click**: stop following the objective;
+  - **Shift-click**: link of the quest in the chat;
   - **Alt-click**: new Roadbook;
   - **Ctrl-Alt-click**: remove the step from the Roadbook;
   - **Shift-drag**: move the button;
@@ -37,6 +38,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Quest log**: quests by category, tracking, pins, abandon recommendations (class, profession, XP, items, chain, money), text export.
 - **Available**: quests you can pick up at your level, by zone, dungeons, class and professions; missing prerequisites (previous quest, profession, reputation) are listed.
 - Search, state filters, collapsible categories.
+- **Shift-click** a quest in any tab: its quest link goes into the chat (the game's link for quests of your log, the same link built from QuestieDB otherwise).
 - **Settings** (gear icon): General (minimap icon), Quest log ("Keep" list) and Roadbook (objective button: show, compass, center; hearthstone; priorities, look-ahead, time estimates) panels.
 
 ## Dependencies
