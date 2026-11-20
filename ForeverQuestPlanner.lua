@@ -1504,7 +1504,13 @@ local function QuestTargets(id)
   local obj = QGet(QDB.Quest, id, "objectives")
   if type(obj) == "table" then
     for _, o in ipairs(obj[1] or {}) do
-      add("kill", QGet(QDB.Npc, o[1], "name"), EntityPoints("npc", o[1]), nil, o[1])
+      local icon = o[3] -- QuestieDB icon type: 3 event, 5 talk, 17 interact; otherwise a monster to kill
+      if icon == 3 or icon == 5 or icon == 17 then
+        -- One action at the NPC (speak, scripted event…): no monster to kill, no monster XP.
+        add("talk", QGet(QDB.Npc, o[1], "name"), EntityPoints("npc", o[1]))
+      else
+        add("kill", QGet(QDB.Npc, o[1], "name"), EntityPoints("npc", o[1]), nil, o[1])
+      end
     end
     for _, o in ipairs(obj[2] or {}) do
       add("object", QGet(QDB.Object, o[1], "name"), EntityPoints("object", o[1]))
