@@ -1982,8 +1982,9 @@ function Geo.TakeTask(en, plevel, pos)
   local t = QuestTargets(en.id)
   if #t.finish == 0 then return nil end
   if (t.missing or 0) > 0 then return nil end -- an objective without a position: cannot be planned
-  -- Quest filed under a dungeon but doable outside (e.g. talk to an NPC in a city): accepted;
-  -- anything that happens inside the instance is rejected.
+  -- Quest filed under a dungeon: only kept when it is just about talking or delivering (e.g. to an
+  -- NPC in a city); anything that happens inside the instance is rejected too.
+  if en.dungeon and Geo.DungeonCombat(en.id) then return nil end
   if AllInstance(t.finish) or (#t.start > 0 and AllInstance(t.start)) then return nil end
   local remaining = RemainingTargets(nil, t)
   for _, r in ipairs(remaining) do if AllInstance(r.tg.points) then return nil end end
@@ -2276,11 +2277,21 @@ function Geo.RecordLater(task)
   Geo.laterList[#Geo.laterList + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
 end
 
+-- Dungeon / raid quest kept out of the Roadbook: anything but talking or delivering, even when its
+-- targets are outside the instance (e.g. an elite in front of the entrance).
+function Geo.DungeonCombat(id)
+  for _, t in ipairs(Geo.QuestTypes(id)) do
+    if t ~= "talk" and t ~= "delivery" then return true end
+  end
+  return false
+end
+
 -- Elite quest: tagged "Elite" by the game (quest log), otherwise most of the monsters of its
 -- objectives (to kill, or dropping the requested items) are elites in QuestieDB.
 Geo.elite = {}
 function Geo.IsEliteQuest(id, tag)
-  if tag then return tag == ELITE or tag:find("[EÉ]lite") ~= nil end
+  -- A quest has a single game tag ("Dungeon" wins over "Elite"): it only settles the "Elite" case.
+  if tag and (tag == ELITE or tag:find("[EÉ]lite")) then return true end
   if not id then return false end
   local v = Geo.elite[id]
   if v ~= nil then return v end
@@ -2364,7 +2375,9 @@ local function BuildTasks(pos, plevel)
     local ready = q.complete and not q.failed
     if Settings().excluded[q.id] then
       skipped = skipped + 1 -- removed from the Roadbook by the player
-    elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel, nil, q.tag or "") + 1) then -- log: the game tag is authoritative
+    elseif not ready and (q.isInstance or q.instanceName) and Geo.DungeonCombat(q.id) then
+      skipped = skipped + 1 -- dungeon / raid quest (game tag): only turned in when it is ready
+    elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel, nil, q.tag or "") + 1) then
       local t = QuestTargets(q.id)
       local remaining, unmatched = {}, 0
       if not q.complete then remaining, unmatched = RemainingTargets(q, t) end
