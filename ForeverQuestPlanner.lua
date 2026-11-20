@@ -1438,6 +1438,46 @@ local function RouteText(a, b, net, plevel)
   return table.concat(parts, ", ")
 end
 
+-- Escort (or defense of an NPC): no flag says so, the text does. The English base texts are
+-- read (GetRaw bypasses the translation); custom Forever quests have no flags, hence the
+-- unambiguous words alone. Checked on the whole QuestieDB: ~70 quests, 1 false positive.
+K.ESCORT_STRONG = { "escort", "help [^.]- escape" }
+K.ESCORT_FLAGGED = { "protect", "defend", "safely", "to safety", "must reach", "keep [^.]- safe",
+  "show [^.]- the way", "help [^.]- to the road", "help [^.]- get" }
+Geo.escort = {}
+function Geo.IsEscort(id)
+  if not id then return false end
+  local v = Geo.escort[id]
+  if v ~= nil then return v end
+  local Q = QDB.Quest
+  local function raw(key)
+    if Q and Q.GetRaw then
+      local ok, val = pcall(Q.GetRaw, id, key)
+      if ok then return val end
+    end
+    return QGet(Q, id, key)
+  end
+  local parts = {}
+  local trig = raw("triggerEnd")
+  if type(trig) == "table" and type(trig[1]) == "string" then parts[#parts + 1] = trig[1] end
+  local texts = raw("objectivesText")
+  if type(texts) == "table" then
+    for _, s in ipairs(texts) do parts[#parts + 1] = tostring(s) end
+  end
+  local text = table.concat(parts, " | "):lower()
+  v = false
+  for _, p in ipairs(K.ESCORT_STRONG) do
+    if text:find(p) then v = true break end
+  end
+  if not v and HasBit(QGet(Q, id, "specialFlags") or 0, 2) then
+    for _, p in ipairs(K.ESCORT_FLAGGED) do
+      if text:find(p) then v = true break end
+    end
+  end
+  Geo.escort[id] = v
+  return v
+end
+
 -- Static quest targets: located objectives, start, end.
 local function QuestTargets(id)
   local t = Geo.targets[id]
@@ -1852,6 +1892,8 @@ end
 -- Objectives are chained from nearest to nearest starting at the departure point.
 -- For monsters, the chosen spot is the most efficient one (travel + density).
 -- Each step carries its XP (monsters for an objective, reward for the turn-in).
+K.ESCORT_SPEED = 2.5   -- walking speed of an escorted NPC (yd/s)
+K.ESCORT_MARGIN = 90   -- ambushes, waiting for the NPC to start
 local function MakeStops(task, pos, plevel)
   local t = task.targets
   local stops, from, mob = {}, pos, 0
@@ -1864,13 +1906,21 @@ local function MakeStops(task, pos, plevel)
   if task.kind ~= "turnin" then
     local todo = {}
     for _, r in ipairs(task.remaining) do todo[#todo + 1] = r end
+    -- Escort: it starts at the quest giver, so it comes first, before the other objectives.
+    local escortFirst = task.kind == "take" and Geo.IsEscort(task.id)
     while #todo > 0 do
       local bi, bp, bd, bspot
+      local onlyExplore = false
+      if escortFirst then
+        for _, r in ipairs(todo) do if r.tg.kind == "explore" then onlyExplore = true end end
+      end
       for i, r in ipairs(todo) do
-        local spot = Geo.BestSpot(r, from)
-        local p, d
-        if spot then p, d = spot.p, Dist(from, spot.p) else p, d = Nearest(r.tg.points, from) end
-        if p and (not bi or (d or math.huge) < bd) then bi, bp, bd, bspot = i, p, d or math.huge, spot end
+        if not (onlyExplore and r.tg.kind ~= "explore") then
+          local spot = Geo.BestSpot(r, from)
+          local p, d
+          if spot then p, d = spot.p, Dist(from, spot.p) else p, d = Nearest(r.tg.points, from) end
+          if p and (not bi or (d or math.huge) < bd) then bi, bp, bd, bspot = i, p, d or math.huge, spot end
+        end
       end
       if not bi then break end
       local r = table.remove(todo, bi)
@@ -1883,14 +1933,30 @@ local function MakeStops(task, pos, plevel)
         nSpots = ns
         work = work * Geo.SpotFactor(bspot, kills)
       end
-      stops[#stops + 1] = { task = task, kind = "obj", p = bp, work = work, r = r, xp = xp,
+      local st = { task = task, kind = "obj", p = bp, work = work, r = r, xp = xp,
         spot = bspot, spots = nSpots }
+      if r.tg.kind == "explore" and Geo.IsEscort(task.id) then
+        -- Escort: the NPC walks (slower than you) and ambushes happen on the way.
+        local d = Dist(from, bp) or 0
+        st.escort = true
+        st.work = math.max(0, d / K.ESCORT_SPEED - d / TravelSpeed()) + K.ESCORT_MARGIN
+        -- Right after the pick-up: nothing may come between them (glued to the previous stop).
+        if task.kind == "take" and #stops == 1 then st.glue = true end
+      end
+      stops[#stops + 1] = st
       from = bp
     end
   end
   local f = Nearest(t.finish, from)
   if not f then return nil end
-  stops[#stops + 1] = { task = task, kind = "turnin", p = f, work = K.OVERHEAD / 2, xp = task.xp }
+  local turnin = { task = task, kind = "turnin", p = f, work = K.OVERHEAD / 2, xp = task.xp }
+  -- Escort without a known destination (no completion trigger): it ends at the turn-in NPC.
+  if task.kind == "take" and #stops == 1 and Geo.IsEscort(task.id) then
+    local d = Dist(from, f) or 0
+    turnin.escort, turnin.glue = true, true
+    turnin.work = turnin.work + math.max(0, d / K.ESCORT_SPEED - d / TravelSpeed()) + K.ESCORT_MARGIN
+  end
+  stops[#stops + 1] = turnin
   task.mobXP = mob
   task.value = (task.xp or 0) + mob
   return stops
@@ -2294,14 +2360,19 @@ local function InsertStops(route, stops, travel, startIdx)
   local r = {}
   for i, s in ipairs(route) do r[i] = s end
   local delta, minIdx = 0, startIdx or 1
-  for _, s in ipairs(stops) do
+  for k, s in ipairs(stops) do
     local bestI, bestD
-    for i = minIdx, #r do -- insertion after r[i]
+    local lo, hi = minIdx, #r
+    if s.glue and k > 1 then hi = minIdx end -- right after the previous step of the quest
+    for i = lo, hi do -- insertion after r[i]
       local a, b = r[i], r[i + 1]
-      local d = travel(a.p, s.p)
-      if b then d = d + travel(s.p, b.p) - travel(a.p, b.p) end
-      if not bestD or d < bestD then bestI, bestD = i, d end
+      if not (b and b.glue) then
+        local d = travel(a.p, s.p)
+        if b then d = d + travel(s.p, b.p) - travel(a.p, b.p) end
+        if not bestD or d < bestD then bestI, bestD = i, d end
+      end
     end
+    if not bestI then return math.huge, route end
     table.insert(r, bestI + 1, s)
     delta = delta + bestD + s.work
     minIdx = bestI + 1
@@ -2390,8 +2461,8 @@ function Geo.AddFlightMasterStops(route, net, plevel)
     local a, b = route[k - 1].p, route[k].p
     local _, choice = Route(a, b, net, plevel)
     local segs = {}
-    if route[k].kind == "hearth" then
-      -- teleport: nothing is passed on the way
+    if route[k].kind == "hearth" or route[k].glue then
+      -- teleport: nothing is passed on the way; escort: no detour
     elseif choice then
       segs[1] = { a, net.hubs[choice.i].p }
       segs[2] = { net.hubs[choice.j].p, b }
@@ -2491,7 +2562,7 @@ function Geo.AddTransportStops(route, net, plevel)
   local out = { route[1] }
   for k = 2, #route do
     local cur = route[k]
-    if cur.kind ~= "hearth" then
+    if cur.kind ~= "hearth" and not cur.glue then -- escort: on foot, with the NPC
       local _, choice = Route(out[#out].p, cur.p, net, plevel)
       if choice then
         for _, b in ipairs(Geo.Boardings(choice, net)) do
@@ -2622,7 +2693,7 @@ function Geo.ApplyHearth(route, travel, bind0, ready0)
   for i = 2, #route do
     local prev, cur = route[i - 1], route[i]
     local normal = travel(prev.p, cur.p)
-    if bindP and cur.kind ~= "hearth" then
+    if bindP and cur.kind ~= "hearth" and not cur.glue then
       local gain = normal - (K.HEARTH_TIME + travel(bindP, cur.p))
       if gain >= K.HEARTH_MIN_GAIN then cands[#cands + 1] = { i = i, t = clock, gain = gain, bindP = bindP } end
     end
@@ -2701,7 +2772,7 @@ function Geo.OptimizeHearth(route, travel)
     if not (same and same < 60) then
       local bestK, bestD
       for k = 2, #route do
-        if route[k].kind ~= "hearth" then
+        if route[k].kind ~= "hearth" and not route[k].glue then
           local a, b = route[k - 1].p, route[k].p
           local d1, d2, d0 = Dist(a, inn.p), Dist(inn.p, b), Dist(a, b)
           if d1 and d2 and d0 and (not bestD or d1 + d2 - d0 < bestD) then bestK, bestD = k, d1 + d2 - d0 end
@@ -2772,7 +2843,8 @@ function Geo.Improve(route, travel)
     while i <= #route do
       local st = route[i]
       local task = st.task
-      if task and st.kind ~= "start" then
+      -- An escort and its pick-up are not moved (they must stay side by side).
+      if task and st.kind ~= "start" and not st.glue and not (route[i + 1] and route[i + 1].glue) then
         local prev, nxt = route[i - 1], route[i + 1]
         local gain = travel(prev.p, st.p) + (nxt and (travel(st.p, nxt.p) - travel(prev.p, nxt.p)) or 0)
         table.remove(route, i)
@@ -2791,7 +2863,7 @@ function Geo.Improve(route, travel)
         end
         local bestJ, bestC
         for j = lo, hi do
-          if j ~= i - 1 then
+          if j ~= i - 1 and not (route[j + 1] and route[j + 1].glue) then
             local a, b = route[j], route[j + 1]
             local c = travel(a.p, st.p) + (b and (travel(st.p, b.p) - travel(a.p, b.p)) or 0)
             if not bestC or c < bestC then bestJ, bestC = j, c end
@@ -4095,6 +4167,38 @@ end
 local CP = {} -- Roadbook checkpoints (a table to stay under the local variables limit)
 CP.lastPlan = nil -- steps of the last computed plan (without the starting point)
 
+-- Escorts --------------------------------------------------------------------
+K.ESCORT_ICON = "|TInterface\\Icons\\Ability_Warrior_DefensiveStance:14:14|t"
+
+function CP.IsFailed(id)
+  return id and IsInLog(id) and C_QuestLog.IsFailed and C_QuestLog.IsFailed(id) or false
+end
+
+-- Escorted NPC: the quest giver (escorts start where they are picked up).
+function CP.EscortNpc(task)
+  local n = task.starter and (task.starter:match("^(.-) %- ") or task.starter)
+  if n then return n end
+  local by = task.id and QGet(QDB.Quest, task.id, "startedBy")
+  local npc = type(by) == "table" and type(by[1]) == "table" and by[1][1]
+  return npc and QGet(QDB.Npc, npc, "name") or L["the NPC"]
+end
+
+-- Failed escort (NPC dead, too far): the pick-up step becomes the focus again, the
+-- quest has to be abandoned and picked up again.
+function CP.EscortFailed(s)
+  if CP.escortFailNotified == s then return end
+  CP.escortFailNotified = s
+  local take = s.task.stops and s.task.stops[1]
+  Print(Color("ff6060", L["Escort failed: "]) .. (s.task.title or "?") ..
+    L[". Abandon the quest, then pick it up again from "] .. CP.EscortNpc(s.task) .. ".")
+  if take and take.kind == "take" then
+    Geo.MarkDone(take, false)
+    CP.FocusStep(take)
+  else
+    CP.RefreshButton()
+  end
+end
+
 function CP.StepPinLabel(s)
   if s.kind == "fm" then return L["activate the flight master"] end
   if s.kind == "bind" then return L["bind the hearthstone"] end
@@ -4108,7 +4212,7 @@ end
 function CP.StepText(s)
   if s.kind == "fm" or s.kind == "bind" then return (s.task.title or "?") .. " (" .. (s.task.npc or "?") .. ")" end
   if s.kind == "hearth" or s.kind == "travel" then return s.task.title or "?" end
-  local tag = (s.kind == "take" and L["Pick up"]) or (s.kind == "obj" and L["Objective"]) or L["Turn in"]
+  local tag = (s.escort and L["Escort"]) or (s.kind == "take" and L["Pick up"]) or (s.kind == "obj" and L["Objective"]) or L["Turn in"]
   local extra = s.kind == "obj" and s.r and (L[": "] .. (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count) or ""
   return tag .. " - " .. (s.task.title or "?") .. extra
 end
@@ -4147,6 +4251,7 @@ function CP.CurrentFocus()
 end
 
 function CP.FocusStep(s)
+  if s.escort then CP.escortFailNotified = nil end -- escort (re)started: a new failure is reported
   CP.focused = s
   CP.focusRec = { questId = s.task.id, label = CP.StepPinLabel(s), area = s.p.area, mx = s.p.mx, my = s.p.my,
     progress = CP.Progress(s.task.id) }
@@ -4179,6 +4284,7 @@ end
 function Geo.SerializeStep(st)
   local t = st.task or {}
   return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots, quick = st.quick,
+    escort = st.escort, glue = st.glue,
     spotN = st.spot and st.spot.n, done = st.done, p = Geo.CopyPoint(st.p),
     objName = st.r and st.r.tg and st.r.tg.name, objKind = st.r and st.r.tg and st.r.tg.kind, count = st.r and st.r.count,
     first = t.stops and t.stops[1] == st or nil,
@@ -4198,6 +4304,7 @@ function Geo.DeserializeStep(rec, tasks)
     tasks[key] = task
   end
   local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots, quick = rec.quick,
+    escort = rec.escort, glue = rec.glue,
     spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task,
     r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind }, count = rec.count } or nil }
   if rec.first then task.stops[1] = st end
@@ -4250,13 +4357,14 @@ function Geo.ClearFrozen()
 end
 
 -- Marks a step as done (and saves it).
-function Geo.MarkDone(st)
-  st.done = true
+function Geo.MarkDone(st, value)
+  if value == nil then value = true end
+  st.done = value or nil
   local fz = Geo.frozen
   local rec = Geo.FrozenStore()[CharKey()]
   if fz and rec and rec.steps then
     for i = 2, #fz.route do
-      if fz.route[i] == st and rec.steps[i - 1] then rec.steps[i - 1].done = true end
+      if fz.route[i] == st and rec.steps[i - 1] then rec.steps[i - 1].done = value or nil end
     end
   end
 end
@@ -4285,13 +4393,13 @@ function Geo.InjectQuickWins()
       local t = QuestTargets(q.id)
       if #t.finish > 0 and not AllInstance(t.finish) then
         local bestI, bestD, bestP
-        if pos then
+        if pos and not (route[curI] and route[curI].glue) then
           local f, d = Nearest(t.finish, pos)
           if d and d < K.QUICKWIN_RADIUS then bestI, bestD, bestP = curI - 1, d, f end
         end
         for i = curI, #route do
           local st = route[i]
-          if st.p and st.p.c and not CP.StepDone(st) then
+          if st.p and st.p.c and not CP.StepDone(st) and not (route[i + 1] and route[i + 1].glue) then
             local f, d = Nearest(t.finish, st.p)
             if d and d < K.QUICKWIN_RADIUS and (not bestD or d < bestD) then bestI, bestD, bestP = i, d, f end
           end
@@ -4327,7 +4435,10 @@ end
 function CP.StepDone(st)
   if st.done then return true end
   local id = st.task and st.task.id
-  if st.kind == "take" then return id and (IsInLog(id) or IsCompleted(id)) or false end
+  if st.kind == "take" then
+    if id and Geo.IsEscort(id) and CP.IsFailed(id) then return false end -- failed escort: pick it up again
+    return id and (IsInLog(id) or IsCompleted(id)) or false
+  end
   if st.kind == "turnin" then return id and IsCompleted(id) or false end
   if st.kind == "obj" then
     if not id then return false end
@@ -4433,6 +4544,15 @@ function CP.ValidateUnsafe(recompute, skip)
     return
   end
   local cur = CP.CurrentFocus()
+  if cur and skip and cur.escort and not CP.StepDone(cur) then
+    local now = GetTime and GetTime() or 0
+    if not (CP.skipConfirm and now - CP.skipConfirm < 5) then
+      CP.skipConfirm = now
+      Print(L["Escort in progress: Shift-click again within 5 s to skip it anyway."])
+      return
+    end
+    CP.skipConfirm = nil
+  end
   if cur and not skip and not CP.StepDone(cur) then
     CP.FocusStep(cur) -- put the pin back on the current step
     Print(L["Step not finished yet: "] .. CP.StepText(cur) .. L[". Shift-click the button to skip it."])
@@ -4527,6 +4647,10 @@ function CP.OnGameEvent(event, a1, a2)
   if not s then return end
   if event == "FQP_TAXI_TAKEOFF" then CP.flying = true end
   local qid = s.task.id
+  if s.escort and event == "QUEST_LOG_UPDATE" and CP.IsFailed(qid) then
+    CP.EscortFailed(s)
+    return
+  end
   if s.kind == "bind" then
     if event == "HEARTHSTONE_BOUND" then CP.AutoUpdate(L["Hearthstone bound"]) end
   elseif s.kind == "hearth" then
@@ -4539,7 +4663,7 @@ function CP.OnGameEvent(event, a1, a2)
     end
   elseif s.kind == "fm" then
     if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
-  elseif event == "QUEST_TURNED_IN" or event == "QUEST_REMOVED" then
+  elseif (event == "QUEST_TURNED_IN" or event == "QUEST_REMOVED") and s.kind ~= "take" then
     if qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(event == "QUEST_TURNED_IN" and L["Quest turned in"] or L["Quest removed"]) end
   elseif s.kind == "take" then
     if event == "QUEST_ACCEPTED" and qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest picked up"]) end
@@ -4574,9 +4698,18 @@ function CP.StepSummary(s)
   elseif s.kind == "fm" then
     return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.title or L["Flight Master"]),
       L["Talk to "] .. (task.npc or "?") .. " · " .. place
+  elseif s.escort and CP.IsFailed(task.id) then
+    return K.ESCORT_ICON .. " " .. (task.title or "?"),
+      Color("ff6060", L["Escort failed: abandon the quest and pick it up again"])
+  elseif s.escort then
+    local dest = s.kind == "turnin" and (L[", then turn in to "] .. (nameOnly(TurnInText(task.id)) or "?")) or ""
+    return K.ESCORT_ICON .. " " .. L["Escort: "] .. (task.title or "?"),
+      L["Stay close to "] .. CP.EscortNpc(task) .. dest .. " · " .. place
   elseif s.kind == "take" then
+    local esc = Geo.IsEscort(task.id) and (" · " .. Color("ffb060", L["escort"])) or ""
+    if CP.IsFailed(task.id) then esc = " · " .. Color("ff6060", L["failed: abandon it first"]) end
     return ICON.available .. " " .. (task.title or "?"),
-      L["Pick up from "] .. (nameOnly(task.starter) or "?") .. " · " .. place
+      L["Pick up from "] .. (nameOnly(task.starter) or "?") .. " · " .. place .. esc
   elseif s.kind == "obj" then
     local name = s.r and s.r.tg.name or L["objective"]
     local prog = "x" .. (s.r and s.r.count or "?")
@@ -4950,9 +5083,17 @@ local function RenderXP()
         kindLabel = "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t" .. Color("c890ff", L["[Flight master]"])
         action = L["Talk to "] .. (task.npc or "?") .. L[" to activate the flight path - "] .. PointText(s.p)
         pinLabel = L["activate the flight master"]
+      elseif s.escort then
+        kindLabel = K.ESCORT_ICON .. Color("ffb060", L["[Escort]"])
+        action = L["Stay close to "] .. CP.EscortNpc(task) ..
+          (s.kind == "turnin" and (L[", then turn in to "] .. (nameOnly(TurnInText(task.id)) or "?")) or "") ..
+          " - " .. PointText(s.p) .. Color("ffb060", "  ~" .. FormatTime(s.work or 0) .. L[", do not interrupt"])
+        if s.kind == "turnin" then action = action .. Color("80c0ff", "  +" .. FormatNumber(task.xp or 0) .. " XP") end
+        pinLabel = s.kind == "obj" and s.r and s.r.tg.name or L["turn in the quest"]
       elseif s.kind == "take" then
         kindLabel = Color("80c0ff", L["[Pick up]"])
         action = L["Pick up from "] .. (nameOnly(task.starter) or "?") .. " - " .. PointText(s.p)
+        if Geo.IsEscort(task.id) then action = action .. Color("ffb060", L["  (escort: starts right after)"]) end
         if task.reqLevel then action = action .. Color("ffb060", L["  (level "] .. task.reqLevel .. L[" required)"]) end
         if task.dep then action = action .. Color("c0a0ff", L["  (follow-up of \""] .. (task.dep.title or "?") .. L["\")"]) end
         pinLabel = L["pick up the quest"]
