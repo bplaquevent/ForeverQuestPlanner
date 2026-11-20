@@ -5191,6 +5191,96 @@ function CP.AdvanceFocus()
   CP.FocusNext(false, cur)
 end
 
+-- Destination chosen at the flight master (final node of the flight).
+if hooksecurefunc and TakeTaxiNode then
+  hooksecurefunc("TakeTaxiNode", function(i)
+    local ok, name = pcall(TaxiNodeName, i)
+    CP.taxiChosen = ok and name or nil
+  end)
+end
+
+-- Take-off while a travel step has the focus: the focus moves to the next step, unless the
+-- chosen destination is not the planned one (the flight step then keeps the focus).
+function CP.TakeOff(s)
+  local chosen = CP.taxiChosen
+  CP.taxiChosen = nil
+  CP.flightStep = s
+  if s.task.mode == "vol" and chosen and s.task.dest and chosen ~= s.task.dest then
+    Print(string.format(L["Wrong destination: %s instead of %s. The route will be computed again on landing."], chosen, s.task.dest))
+    return
+  end
+  CP.AdvanceFocus()
+end
+
+-- Landing after a flight step: if it is not the planned destination, the transport steps
+-- towards the next real step are replaced by the shortest route from where you landed.
+K.LANDING_RADIUS = 500
+function CP.CheckLanding(st)
+  local t = st.task
+  local pos = PlayerPos()
+  if not (t and t.mode == "vol" and t.dest and pos) then return end
+  local node, nd
+  for _, n in pairs(TaxiStore()) do
+    local d = Dist(n, pos)
+    if d and (not nd or d < nd) then node, nd = n, d end
+  end
+  if node and nd < K.LANDING_RADIUS then
+    if node.name == t.dest then return end
+  else
+    local d = t.destP and Dist(pos, t.destP)
+    if not t.destP or (d and d < K.LANDING_RADIUS) then return end
+  end
+  CP.Reroute(st, pos)
+end
+
+-- Replaces the transport steps from the step `st` to the next real step by the shortest
+-- route from `pos`, then focuses the first step of that route.
+function CP.Reroute(st, pos)
+  local fz = Geo.Frozen()
+  if not fz then return end
+  local route = fz.route
+  local fi
+  for i = 2, #route do if route[i] == st then fi = i break end end
+  if not fi then return end
+  local ti = fi
+  while route[ti] and route[ti].kind == "travel" do ti = ti + 1 end
+  local target = route[ti]
+  for _ = fi, ti - 1 do table.remove(route, fi) end
+  local legs = {}
+  if target and target.kind ~= "hearth" and not target.glue then
+    local net = fz.info.net or BuildNetwork(TravelSpeed())
+    local _, choice = Route(pos, target.p, net, UnitLevel("player"))
+    if choice then
+      for _, b in ipairs(Geo.Boardings(choice, net)) do
+        local what = (b.mode == "vol" and L["Take the flight"]) or (L["Take the "] .. (K.MODE_NAME[b.mode] or b.mode))
+        legs[#legs + 1] = { kind = "travel", p = Geo.MapPoint(b.hub.p), work = 0, at = st.at,
+          task = { title = what .. L[": "] .. (b.hub.name or "?") .. " -> " .. (b.dest and b.dest.name or "?"),
+            mode = b.mode, from = b.hub.name, dest = b.dest and b.dest.name, destP = b.dest and b.dest.p,
+            xp = 0, travel = true } }
+      end
+    end
+  end
+  for k, leg in ipairs(legs) do table.insert(route, fi + k - 1, leg) end
+  local rec = Geo.FrozenStore()[CharKey()]
+  if rec then
+    rec.steps = {}
+    for i = 2, #route do rec.steps[#rec.steps + 1] = Geo.SerializeStep(route[i]) end
+  end
+  CP.lastPlan = {}
+  for i = 2, #route do CP.lastPlan[#CP.lastPlan + 1] = route[i] end
+  local first = legs[1]
+  if first then
+    Print(L["Wrong destination: new route. "] .. L["Focus: "] .. CP.StepText(first))
+    CP.FocusStep(first)
+  elseif target then
+    Print(L["Wrong destination: new route. "] .. L["Focus: "] .. CP.StepText(target))
+    CP.FocusStep(target)
+  else
+    CP.FocusNext(false)
+  end
+  if Refresh then C_Timer.After(0.2, Refresh) end
+end
+
 function CP.OnGameEvent(event, a1, a2)
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
   if (event == "QUEST_LOG_UPDATE" or event == "ZONE_CHANGED_NEW_AREA") and not CP.quickPending and Geo.frozen then
@@ -5204,11 +5294,14 @@ function CP.OnGameEvent(event, a1, a2)
   -- Landing after a flight taken during a focus.
   if event == "FQP_TAXI_LANDED" and CP.flying then
     CP.flying = nil -- the focus already moved to the next step at take-off
+    local st = CP.flightStep
+    CP.flightStep, CP.taxiChosen = nil, nil
+    if st then CP.CheckLanding(st) end
     return
   end
   local s = CP.CurrentFocus()
   if not s then return end
-  if event == "FQP_TAXI_TAKEOFF" then CP.flying = true end
+  if event == "FQP_TAXI_TAKEOFF" then CP.flying, CP.flightStep = true, nil end
   local qid = s.task.id
   if s.escort and event == "QUEST_LOG_UPDATE" and CP.IsFailed(qid) then
     CP.EscortFailed(s)
@@ -5220,7 +5313,7 @@ function CP.OnGameEvent(event, a1, a2)
     if event == "FQP_HEARTH_ARRIVED" then CP.AutoUpdate(L["Back by hearthstone"]) end
   elseif s.kind == "travel" then
     if event == "FQP_TAXI_TAKEOFF" then
-      CP.AdvanceFocus()
+      CP.TakeOff(s)
     elseif s.task.mode ~= "vol" and (event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK") then
       CP.CheckArrival(s)
     end
