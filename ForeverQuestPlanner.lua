@@ -4321,6 +4321,10 @@ function Geo.FactionName(fid)
     local ok, name = pcall(GetFactionInfoByID, fid)
     if ok and name then return name end
   end
+  if C_Reputation and C_Reputation.GetFactionDataByID then -- newer API (Forever factions)
+    local ok, data = pcall(C_Reputation.GetFactionDataByID, fid)
+    if ok and type(data) == "table" and data.name and data.name ~= "" then return data.name end
+  end
   return L["Faction "] .. fid
 end
 
