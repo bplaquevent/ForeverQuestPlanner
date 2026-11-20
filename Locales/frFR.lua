@@ -360,5 +360,8 @@ L["Settings are saved. Priorities and estimates apply to the next Roadbook compu
 L["|cffffff00Right-click|r: settings"] = "|cffffff00Clic droit|r : réglages"
 L["Show"] = "Afficher"
 L["Lock"] = "Verrouiller"
+L["Compass"] = "Boussole"
+L["%d yd"] = "%d m"
+L["%.1f kyd"] = "%.1f km"
 L["Center horizontally"] = "Centrer horizontalement"
 L["Max quest level above yours (difficulty)"] = "Niveau de quête max au-dessus du tien (difficulté)"
