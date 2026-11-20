@@ -154,6 +154,9 @@ local function CreateMainFrame()
   exportButton:SetPoint("TOPRIGHT", -12, -70)
   exportButton:SetText(L["Export"])
   exportButton:SetScript("OnClick", function() SelectTab("export") end)
+  local questCount = panels.groups:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  questCount:SetPoint("RIGHT", exportButton, "LEFT", -12, 0)
+  panels.groups.questCount = questCount
 
   panels.avail = CreateFilterPanel(f, {
     { key = "zone", label = L["Current zone"] },

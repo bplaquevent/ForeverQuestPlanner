@@ -32,6 +32,11 @@ end
 local function RenderTodo(a)
   local searching = #State.todoQuery > 0 or next(journalStates) ~= nil
   local items = {}
+  if panels.groups.questCount then
+    local count = a.count or 0
+    local color = count >= K.MAX_QUESTS and "ff4040" or count >= K.MAX_QUESTS - 5 and "ff8040" or "ffffff"
+    panels.groups.questCount:SetText(L["Quests: "] .. Color(color, count .. "/" .. K.MAX_QUESTS))
+  end
 
   local function category(kind, key, label, quests, detail)
     if searching then
