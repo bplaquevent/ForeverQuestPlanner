@@ -4392,8 +4392,11 @@ local function RenderAvailable()
         or (e.dungeon and zoneNames[e.dungeon])
       key = e.dungeon or e.area or e.starterZone or L["Other"]
     elseif availFilter == "dungeon" then
-      keep = e.dungeon ~= nil
+      keep = e.dungeon ~= nil and not e.pvp -- battlegrounds have their own filter
       key = e.dungeon
+    elseif availFilter == "pvp" then
+      keep = e.pvp
+      key = e.dungeon or e.area or e.starterZone or L["Other"]
     elseif availFilter == "class" then
       keep = e.isClass or e.isProf
       key = e.isClass and L["Class"] or L["Professions"]
@@ -6350,6 +6353,7 @@ local function CreateMainFrame()
   panels.avail = CreateFilterPanel(f, {
     { key = "zone", label = L["Current zone"] },
     { key = "dungeon", label = L["Dungeons"] },
+    { key = "pvp", label = L["PvP"] },
     { key = "class", label = L["Class & professions"] },
     { key = "all", label = L["All"] },
   }, function() return availFilter end, function(v)
