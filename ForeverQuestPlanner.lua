@@ -1441,10 +1441,10 @@ end
 
 -- Escort (or defense of an NPC): no flag says so, the text does. The English base texts are
 -- read (GetRaw bypasses the translation); custom Forever quests have no flags, hence the
--- unambiguous words alone. Checked on the whole QuestieDB: ~70 quests, 1 false positive.
+-- unambiguous words alone. Checked on the whole QuestieDB: 70 quests, 1 false positive.
 K.ESCORT_STRONG = { "escort", "help [^.]- escape" }
 K.ESCORT_FLAGGED = { "protect", "defend", "safely", "to safety", "must reach", "keep [^.]- safe",
-  "show [^.]- the way", "help [^.]- to the road", "help [^.]- get" }
+  "show [^.]- the way", "help [^.]- to the road", "help [^.]- get", "go with" }
 Geo.escort = {}
 function Geo.IsEscort(id)
   if not id then return false end
