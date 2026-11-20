@@ -4710,7 +4710,8 @@ local function RenderXP()
     local last = Geo.planCache
     if last and last.err and not last.route and Geo.lastErrShown ~= last then
       Geo.lastErrShown = last
-      ShowMessage(panel, "xp", Color("ff6060", last.err) .. L["\n\nClick Refresh to try again."])
+      RenderList(panel, "xp", { { text = Color("ff6060", last.err),
+        b3 = { text = L["Recalculate"], fn = function() CP.Recompute() end } } })
       return
     end
     Geo.Recompute()
@@ -5406,16 +5407,6 @@ local function CreateMainFrame()
   f.usesTabs = tabTemplate ~= nil
   if f.usesTabs and PanelTemplates_SetNumTabs then pcall(PanelTemplates_SetNumTabs, f, #tabs) end
 
-  local refresh = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-  refresh:SetSize(90, 24)
-  refresh:SetPoint("TOPRIGHT", -12, -30)
-  refresh:SetText(L["Refresh"])
-  refresh:SetScript("OnClick", function()
-    scan.dirty = true
-    if currentTab == "xp" then Geo.ClearFrozen() end -- Refresh on the Roadbook: new computation
-    Refresh()
-  end)
-
   -- Gear icon: opens / closes the settings (back to the previous tab).
   local gear = CreateFrame("Button", nil, f)
   gear:SetSize(18, 18)
@@ -5643,6 +5634,9 @@ f:RegisterEvent("QUEST_ACCEPTED")
 f:RegisterEvent("QUEST_REMOVED")
 f:RegisterEvent("QUEST_TURNED_IN")
 f:RegisterEvent("PLAYER_LEVEL_UP")
+-- Reputation and profession changes can unlock quests: rescan (batched, they can fire often).
+pcall(f.RegisterEvent, f, "UPDATE_FACTION")
+pcall(f.RegisterEvent, f, "SKILL_LINES_CHANGED")
 f:RegisterEvent("TAXIMAP_OPENED")
 pcall(f.RegisterEvent, f, "USER_WAYPOINT_UPDATED")
 f:RegisterEvent("PLAYER_LOGOUT")
@@ -5691,6 +5685,15 @@ f:SetScript("OnEvent", function(_, event, ...)
         pcall(CP.OnGameEvent, "FQP_TAXI_TAKEOFF")
       end
     end)
+  elseif event == "UPDATE_FACTION" or event == "SKILL_LINES_CHANGED" then
+    if not f.rescanPending then
+      f.rescanPending = true
+      C_Timer.After(10, function()
+        f.rescanPending = nil
+        scan.dirty = true
+        if mainFrame and mainFrame:IsShown() and currentTab ~= "xp" then Refresh() end
+      end)
+    end
   elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_ENTERING_WORLD" then
     pcall(CP.OnGameEvent, "ZONE_CHANGED_NEW_AREA")
   elseif event == "PLAYER_CONTROL_GAINED" then
