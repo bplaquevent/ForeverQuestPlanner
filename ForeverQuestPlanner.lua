@@ -3439,6 +3439,52 @@ function Geo.HideRowTooltip()
   if owner and owner.isListRow then GameTooltip:Hide() end
 end
 
+-- Lines wider than the text area: wrapped here, each continuation starting with the same indent
+-- (the game wraps at the left edge). Item links and textures are never cut; an open color goes on.
+function Geo.IndentWrap(text, width)
+  if not (text and width and width > 0) then return text end
+  local fs = Geo.wrapMeasure
+  if not fs then
+    fs = UIParent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    fs:Hide()
+    Geo.wrapMeasure = fs
+  end
+  local function W(s)
+    fs:SetText(s)
+    return fs:GetStringWidth() or 0
+  end
+  local out = {}
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    if W(line) <= width then
+      out[#out + 1] = line
+    else
+      local indent = line:match("^( *)")
+      -- Spaces inside links ("|H...|h[...]|h") and textures ("|T...|t") do not split words.
+      local body = line:sub(#indent + 1):gsub("|H.-|h.-|h", function(l) return (l:gsub(" ", "\001")) end)
+        :gsub("|T.-|t", function(t) return (t:gsub(" ", "\001")) end)
+      local cur, color = nil, nil
+      for word in body:gmatch("%S+") do
+        word = word:gsub("\001", " ")
+        local test = cur and (cur .. " " .. word) or (indent .. (color or "") .. word)
+        if cur and W(test) > width then
+          out[#out + 1] = cur
+          -- Color still open at the end of the line: repeated at the start of the next one.
+          local last = nil
+          for code in cur:gmatch("|c%x%x%x%x%x%x%x%x") do last = code end
+          local lastPos = 0
+          for pos in cur:gmatch("()|c%x%x%x%x%x%x%x%x") do lastPos = pos end
+          color = (last and not cur:find("|r", lastPos, true)) and last or nil
+          cur = indent .. (color or "") .. word
+        else
+          cur = test
+        end
+      end
+      if cur then out[#out + 1] = cur end
+    end
+  end
+  return table.concat(out, "\n")
+end
+
 local function ListRow(panel, i)
   panel.rows = panel.rows or {}
   local r = panel.rows[i]
@@ -3609,7 +3655,7 @@ local function RenderList(panel, tabKey, items, forceOpen)
           r:SetScript("OnEnter", nil)
           r:SetScript("OnLeave", nil)
         end
-        r.text:SetText(it.text or "")
+        r.text:SetText(Geo.IndentWrap(it.text or "", r.text:GetWidth()))
       end
       local h = math.max(it.header and 24 or 26, r.text:GetStringHeight() + 12)
       r:SetHeight(h)
