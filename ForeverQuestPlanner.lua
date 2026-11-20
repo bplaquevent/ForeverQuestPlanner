@@ -3711,14 +3711,137 @@ local function StateIcons(questId)
   return table.concat(icons, "") .. " "
 end
 
--- Level warning: quest more than 2 levels above the character.
-local function LevelWarning(level)
-  local plevel = UnitLevel("player")
-  if not (level and level > 0 and plevel) then return "" end
-  local gap = level - plevel
-  if gap <= 2 then return "" end
-  return "  |TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:14:14|t" ..
-    Color(gap >= 5 and "ff4040" or "ff8040", "+" .. gap .. L[" lvl"])
+---------------------------------------------------------------------------
+-- Quest line shown the same way in every tab: title, level, elite, types
+---------------------------------------------------------------------------
+-- Quest types, deduced from the QuestieDB objectives (several per quest, in this order).
+K.QUEST_TYPES = { "escort", "assassination", "slaying", "collect", "gathering", "interaction", "exploration",
+  "talk", "reputation", "delivery" }
+K.QUEST_TYPE_LABEL = {
+  escort = L["Escort"], assassination = L["Assassination"], slaying = L["Slaying"], collect = L["Collect"],
+  gathering = L["Gathering"], interaction = L["Interaction"], exploration = L["Exploration"], talk = L["Talk"],
+  reputation = L["Reputation"], delivery = L["Delivery"],
+}
+
+-- Words of the objective text, for quests whose objectives QuestieDB does not know.
+K.QUEST_TYPE_WORDS = {
+  slaying = { "%f[%a]kill", "%f[%a]slay", "%f[%a]destroy", "%f[%a]defeat", "%f[%a]exterminate", "%f[%a]eliminate" },
+  collect = { "%f[%a]collect%f[%A]", "%f[%a]gather%f[%A]", "%f[%a]obtain%f[%A]", "%f[%a]recover%f[%A]",
+    "%f[%a]retrieve%f[%A]", "bring %d", "bring me %d" },
+  exploration = { "%f[%a]explore%f[%A]", "%f[%a]scout%f[%A]", "%f[%a]investigate%f[%A]", "%f[%a]locate%f[%A]" },
+  interaction = { "%f[%a]use%f[%A]", "%f[%a]place%f[%A]", "%f[%a]plant%f[%A]", "%f[%a]activate%f[%A]" },
+}
+
+-- Unique NPC (to assassinate): rare, rare elite or boss, or a single known spawn point.
+function Geo.UniqueNpc(id)
+  local rank = QGet(QDB.Npc, id, "rank")
+  if rank == 2 or rank == 3 or rank == 4 then return true end
+  local spawns, n = QGet(QDB.Npc, id, "spawns"), 0
+  if type(spawns) == "table" then
+    for _, pts in pairs(spawns) do n = n + (type(pts) == "table" and #pts or 0) end
+  end
+  return n == 1
+end
+
+Geo.qtypes = {}
+function Geo.QuestTypes(id)
+  if not id then return {} end
+  local cached = Geo.qtypes[id]
+  if cached then return cached end
+  local has = {}
+  if Geo.IsEscort(id) then has.escort = true end
+  local obj = QGet(QDB.Quest, id, "objectives")
+  if type(obj) == "table" then
+    for _, o in ipairs(obj[1] or {}) do
+      local icon = o[3]
+      if icon == 3 or icon == 5 or icon == 17 then has.talk = true
+      elseif Geo.UniqueNpc(o[1]) then has.assassination = true
+      else has.slaying = true end
+    end
+    if #(obj[2] or {}) > 0 then has.interaction = true end
+    for _, o in ipairs(obj[3] or {}) do
+      local npcs, objs = QGet(QDB.Item, o[1], "npcDrops"), QGet(QDB.Item, o[1], "objectDrops")
+      if type(npcs) == "table" and #npcs > 0 then has.collect = true
+      elseif type(objs) == "table" and #objs > 0 then has.gathering = true
+      else has.collect = true end -- bought, crafted…
+    end
+    if #(obj[4] or {}) > 0 then has.reputation = true end
+    local givesItem = QGet(QDB.Quest, id, "sourceItemId")
+    for _, o in ipairs(obj[5] or {}) do
+      if givesItem then has.interaction = true -- credit for using the item given by the quest on them
+      elseif type(o) == "table" and o[2] and Geo.UniqueNpc(o[2]) then has.assassination = true
+      else has.slaying = true end
+    end
+    if #(obj[6] or {}) > 0 then has.interaction = true end
+  end
+  if not has.escort and type(QGet(QDB.Quest, id, "triggerEnd")) == "table" then has.exploration = true end
+  if not next(has) then
+    -- No objective known by QuestieDB (frequent for Forever quests): words of the English text.
+    local text = ""
+    if QDB.Quest and QDB.Quest.GetRaw then
+      local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
+      if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
+    end
+    for kind, words in pairs(K.QUEST_TYPE_WORDS) do
+      for _, w in ipairs(words) do
+        if text:find(w) then has[kind] = true break end
+      end
+    end
+    if not next(has) then has.delivery = true end -- bring something / someone, or talk to an NPC
+  end
+  local list = {}
+  for _, k in ipairs(K.QUEST_TYPES) do if has[k] then list[#list + 1] = k end end
+  Geo.qtypes[id] = list
+  return list
+end
+
+-- Game tag of a quest of the log ("Elite", "Dungeon"…), "" if none, nil if not in the log.
+function Geo.LogTag(id)
+  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
+  for _, q in ipairs(e and e.quests or {}) do
+    if q.id == id then return q.tag or "" end
+  end
+  return nil
+end
+
+-- Quest level, colored like in the game's quest log (gray, green, yellow, orange, red).
+function Geo.LevelBadge(level)
+  if not (level and level > 0) then return "" end
+  local hex
+  if GetQuestDifficultyColor then
+    local ok, c = pcall(GetQuestDifficultyColor, level)
+    if ok and type(c) == "table" and c.r then
+      hex = string.format("%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255)
+    end
+  end
+  if not hex then
+    local gap = level - (UnitLevel("player") or level)
+    hex = (gap >= 5 and "ff2020") or (gap >= 3 and "ff8040") or (gap >= -2 and "ffff00") or "40c040"
+  end
+  return Color(hex, "[" .. level .. "]")
+end
+
+-- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
+-- isClass, isProf, dungeon }.
+function Geo.QuestBadges(o)
+  local id = o.id
+  local tag = o.tag
+  if tag == nil and id then tag = Geo.LogTag(id) end
+  local parts = {}
+  if id and Geo.IsEliteQuest(id, tag) then parts[#parts + 1] = Color("ff8040", L["Elite"]) end
+  if tag and tag ~= "" and not tag:find("[EÉ]lite") and tag ~= ELITE then parts[#parts + 1] = tag
+  elseif o.dungeon then parts[#parts + 1] = L["Dungeon"] end
+  local isClass = o.isClass
+  if isClass == nil and id then
+    local m = QuestMeta(id)
+    isClass = m and IsClassMeta(m) or false
+  end
+  if isClass then parts[#parts + 1] = L["Class"] end
+  if o.isProf then parts[#parts + 1] = L["Profession"] end
+  local types = Geo.QuestTypes(id)
+  for i = 1, math.min(#types, 3) do parts[#parts + 1] = K.QUEST_TYPE_LABEL[types[i]] end
+  local badge = Geo.LevelBadge(o.level)
+  return "  " .. badge .. (#parts > 0 and (" " .. Color("80c0ff", table.concat(parts, " · "))) or "")
 end
 
 local function IconLegend(withAvailable)
@@ -3903,15 +4026,12 @@ end
 
 local function QuestLine(q)
   local extras = {}
-  if q._isClass then extras[#extras + 1] = L["class"] end
-  if q._isProf then extras[#extras + 1] = L["profession"] end
   if q._itemReason then extras[#extras + 1] = q._itemReason end
   if q.xp and q.xp > 0 then extras[#extras + 1] = q.xp .. " XP" end
   if q.money and q.money > 0 then extras[#extras + 1] = MoneyText(q.money) end
   if q.suggestedGroup and q.suggestedGroup > 1 then extras[#extras + 1] = L["group "] .. q.suggestedGroup end
-  local level = Color("aaaaaa", L["(level "] .. tostring(q.level or "?") .. ")")
-  return string.format("%s %s%s%s", q.title or "?", level, q._isProf and "" or LevelWarning(q.level),
-    #extras > 0 and Color("80c0ff", "  " .. table.concat(extras, ", ")) or "")
+  local badges = Geo.QuestBadges({ id = q.id, level = q.level, tag = q.tag or "", isClass = q._isClass, isProf = q._isProf })
+  return (q.title or "?") .. badges .. (#extras > 0 and Color("aaaaaa", "  " .. table.concat(extras, ", ")) or "")
 end
 
 local function RenderTodo(a)
@@ -4132,14 +4252,14 @@ local function RenderAvailable()
     for _, e in ipairs(g.list) do
       local tags = {}
       if e.xp and e.xp > 0 then tags[#tags + 1] = "~" .. e.xp .. " XP" end
-      if e.isClass then tags[#tags + 1] = L["class"] end
-      if e.isProf then tags[#tags + 1] = L["profession"] end
       if e.opensChain then tags[#tags + 1] = L["opens a chain"] end
       if e.repeatable then tags[#tags + 1] = L["repeatable"] end
       if e.lowLevel then tags[#tags + 1] = L["low level"] end
-      local info = Color("aaaaaa", L["level "] .. e.level .. L[", requires "] .. e.reqLevel) ..
+      local info = Color("aaaaaa", L["requires level "] .. e.reqLevel) ..
         (#tags > 0 and Color("80c0ff", "  " .. table.concat(tags, ", ")) or "")
-      local text = "  " .. StateIcons(e.id) .. e.name .. (e.isProf and "" or LevelWarning(e.level)) .. "\n       " .. info
+      local text = "  " .. StateIcons(e.id) .. e.name ..
+        Geo.QuestBadges({ id = e.id, level = e.level, isClass = e.isClass, isProf = e.isProf, dungeon = e.dungeon }) ..
+        "\n       " .. info
       if e.repMissing then text = text .. "\n       " .. Color("ff6060", e.repMissing) end
       if e.missing then
         text = text .. "\n       " .. Color("ff6060", L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", "))
@@ -4193,7 +4313,7 @@ local function RenderNear()
     local info = string.format("%.0f m", it.d)
     if it.kind == "take" then
       local tags = {}
-      if it.level then tags[#tags + 1] = L["level "] .. it.level .. (it.lowLevel and L[" (low level)"] or "") end
+      if it.lowLevel then tags[#tags + 1] = L["low level"] end
       if it.xp and it.xp > 0 then tags[#tags + 1] = "~" .. it.xp .. " XP" end
       if #tags > 0 then info = info .. Color("80c0ff", "  " .. table.concat(tags, ", ")) end
     end
@@ -4205,7 +4325,8 @@ local function RenderNear()
     else
       who = L["Objective: "] .. (it.extra or "?")
     end
-    local text = "  " .. StateIcons(it.id) .. (withKind and KIND_TAG[it.kind] or "") .. it.label .. LevelWarning(it.level) ..
+    local text = "  " .. StateIcons(it.id) .. (withKind and KIND_TAG[it.kind] or "") .. it.label ..
+      (it.id and Geo.QuestBadges({ id = it.id, level = it.level }) or "") ..
       "\n       " .. Color("aaaaaa", info) .. "\n       " .. Color("bbbbbb", who .. " - " .. PointText(it.p))
     if it.rep then text = text .. "\n       " .. Color("ff6060", it.rep) end
     local b1
@@ -5265,7 +5386,8 @@ local function RenderXP()
       if task.id and IsWatched(task.id) then icon = icon .. ICON.watched end
       if task.id and IsPinned(task.id) then icon = icon .. PinIcon() end
       if icon ~= "" then icon = icon .. " " end
-      local text = string.format("  %d. %s%s %s%s", n, icon, kindLabel, task.title or "?", LevelWarning(task.level))
+      local text = string.format("  %d. %s%s %s%s", n, icon, kindLabel, task.title or "?",
+        task.id and Geo.QuestBadges({ id = task.id, level = task.level }) or "")
       text = text .. "\n       " .. Color("bbbbbb", action) .. Color("888888", "  [" .. FormatTime(s.at) .. "]")
       if spotLine then text = text .. "\n       " .. spotLine end
       local way = s.kind ~= "hearth" and RouteText(st.prev.p, s.p, net, plevel) or nil
