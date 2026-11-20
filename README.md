@@ -33,7 +33,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Quest log**: quests by category, tracking, pins, abandon recommendations (class, profession, XP, items, chain, money), text export.
 - **Available**: quests you can pick up at your level, by zone, dungeons, class and professions; missing prerequisites (previous quest, profession, reputation) are listed.
 - Search, state filters, collapsible categories.
-- **Settings** (gear icon): every option grouped by family (general, Roadbook, quest lists, priorities, look-ahead, time estimates).
+- **Settings** (gear icon): general options (minimap icon, objective button, "Keep" list) and a Roadbook panel (hearthstone, priorities, look-ahead, time estimates).
 
 ## Dependencies
 
