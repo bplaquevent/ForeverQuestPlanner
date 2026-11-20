@@ -19,6 +19,7 @@ end
 local function Settings()
   ForeverQuestPlannerSettings = ForeverQuestPlannerSettings or {}
   ForeverQuestPlannerSettings.keep = ForeverQuestPlannerSettings.keep or {}
+  ForeverQuestPlannerSettings.excluded = ForeverQuestPlannerSettings.excluded or {} -- quest id -> title
   return ForeverQuestPlannerSettings
 end
 
@@ -1964,6 +1965,7 @@ end
 
 -- Quest to pick up (available, or a follow-up unlocked by the plan) -> plannable task.
 function Geo.TakeTask(en, plevel, pos)
+  if Settings().excluded[en.id] then return nil end -- removed from the Roadbook by the player
   local t = QuestTargets(en.id)
   if #t.finish == 0 then return nil end
   if (t.missing or 0) > 0 then return nil end -- an objective without a position: cannot be planned
@@ -2284,7 +2286,9 @@ local function BuildTasks(pos, plevel)
     -- Quest ready to turn in: always a candidate (even dungeon, group, gray or high level),
     -- you only need to visit the NPC: it is a quick win.
     local ready = q.complete and not q.failed
-    if ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= plevel + K.MAX_LEVEL_GAP + 1) then
+    if Settings().excluded[q.id] then
+      skipped = skipped + 1 -- removed from the Roadbook by the player
+    elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= plevel + K.MAX_LEVEL_GAP + 1) then
       local t = QuestTargets(q.id)
       local remaining, unmatched = {}, 0
       if not q.complete then remaining, unmatched = RemainingTargets(q, t) end
@@ -4562,6 +4566,35 @@ function CP.ValidateUnsafe(recompute, skip)
   CP.FocusNext(false, cur)
 end
 
+-- Quest removed from the Roadbook (badly defined, not found…): excluded, then a new Roadbook.
+function CP.ExcludeQuest(id, title)
+  if not id then return end
+  Settings().excluded[id] = title or true
+  Geo.planCache = nil
+  Print(L["Quest removed from the Roadbook: "] .. (title or tostring(id)) .. L[". It can be added back in the options."])
+  CP.Recompute()
+end
+
+function CP.AskExclude(s)
+  local id = s and s.task and s.task.id
+  if not id then
+    Print(L["This step is not a quest: Shift-click to skip it."])
+    return
+  end
+  StaticPopup_Show("FQP_EXCLUDE", s.task.title or tostring(id), nil, { id = id, title = s.task.title })
+end
+
+StaticPopupDialogs["FQP_EXCLUDE"] = {
+  text = L["Remove the quest \"%s\" from the Roadbook and compute a new one?\n\nUseful when a quest is badly defined or cannot be found. It can be added back in the options."],
+  button1 = L["Remove"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, data) if data then CP.ExcludeQuest(data.id, data.title) end end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
 function CP.Validate(recompute, skip)
   local ok, err = xpcall(function() CP.ValidateUnsafe(recompute, skip) end, function(e)
     return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
@@ -4913,7 +4946,11 @@ function CP.CreateCheckpointButton()
     if button == "RightButton" then
       if CP.OpenWindow then CP.OpenWindow("xp") end -- right-click: window opened on the Roadbook
     else
-      CP.Validate(IsControlKeyDown and IsControlKeyDown(), IsShiftKeyDown and IsShiftKeyDown())
+      if IsAltKeyDown and IsAltKeyDown() then
+        CP.AskExclude(b.current) -- Alt-click: remove the quest from the Roadbook
+      else
+        CP.Validate(IsControlKeyDown and IsControlKeyDown(), IsShiftKeyDown and IsShiftKeyDown())
+      end
     end
   end)
   b:SetScript("OnEnter", function(self)
@@ -4928,6 +4965,7 @@ function CP.CreateCheckpointButton()
     GameTooltip:AddLine(L["The focus moves to the next step on its own when this one is done."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Click: focus the next step if the current one is done (otherwise the pin is placed on it again)."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Shift-click: skip the current step without finishing it."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Alt-click: remove this quest from the Roadbook (badly defined, not found…) and compute a new one."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Ctrl-click: compute a new Roadbook."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Right-click: open the Roadbook."], 0.7, 0.7, 0.7, true)
     if not Settings().checkpointLocked then GameTooltip:AddLine(L["Drag: move the button."], 0.7, 0.7, 0.7, true) end
@@ -5036,6 +5074,9 @@ local function RenderXP()
     end
   end
   if info.skipped > 0 then l3[#l3 + 1] = Plural(info.skipped, L["quest"]) .. L[" ignored"] end
+  local nEx = 0
+  for _ in pairs(Settings().excluded) do nEx = nEx + 1 end
+  if nEx > 0 then l3[#l3 + 1] = Plural(nEx, L["quest"]) .. L[" removed by you"] end
   local head = { table.concat(l1, sep), table.concat(l2, sep), table.concat(l3, sep) }
   local items = { { text = Color("aaaaaa", table.concat(head, "\n")),
     b3 = { text = L["Recalculate"], fn = function() CP.Recompute() end } } }
@@ -5161,7 +5202,8 @@ local function RenderXP()
             end }
           end
         end
-        segItems[#segItems + 1] = { text = text, b2 = track, b3 = pin, questID = task.id }
+        local exclude = qid and not CP.StepDone(step) and { text = L["Remove"], fn = function() CP.AskExclude(step) end } or nil
+        segItems[#segItems + 1] = { text = text, b1 = exclude, b2 = track, b3 = pin, questID = task.id }
       end
     end
     if #segItems > 0 then
@@ -5534,6 +5576,18 @@ function Geo.CreateSettingsPanel(f)
       Settings().noHearth = not v or nil
       Geo.planCache = nil
     end, panel)
+  local restore = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
+  restore:SetSize(260, 22)
+  restore:SetPoint("TOPRIGHT", -10, -24)
+  restore:SetText(L["Restore removed quests"])
+  restore:SetScript("OnClick", function()
+    local n = 0
+    for _ in pairs(Settings().excluded) do n = n + 1 end
+    Settings().excluded = {}
+    Geo.planCache = nil
+    Print(Plural(n, L["quest"]) .. L[" added back to the Roadbook: Ctrl-click the Objective button to recompute."])
+    if Refresh then Refresh() end
+  end)
   -- Objective button: shown, locked, compass, centered.
   local obj = Geo.SettingsBox(rb, L["Objective"], 8, -52, 776, 56)
   Geo.SettingsCheck(obj, L["Show"], 10, -26, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
