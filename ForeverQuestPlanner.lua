@@ -73,6 +73,7 @@ local QDB = { ok = false }
 local K = {} -- tuning constants (avoids the 200 local variables limit)
 -- Transport mode names (internal ids -> displayed text).
 K.MODE_NAME = { vol = L["flight"], zeppelin = L["zeppelin"], bateau = L["boat"] }
+K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above yours (+1 for quests already in the log)
 K.LOOKAHEAD_LEVELS = 3 -- the Roadbook considers quests up to 3 levels above (expected level)
 
 local CLASS_SORTS = { [-395] = true, [-372] = true, [-263] = true, [-262] = true, [-261] = true, [-162] = true,
@@ -1964,7 +1965,7 @@ function Geo.Followers(task, ctx, plevel)
       local ok, en = pcall(CheckAvailable, b, c)
       if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
-        and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + 2 then
+        and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + K.MAX_LEVEL_GAP then
         local f = Geo.TakeTask(en, plevel, from)
         if f then
           f.dep, f.depth, f.done = task, (task.depth or 0) + 1, done
@@ -2214,7 +2215,7 @@ local function BuildTasks(pos, plevel)
     -- Quest ready to turn in: always a candidate (even dungeon, group, gray or high level),
     -- you only need to visit the NPC: it is a quick win.
     local ready = q.complete and not q.failed
-    if ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= plevel + 3) then
+    if ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= plevel + K.MAX_LEVEL_GAP + 1) then
       local t = QuestTargets(q.id)
       local remaining, unmatched = {}, 0
       if not q.complete then remaining, unmatched = RemainingTargets(q, t) end
@@ -2250,7 +2251,7 @@ local function BuildTasks(pos, plevel)
   for _, en in ipairs(scan.entries or {}) do
     if not en.lowLevel and not en.repMissing and not en.missing and not en.repeatable
       and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
-      and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + 2 then
+      and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + K.MAX_LEVEL_GAP then
       local p, d = Nearest(StartPoints(en.id), pos)
       if p then near[#near + 1] = { en = en, d = d or math.huge } end
     end
@@ -5176,6 +5177,7 @@ K.PARAMS = {
   { section = L["Look-ahead (quest chains and expected level)"] },
   { key = "LOOKAHEAD_LEVELS", label = L["Quests above your level"], unit = L[" lvl"], min = 0, max = 5, step = 1, rescan = true },
   { key = "LOOKAHEAD_WEIGHT", label = L["Weight of what a quest unlocks"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "MAX_LEVEL_GAP", label = L["Max quest level above yours (difficulty)"], unit = L[" lvl"], min = 0, max = 10, step = 1 },
   { section = L["Time estimates"] },
   { key = "MOB_TIME", label = L["Time per monster"], unit = L[" s"], min = 10, max = 90, step = 5 },
   { key = "KILLS_NO_RATE", label = L["Monsters per item (unknown drop rate)"], unit = "", min = 1, max = 20, step = 1 },
@@ -5318,7 +5320,7 @@ function Geo.CreateSettingsPanel(f)
   end)
 
   -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
-  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 500)
+  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 548)
   Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -26,
     function() return not Settings().noHearth end,
     function(v)
@@ -5338,8 +5340,8 @@ function Geo.CreateSettingsPanel(f)
   center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   local boxes = {
     Geo.SettingsBox(rb, L["Priorities (bonus in % of your level's XP)"], 8, -114, 776, 262),
-    Geo.SettingsBox(rb, L["Look-ahead"], 8, -382, 384, 112),
-    Geo.SettingsBox(rb, L["Time estimates"], 400, -382, 384, 112),
+    Geo.SettingsBox(rb, L["Look-ahead"], 8, -382, 384, 160),
+    Geo.SettingsBox(rb, L["Time estimates"], 400, -382, 384, 160),
   }
   local sec, n = 0, 0
   for _, d in ipairs(K.PARAMS) do
@@ -5441,7 +5443,7 @@ function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
     w = CreateFrame("Frame", "ForeverQuestPlannerSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    w:SetSize(820, 672)
+    w:SetSize(820, 720)
     w:SetPoint("CENTER", 40, -20)
     w:SetFrameStrata("DIALOG")
     w:SetToplevel(true)
