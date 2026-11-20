@@ -10,4 +10,15 @@
 
 Locales\Locales.lua
 Locales\frFR.lua
-ForeverQuestPlanner.lua
+Core.lua
+Available.lua
+Geo.lua
+Planner.lua
+Route.lua
+UI\Lists.lua
+UI\Tabs.lua
+Roadbook.lua
+UI\Window.lua
+UI\Settings.lua
+UI\MainFrame.lua
+Events.lua
