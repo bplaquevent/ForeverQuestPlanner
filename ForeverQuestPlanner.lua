@@ -2156,8 +2156,14 @@ end
 -- Recipe item (class 9) subclass -> profession skill line (Classic). Subclass 0 = book.
 K.RECIPE_SKILL = { [1] = 165, [2] = 197, [3] = 202, [4] = 164, [5] = 185, [6] = 171, [7] = 129, [8] = 333, [9] = 356 }
 
+-- QuestieDB "teachesSpell" field: a spell ID, or the default 0 (truthy in Lua!) when the item teaches nothing.
+function Geo.ItemTeachesSpell(itemId)
+  local v = QGet(QDB.Item, itemId, "teachesSpell")
+  return type(v) == "number" and v > 0
+end
+
 -- Reward that teaches a skill: a book, or a recipe of one of the character's professions.
--- (QuestieDB's "teachesSpell" field is empty in the Forever database: the item class is used.)
+-- (QuestieDB's "teachesSpell" field is empty in the Forever database: the item class is used too.)
 function Geo.TeachesSkill(classID, subclassID)
   if classID ~= 9 then return false end
   if subclassID == 0 then return true end
@@ -2173,7 +2179,7 @@ function Geo.ItemInterest(itemId, plevel)
     if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemId) end
     return 0
   end
-  if QGet(QDB.Item, itemId, "teachesSpell") or Geo.TeachesSkill(classID, subclassID) then
+  if Geo.ItemTeachesSpell(itemId) or Geo.TeachesSkill(classID, subclassID) then
     return K.PRIO_SPELL, name .. L[" (teaches a skill)"]
   end
   if equipLoc == "INVTYPE_BAG" then return K.PRIO_BAG, name .. L[" (bag)"] end
@@ -3779,7 +3785,7 @@ function Geo.QuestTypes(id)
       else has.collect = true end -- bought, crafted…
     end
     if #(obj[4] or {}) > 0 then has.reputation = true end
-    local givesItem = QGet(QDB.Quest, id, "sourceItemId")
+    local givesItem = (tonumber(QGet(QDB.Quest, id, "sourceItemId")) or 0) > 0 -- 0 = no item
     for _, o in ipairs(obj[5] or {}) do
       if givesItem then has.interaction = true -- credit for using the item given by the quest on them
       elseif type(o) == "table" and o[2] and Geo.UniqueNpc(o[2]) then has.assassination = true
