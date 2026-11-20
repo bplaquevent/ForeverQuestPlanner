@@ -816,8 +816,8 @@ local function CheckAvailable(id, ctx)
   local Q = QDB.Quest
   local req = QGet(Q, id, "requiredLevel") or 0
   local lvl = QGet(Q, id, "questLevel") or 0
-  -- No required level in the data: assume the usual Classic rule (quest level - 5).
-  if req <= 0 and lvl > 0 then req = math.max(1, lvl - 5) end
+  -- Only the required level decides whether the character can pick the quest up (a high quest
+  -- level alone does not hide it).
   -- Quests slightly too high kept for the Roadbook (unlocked by the expected level).
   if req > ctx.plevel + (ctx.lookahead or 0) then return nil end
   local function done(q) return IsCompleted(q) or (ctx.done and ctx.done[q]) or false end
