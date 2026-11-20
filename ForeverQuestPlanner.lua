@@ -5319,23 +5319,23 @@ function Geo.CreateSettingsPanel(f)
 
   -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
   local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 500)
-  -- Objective button: shown, locked, centered.
-  local obj = Geo.SettingsBox(rb, L["Objective"], 8, -26, 776, 56)
-  Geo.SettingsCheck(obj, L["Show objective"], 10, -26, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
-  Geo.SettingsCheck(obj, L["Lock the objective"], 220, -26,
-    function() return Settings().checkpointLocked end,
-    function(v) Settings().checkpointLocked = v or nil end, panel)
-  local center = CreateFrame("Button", nil, obj, "UIPanelButtonTemplate")
-  center:SetSize(260, 22)
-  center:SetPoint("TOPRIGHT", -10, -26)
-  center:SetText(L["Center the objective horizontally"])
-  center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
-  Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -88,
+  Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -26,
     function() return not Settings().noHearth end,
     function(v)
       Settings().noHearth = not v or nil
       Geo.planCache = nil
     end, panel)
+  -- Objective button: shown, locked, centered.
+  local obj = Geo.SettingsBox(rb, L["Objective"], 8, -52, 776, 56)
+  Geo.SettingsCheck(obj, L["Show"], 10, -26, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
+  Geo.SettingsCheck(obj, L["Lock"], 220, -26,
+    function() return Settings().checkpointLocked end,
+    function(v) Settings().checkpointLocked = v or nil end, panel)
+  local center = CreateFrame("Button", nil, obj, "UIPanelButtonTemplate")
+  center:SetSize(260, 22)
+  center:SetPoint("TOPRIGHT", -10, -26)
+  center:SetText(L["Center horizontally"])
+  center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   local boxes = {
     Geo.SettingsBox(rb, L["Priorities (bonus in % of your level's XP)"], 8, -114, 776, 262),
     Geo.SettingsBox(rb, L["Look-ahead"], 8, -382, 384, 112),
