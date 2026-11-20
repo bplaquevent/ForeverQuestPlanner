@@ -20,12 +20,14 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Saved plan**: it no longer changes until the end or until you ask for a recompute.
 
 ### Focus and floating button
-- Each Roadbook step has **Track** and **Pin** buttons; the floating **Objective** button focuses a step (exclusive tracking + pin).
+- The floating **Objective** button follows a step (exclusive tracking + pin, compass pointing at it).
+- Each Roadbook step of a quest has a **Remove from the Roadbook** button (the whole quest, then a new Roadbook); removed quests can be added back from the settings.
 - Automatically moves to the next step (quest picked up, objective done, quest turned in, flight master activated, take-off, zeppelin or boat arrival, hearthstone…).
 - Movable floating button showing a summary of the current step:
-  - **click**: next step if the current one is done;
-  - **Shift-click**: skip the step;
-  - **Ctrl-click**: new Roadbook;
+  - **click**: follow the objective;
+  - **Shift-click**: stop following the objective;
+  - **Alt-click**: new Roadbook;
+  - **Ctrl-Alt-click**: remove the step from the Roadbook;
   - **right-click**: open the Roadbook.
 
 ### Other tabs
