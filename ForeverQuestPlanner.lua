@@ -1704,7 +1704,7 @@ end
 ---------------------------------------------------------------------------
 local xpHorizon = 7200
 K.MAX_TAKE_CANDIDATES = 80
-K.LOOKAHEAD_WEIGHT = 0.9 -- weight of a "quest + what it unlocks" combination
+K.LOOKAHEAD_WEIGHT = 1   -- a quest is also judged with what it unlocks, at full weight
 K.MAX_FOLLOW_DEPTH = 12  -- safety: maximum length of an evaluated quest chain
 K.SLICE_MS = 15          -- maximum computation time per frame (the computation is spread over several frames)
 K.REPLAN_DISTANCE = 150  -- beyond this distance (m), the Roadbook is recomputed from the new position
@@ -1990,7 +1990,7 @@ function Geo.TakeTask(en, plevel, pos)
     Geo.RecordLater(task)
     return nil
   end
-  if plevel >= Geo.MaxLevel() and (task.prio or 0) <= 0 then return nil end
+  if plevel >= Geo.MaxLevel() and (task.share or 0) <= 0 then return nil end
   return task
 end
 
@@ -2055,18 +2055,18 @@ function Geo.Followers(task, ctx, plevel)
 end
 
 ---------------------------------------------------------------------------
--- Roadbook priorities: class quests, interesting rewards, important unlocks.
--- Each priority is worth a share of the level's XP, added to the quest value when choosing.
+-- Roadbook priorities: class quests, interesting rewards, quests ready to turn in.
+-- XP stays the main criterion: each priority adds a share (0 to 100 %) of the XP of an average
+-- Roadbook quest to the quest value when choosing. 100 % = as if it gave one more average quest.
 ---------------------------------------------------------------------------
-K.PRIO_CLASS = 0.40        -- class quest
-K.PRIO_ITEM_SPEC = 0.25    -- usable blue (or better) item suited to the specialization
-K.PRIO_ITEM_BLUE = 0.08    -- usable blue item, not ideal for the specialization
-K.PRIO_UPGRADE_SPEC = 0.12 -- equipment upgrade with the right stats
-K.PRIO_UPGRADE = 0.04      -- item level upgrade only
-K.PRIO_BAG = 0.10          -- bag
-K.PRIO_SPELL = 0.10        -- item that teaches a spell / a recipe
-K.PRIO_UNLOCK_CLASS = 0.20 -- opens a chain leading to a class quest
-K.READY_BONUS = 0.03       -- quest ready to turn in (quick win, frees the quest log)
+K.PRIO_CLASS = 1.00        -- class quest, or a chain leading to one
+K.PRIO_ITEM_SPEC = 1.00    -- usable blue (or better) item suited to the specialization
+K.PRIO_ITEM_BLUE = 0.25    -- usable blue item, not ideal for the specialization
+K.PRIO_UPGRADE_SPEC = 0.50 -- equipment upgrade with the right stats
+K.PRIO_UPGRADE = 0.15      -- item level upgrade only
+K.PRIO_BAG = 0.50          -- bag
+K.PRIO_SPELL = 0.30        -- reward that teaches a skill: book, recipe of one of your professions
+K.READY_BONUS = 0.10       -- quest ready to turn in (quick win, frees the quest log)
 K.QUICKWIN_RADIUS = 250    -- m: turn-in added to the saved Roadbook if it is next to a step
 
 -- Armor (subclasses) and weapons usable per class (Classic). Mail / plate from level 40.
@@ -2145,14 +2145,29 @@ function Geo.RewardIndex()
   return idx
 end
 
--- Interest of a reward item: share of the level's XP + reason, or 0.
+-- Recipe item (class 9) subclass -> profession skill line (Classic). Subclass 0 = book.
+K.RECIPE_SKILL = { [1] = 165, [2] = 197, [3] = 202, [4] = 164, [5] = 185, [6] = 171, [7] = 129, [8] = 333, [9] = 356 }
+
+-- Reward that teaches a skill: a book, or a recipe of one of the character's professions.
+-- (QuestieDB's "teachesSpell" field is empty in the Forever database: the item class is used.)
+function Geo.TeachesSkill(classID, subclassID)
+  if classID ~= 9 then return false end
+  if subclassID == 0 then return true end
+  local line = K.RECIPE_SKILL[subclassID]
+  local skills = PlayerSkills()
+  return line and skills[line] ~= nil or false
+end
+
+-- Interest of a reward item: share of an average quest's XP + reason, or 0.
 function Geo.ItemInterest(itemId, plevel)
   local name, link, quality, ilvl, _, _, _, _, equipLoc, _, _, classID, subclassID = GetItemInfoCompat(itemId)
   if not name then
     if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemId) end
     return 0
   end
-  if QGet(QDB.Item, itemId, "teachesSpell") then return K.PRIO_SPELL, name .. L[" (teaches a spell)"] end
+  if QGet(QDB.Item, itemId, "teachesSpell") or Geo.TeachesSkill(classID, subclassID) then
+    return K.PRIO_SPELL, name .. L[" (teaches a skill)"]
+  end
   if equipLoc == "INVTYPE_BAG" then return K.PRIO_BAG, name .. L[" (bag)"] end
   local slots = SLOTS[equipLoc]
   if not slots then return 0 end
@@ -2254,13 +2269,23 @@ function Geo.RecordLater(task)
   Geo.laterList[#Geo.laterList + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
 end
 
+-- XP of an average quest among the Roadbook candidates (set by BuildTasks), the unit of priorities.
+function Geo.AverageXP()
+  return Geo.avgXP or K.MAX_LEVEL_UNIT
+end
+
 function Geo.Priority(task, plevel, isClass)
-  local unit = Geo.XPNeeded(plevel) or K.MAX_LEVEL_UNIT
   if plevel < Geo.MaxLevel() then task.later = Geo.LaterReason(task.id, plevel) end
-  local prio, tags = 0, {}
+  local share, tags = 0, {}
   if isClass then
-    prio = prio + K.PRIO_CLASS
+    share = share + K.PRIO_CLASS
     tags[#tags + 1] = L["class quest"]
+  else
+    local chain = ChainInfo(task.id, plevel, TrivialRange())
+    if chain and chain.hasClass then
+      share = share + K.PRIO_CLASS
+      tags[#tags + 1] = L["unlocks a class quest"]
+    end
   end
   local best, why = 0, nil
   for _, itemId in ipairs(Geo.RewardIndex()[task.id] or {}) do
@@ -2268,22 +2293,17 @@ function Geo.Priority(task, plevel, isClass)
     if v > best then best, why = v, r end
   end
   if best > 0 then
-    prio = prio + best
+    share = share + best
     tags[#tags + 1] = L["reward: "] .. why
   end
-  if not isClass then
-    local chain = ChainInfo(task.id, plevel, TrivialRange())
-    if chain and chain.hasClass then
-      prio = prio + K.PRIO_UNLOCK_CLASS
-      tags[#tags + 1] = L["unlocks a class quest"]
-    end
-  end
-  task.prio = prio * unit
+  task.share = share
+  task.prio = share * Geo.AverageXP()
   task.tags = #tags > 0 and tags or nil
 end
 
 local function BuildTasks(pos, plevel)
   local tasks, skipped = {}, 0
+  Geo.avgXP = nil -- computed below from the candidates
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   for _, q in ipairs(e and e.quests or {}) do
     local xp = q.xp or DBXP(q.id, plevel) or 0
@@ -2309,12 +2329,12 @@ local function BuildTasks(pos, plevel)
         Geo.Priority(task, plevel, (q.zone == UnitClass("player")) or (m and IsClassMeta(m)) or false)
         if ready then
           task.later = nil -- the objective is done: turn the quest in now
-          task.prio = (task.prio or 0) + K.READY_BONUS * (Geo.XPNeeded(plevel) or K.MAX_LEVEL_UNIT)
+          task.share = (task.share or 0) + K.READY_BONUS
           task.quick = true
         end
         if task.later then
           Geo.RecordLater(task)
-        elseif not atMax or (task.prio or 0) > 0 then
+        elseif not atMax or (task.share or 0) > 0 then
           tasks[#tasks + 1] = task
         end
       else
@@ -2341,6 +2361,13 @@ local function BuildTasks(pos, plevel)
     if task then tasks[#tasks + 1] = task end
     if i % 10 == 0 then Geo.Yield() end
   end
+  -- Unit of the priorities: XP of an average candidate quest (quest + monsters).
+  local sum, n = 0, 0
+  for _, task in ipairs(tasks) do
+    if (task.value or 0) > 0 then sum, n = sum + task.value, n + 1 end
+  end
+  Geo.avgXP = (n > 0 and plevel < Geo.MaxLevel()) and sum / n or K.MAX_LEVEL_UNIT
+  for _, task in ipairs(tasks) do task.prio = (task.share or 0) * Geo.avgXP end
   return tasks, skipped
 end
 
@@ -5420,18 +5447,16 @@ end
 -- Settings: Roadbook priority and estimate parameters
 ---------------------------------------------------------------------------
 K.PARAMS = {
-  { section = L["Priority bonuses (in % of your level's XP, added to the quest XP when choosing it)"] },
-  { key = "PRIO_CLASS", label = L["Class quest"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "PRIO_UNLOCK_CLASS", label = L["Opens a chain leading to a class quest"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "PRIO_ITEM_SPEC", label = L["Blue reward suited to your spec"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "PRIO_ITEM_BLUE", label = L["Blue reward, off-spec"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "PRIO_UPGRADE_SPEC", label = L["Upgrade with the right stats"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "PRIO_UPGRADE", label = L["Upgrade (item level only)"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "PRIO_SPELL", label = L["Reward that teaches a spell"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "PRIO_BAG", label = L["Reward: bag"], pct = true, min = 0, max = 1, step = 0.01 },
-  { key = "READY_BONUS", label = L["Quest ready to turn in"], pct = true, min = 0, max = 0.5, step = 0.01 },
-  { section = L["Look-ahead (quest chains and expected level)"] },
-  { key = "LOOKAHEAD_WEIGHT", label = L["Weight of what a quest unlocks"], pct = true, min = 0, max = 1, step = 0.05 },
+  { section = L["Priority bonuses (100 % = as if the quest gave the XP of one more average Roadbook quest)"] },
+  { key = "PRIO_CLASS", label = L["Class quest (or chain leading to one)"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "PRIO_ITEM_SPEC", label = L["Blue reward suited to your spec"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "PRIO_ITEM_BLUE", label = L["Blue reward, off-spec"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "PRIO_UPGRADE_SPEC", label = L["Upgrade with the right stats"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "PRIO_UPGRADE", label = L["Upgrade (item level only)"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "PRIO_SPELL", label = L["Reward that teaches a skill"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "PRIO_BAG", label = L["Reward: bag"], pct = true, min = 0, max = 1, step = 0.05 },
+  { key = "READY_BONUS", label = L["Quest ready to turn in"], pct = true, min = 0, max = 1, step = 0.05 },
+  { section = L["Difficulty"] },
   { key = "MAX_LEVEL_GAP", label = L["Max quest level above yours (difficulty)"], unit = L[" lvl"], min = 0, max = 10, step = 1 },
   { section = L["Time estimates"] },
   { key = "MOB_TIME", label = L["Time per monster"], unit = L[" s"], min = 10, max = 90, step = 5 },
@@ -5442,8 +5467,16 @@ for _, d in ipairs(K.PARAMS) do
 end
 
 -- Applies the saved values (or the defaults).
+K.PARAMS_SCALE = 2 -- 2: priorities in share of an average quest (before: share of the level's XP)
 function Geo.ApplyParams()
-  local saved = Settings().params or {}
+  local st = Settings()
+  if st.params and st.paramsScale ~= K.PARAMS_SCALE then
+    -- Values saved with the former scale make no sense anymore: back to the defaults.
+    for _, k in ipairs({ "PRIO_CLASS", "PRIO_UNLOCK_CLASS", "PRIO_ITEM_SPEC", "PRIO_ITEM_BLUE", "PRIO_UPGRADE_SPEC",
+      "PRIO_UPGRADE", "PRIO_SPELL", "PRIO_BAG", "READY_BONUS", "LOOKAHEAD_WEIGHT" }) do st.params[k] = nil end
+  end
+  st.paramsScale = K.PARAMS_SCALE
+  local saved = st.params or {}
   for _, d in ipairs(K.PARAMS) do
     if d.key then
       local v = saved[d.key]
@@ -5613,8 +5646,8 @@ function Geo.CreateSettingsPanel(f)
   center:SetText(L["Center horizontally"])
   center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   local boxes = {
-    Geo.SettingsBox(rb, L["Priorities (bonus in % of your level's XP)"], 8, -114, 776, 262),
-    Geo.SettingsBox(rb, L["Look-ahead"], 8, -382, 384, 112),
+    Geo.SettingsBox(rb, L["Priorities (100 % = adds the XP of an average Roadbook quest)"], 8, -114, 776, 262),
+    Geo.SettingsBox(rb, L["Difficulty"], 8, -382, 384, 112),
     Geo.SettingsBox(rb, L["Time estimates"], 400, -382, 384, 112),
   }
   local sec, n = 0, 0
