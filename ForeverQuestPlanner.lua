@@ -5204,7 +5204,7 @@ function Geo.CreateSettingsPanel(f)
   end
   local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   reset:SetSize(170, 24)
-  reset:SetPoint("BOTTOMLEFT", 16, 14)
+  reset:SetPoint("BOTTOMLEFT", 16, 26)
   reset:SetText(L["Defaults"])
   reset:SetScript("OnClick", function()
     Settings().params = nil
@@ -5237,8 +5237,47 @@ function Geo.AddVersionFooter(frame)
   local footer = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMRIGHT", -14, 8)
   footer:SetText("ForeverQuestPlanner v" .. ((ok and version) or "?"))
+  -- GitHub link, bottom left: the game cannot open URLs, so a click shows it ready to copy.
+  local link = CreateFrame("Button", nil, frame)
+  link.text = link:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  link.text:SetPoint("LEFT")
+  link.text:SetText(K.REPO_URL)
+  link:SetSize((link.text:GetStringWidth() or 200) + 4, 14)
+  link:SetPoint("BOTTOMLEFT", 14, 6)
+  link:SetScript("OnEnter", function(self)
+    self.text:SetTextColor(1, 0.82, 0)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(L["Click to copy the link"])
+    GameTooltip:Show()
+  end)
+  link:SetScript("OnLeave", function(self)
+    self.text:SetTextColor(0.5, 0.5, 0.5)
+    GameTooltip:Hide()
+  end)
+  link:SetScript("OnClick", function() StaticPopup_Show("FQP_COPY_URL") end)
   return footer
 end
+
+K.REPO_URL = "https://github.com/bplaquevent/ForeverQuestPlanner"
+StaticPopupDialogs["FQP_COPY_URL"] = {
+  text = L["Copy the link with Ctrl+C:"],
+  button1 = OKAY or "OK",
+  hasEditBox = true,
+  editBoxWidth = 320,
+  OnShow = function(self)
+    local eb = self.editBox or self.EditBox
+    if eb then
+      eb:SetText(K.REPO_URL)
+      eb:HighlightText()
+      eb:SetFocus()
+    end
+  end,
+  EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+  EditBoxOnEnterPressed = function(self) self:GetParent():Hide() end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+}
 
 -- Standalone settings window (movable, closed with Escape or the close button).
 function Geo.ToggleSettings()
