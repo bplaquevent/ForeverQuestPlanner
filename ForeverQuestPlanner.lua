@@ -5295,25 +5295,32 @@ function CP.CreateCheckpointButton()
   local pos = Settings().checkpointPos
   if pos then b:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3]) else b:SetPoint("CENTER", UIParent, "CENTER", 0, -220) end
   b:SetScript("OnDragStart", function(self)
-    if not Settings().checkpointLocked then self:StartMoving() end -- "Lock the objective" option
+    if IsShiftKeyDown and IsShiftKeyDown() then self:StartMoving() end -- Shift + drag: move the button
   end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
+    self.dragEnd = GetTime and GetTime() or 0 -- the release of a Shift-drag must not count as a Shift-click
     local point, _, _, x, y = self:GetPoint()
     Settings().checkpointPos = { point, x, y }
   end)
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   b:SetScript("OnClick", function(_, button)
+    if b.dragEnd and GetTime and GetTime() - b.dragEnd < 0.3 then return end
     if button == "RightButton" then
-      if CP.OpenWindow then CP.OpenWindow("xp") end -- right-click: window opened on the Roadbook
+      if IsShiftKeyDown and IsShiftKeyDown() then
+        CP.CenterCheckpointButton() -- Shift-right-click: center the button horizontally
+      elseif CP.OpenWindow then
+        CP.OpenWindow("xp") -- right-click: window opened on the Roadbook
+      end
     else
       local alt = IsAltKeyDown and IsAltKeyDown()
       local ctrl = IsControlKeyDown and IsControlKeyDown()
+      local shift = IsShiftKeyDown and IsShiftKeyDown()
       if alt and ctrl then
         CP.RemoveCurrentStep()   -- Ctrl-Alt-click: remove the step from the Roadbook
       elseif alt then
         CP.Validate(true)        -- Alt-click: compute a new Roadbook
-      elseif IsShiftKeyDown and IsShiftKeyDown() then
+      elseif shift then
         CP.StopTracking()        -- Shift-click: stop following the objective
       else
         CP.Validate(false)       -- click: follow the objective
@@ -5334,8 +5341,9 @@ function CP.CreateCheckpointButton()
     GameTooltip:AddLine(L["Shift-click: stop following the objective."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Alt-click: compute a new Roadbook."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Ctrl-Alt-click: remove the step from the Roadbook (a quest: the whole quest, then a new Roadbook)."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Shift-right-click: center the button horizontally."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Right-click: open the Roadbook."], 0.7, 0.7, 0.7, true)
-    if not Settings().checkpointLocked then GameTooltip:AddLine(L["Drag: move the button."], 0.7, 0.7, 0.7, true) end
+    GameTooltip:AddLine(L["Shift-drag: move the button."], 0.7, 0.7, 0.7, true)
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function(self)
@@ -5962,13 +5970,10 @@ function Geo.CreateSettingsPanel(f)
     UpdateRestore()
     CP.Recompute()
   end)
-  -- Objective button: shown, locked, compass, centered.
+  -- Objective button: shown, compass, centered.
   local obj = Geo.SettingsBox(rb, L["Objective"], 8, -58, 776, 62)
   Geo.SettingsCheck(obj, L["Show"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
-  Geo.SettingsCheck(obj, L["Lock"], 220, -28,
-    function() return Settings().checkpointLocked end,
-    function(v) Settings().checkpointLocked = v or nil end, panel)
-  Geo.SettingsCheck(obj, L["Compass"], 380, -28,
+  Geo.SettingsCheck(obj, L["Compass"], 220, -28,
     function() return Settings().compass ~= false end,
     function(v)
       if v then Settings().compass = nil else Settings().compass = false end -- shown by default
