@@ -83,8 +83,10 @@ K.LOOKAHEAD_LEVELS = 5
 
 local CLASS_SORTS = { [-395] = true, [-372] = true, [-263] = true, [-262] = true, [-261] = true, [-162] = true,
   [-161] = true, [-141] = true, [-82] = true, [-81] = true, [-61] = true }
+-- Profession quest categories; -666 = "Camping", the crafting quests of Forever ("Camping 101: …").
 local PROF_SORTS = { [-398] = true, [-377] = true, [-373] = true, [-371] = true, [-324] = true, [-304] = true,
-  [-264] = true, [-201] = true, [-182] = true, [-181] = true, [-121] = true, [-101] = true, [-24] = true }
+  [-264] = true, [-201] = true, [-182] = true, [-181] = true, [-121] = true, [-101] = true, [-24] = true,
+  [-666] = true }
 local EVENT_SORTS = { [-1000] = true, [-404] = true, [-402] = true, [-378] = true, [-376] = true, [-375] = true,
   [-374] = true, [-370] = true, [-369] = true, [-366] = true, [-364] = true, [-41] = true, [-22] = true,
   [-21] = true, [-368] = true, [-365] = true, [-241] = true }
