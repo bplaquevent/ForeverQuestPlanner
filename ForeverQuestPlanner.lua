@@ -5357,13 +5357,18 @@ function Geo.CreateSettingsPanel(f)
 end
 
 -- "ForeverQuestPlanner vX.Y.Z" footer at the bottom of a window (version read from the .toc).
-function Geo.AddVersionFooter(frame)
+-- Addon version, read from the .toc.
+function Geo.Version()
   local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
   local ok, version = false, nil
   if getMeta then ok, version = pcall(getMeta, "ForeverQuestPlanner", "Version") end
+  return (ok and version) or "?"
+end
+
+function Geo.AddVersionFooter(frame)
   local footer = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMRIGHT", -14, 8)
-  footer:SetText("ForeverQuestPlanner v" .. ((ok and version) or "?"))
+  footer:SetText("ForeverQuestPlanner v" .. Geo.Version())
   -- GitHub link, bottom left: the game cannot open URLs, so a click shows it ready to copy.
   local link = CreateFrame("Button", nil, frame)
   link.text = link:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -5736,7 +5741,7 @@ local function CreateMinimapButton()
 
   b:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:AddLine("Forever Quest Planner")
+    GameTooltip:AddDoubleLine("Forever Quest Planner", "v" .. Geo.Version(), 1, 0.82, 0, 0.6, 0.6, 0.6)
     GameTooltip:AddLine(L["|cffffff00Click|r: open / close the window"], 1, 1, 1)
     GameTooltip:AddLine(L["|cffffff00Right-click|r: settings"], 1, 1, 1)
     GameTooltip:AddLine(L["|cffffff00Drag|r: move the icon"], 1, 1, 1)
