@@ -5334,6 +5334,13 @@ function CP.RefreshButton()
   b.compassTarget = CP.CompassTarget()
 end
 
+-- Commands of the Objective button, shown in its tooltip (two per line).
+K.OBJECTIVE_COMMANDS = {
+  { "Click: follow", "Ctrl-click: stop" },
+  { "Shift-click: chat link", "Alt-click: new Roadbook" },
+  { "Ctrl-Alt-click: remove the step", "Right-click: Roadbook" },
+  { "Shift-right-click: center", "Shift-drag: move" },
+}
 K.OBJECTIVE_TEXT_X = 59       -- text of the Objective button, right of the compass square
 K.OBJECTIVE_MAX_WIDTH = 380   -- widest Objective button (beyond, one information per line)
 
@@ -5561,15 +5568,11 @@ function CP.CreateCheckpointButton()
     else
       GameTooltip:AddLine(L["No Roadbook step has the focus."], 1, 1, 1, true)
     end
-    GameTooltip:AddLine(L["The focus moves to the next step on its own when this one is done."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Click: follow the objective (step to do, pin, compass)."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Ctrl-click: stop following the objective."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Shift-click: link of the quest in the chat."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Alt-click: compute a new Roadbook."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Ctrl-Alt-click: remove the step from the Roadbook (a quest: the whole quest, then a new Roadbook)."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Shift-right-click: center the button horizontally."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Right-click: open the Roadbook."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Shift-drag: move the button."], 0.7, 0.7, 0.7, true)
+    -- Commands: compact, two per line, dimmed (the step detail stays the main content).
+    GameTooltip:AddLine(" ")
+    for _, pair in ipairs(K.OBJECTIVE_COMMANDS) do
+      GameTooltip:AddDoubleLine(L[pair[1]], L[pair[2]], 0.55, 0.55, 0.55, 0.55, 0.55, 0.55)
+    end
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function(self)
