@@ -5281,7 +5281,7 @@ function Geo.CreateSettingsPanel(f)
   panel.sliders, panel.updaters = {}, {}
 
   -- General
-  local gen = Geo.SettingsBox(panel, L["General"], 14, -32, 792, 62)
+  local gen = Geo.SettingsBox(panel, L["General"], 14, -32, 390, 62)
   Geo.SettingsCheck(gen, L["Minimap icon"], 10, -28,
     function() return not Settings().hideMinimap end,
     function(v)
@@ -5289,10 +5289,12 @@ function Geo.CreateSettingsPanel(f)
       local mb = _G["ForeverQuestPlannerMinimapButton"]
       if mb then mb:SetShown(v) end
     end, panel)
-  Geo.SettingsCheck(gen, L["Show objective"], 250, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
-  local keep = CreateFrame("Button", nil, gen, "UIPanelButtonTemplate")
+
+  -- Quest log
+  local journal = Geo.SettingsBox(panel, L["Quest log"], 416, -32, 390, 62)
+  local keep = CreateFrame("Button", nil, journal, "UIPanelButtonTemplate")
   keep:SetSize(240, 22)
-  keep:SetPoint("TOPRIGHT", -12, -28)
+  keep:SetPoint("TOPLEFT", 10, -28)
   keep:SetText(L["Clear \"Keep\" quests"])
   keep:SetScript("OnClick", function()
     Settings().keep = {}
@@ -5300,9 +5302,10 @@ function Geo.CreateSettingsPanel(f)
     if Refresh then Refresh() end
   end)
 
-  -- Roadbook: hearthstone + recalculate, then priorities, look-ahead and time estimates.
+  -- Roadbook: objective button, hearthstone, recalculate, then priorities, look-ahead and time estimates.
   local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 446)
-  Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -28,
+  Geo.SettingsCheck(rb, L["Show objective"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
+  Geo.SettingsCheck(rb, L["Use the hearthstone"], 250, -28,
     function() return not Settings().noHearth end,
     function(v)
       Settings().noHearth = not v or nil
