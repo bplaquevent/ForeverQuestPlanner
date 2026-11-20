@@ -5302,7 +5302,7 @@ function Geo.CreateSettingsPanel(f)
     if Refresh then Refresh() end
   end)
 
-  -- Roadbook: objective button, hearthstone, recalculate, then priorities, look-ahead and time estimates.
+  -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
   local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 446)
   Geo.SettingsCheck(rb, L["Show objective"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
   Geo.SettingsCheck(rb, L["Use the hearthstone"], 250, -28,
@@ -5311,11 +5311,6 @@ function Geo.CreateSettingsPanel(f)
       Settings().noHearth = not v or nil
       Geo.planCache = nil
     end, panel)
-  local recompute = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
-  recompute:SetSize(200, 22)
-  recompute:SetPoint("TOPRIGHT", -12, -28)
-  recompute:SetText(L["Recalculate"])
-  recompute:SetScript("OnClick", function() CP.Recompute() end)
   local boxes = {
     Geo.SettingsBox(rb, L["Priorities (bonus in % of your level's XP)"], 8, -58, 776, 262),
     Geo.SettingsBox(rb, L["Look-ahead"], 8, -326, 384, 112),
