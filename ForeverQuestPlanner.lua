@@ -323,6 +323,13 @@ local function TurnInText(id)
   return (GiverText(QGet(QDB.Quest, id, "finishedBy")))
 end
 
+-- Profession names by skill line id (for missing prerequisites).
+K.SKILL_NAMES = {
+  [164] = L["Blacksmithing"], [165] = L["Leatherworking"], [171] = L["Alchemy"], [182] = L["Herbalism"],
+  [185] = L["Cooking"], [186] = L["Mining"], [197] = L["Tailoring"], [202] = L["Engineering"],
+  [333] = L["Enchanting"], [356] = L["Fishing"], [393] = L["Skinning"], [129] = L["First Aid"],
+  [762] = L["Riding"],
+}
 -- Profession skill line ids.
 local PROFESSION_SKILLS = {
   [164] = true, [165] = true, [171] = true, [182] = true, [185] = true, [186] = true, [197] = true,
@@ -808,10 +815,15 @@ end
 local function CheckAvailable(id, ctx)
   local Q = QDB.Quest
   local req = QGet(Q, id, "requiredLevel") or 0
+  local lvl = QGet(Q, id, "questLevel") or 0
+  -- No required level in the data: assume the usual Classic rule (quest level - 5).
+  if req <= 0 and lvl > 0 then req = math.max(1, lvl - 5) end
   -- Quests slightly too high kept for the Roadbook (unlocked by the expected level).
   if req > ctx.plevel + (ctx.lookahead or 0) then return nil end
   local function done(q) return IsCompleted(q) or (ctx.done and ctx.done[q]) or false end
-  local lvl = QGet(Q, id, "questLevel") or 0
+  -- Missing prerequisites (quests, professions): the quest is listed with what is missing.
+  local missing = { texts = {}, quests = {} }
+  local function questName(q) return string.format(L["\"%s\""], QGet(Q, q, "name") or ("#" .. q)) end
   if lvl < 0 then lvl = ctx.plevel end -- quest at the player's level
   local lowLevel = lvl > 0 and lvl < ctx.plevel - ctx.range
   local maxL = QGet(Q, id, "requiredMaxLevel")
@@ -828,13 +840,23 @@ local function CheckAvailable(id, ctx)
 
   local group = QGet(Q, id, "preQuestGroup")
   if type(group) == "table" then
-    for _, p in ipairs(group) do if not done(p) then return nil end end
+    for _, p in ipairs(group) do
+      if not done(p) then
+        missing.texts[#missing.texts + 1] = questName(p)
+        missing.quests[#missing.quests + 1] = { p }
+      end
+    end
   end
   local single = QGet(Q, id, "preQuestSingle")
   if type(single) == "table" and #single > 0 then
     local ok = false
     for _, p in ipairs(single) do if done(p) then ok = true break end end
-    if not ok then return nil end
+    if not ok then
+      local names = {}
+      for _, p in ipairs(single) do names[#names + 1] = questName(p) end
+      missing.texts[#missing.texts + 1] = table.concat(names, L[" or "])
+      missing.quests[#missing.quests + 1] = single
+    end
   end
   local excl = QGet(Q, id, "exclusiveTo")
   if type(excl) == "table" then
@@ -858,14 +880,17 @@ local function CheckAvailable(id, ctx)
   local skill = QGet(Q, id, "requiredSkill")
   if type(skill) == "table" and ctx.skillsKnown then
     local have = ctx.skills[skill[1]]
-    if not have or have < (skill[2] or 0) then return nil end
+    if not have or have < (skill[2] or 0) then
+      missing.texts[#missing.texts + 1] = (K.SKILL_NAMES[skill[1]] or (L["profession"] .. " " .. skill[1])) ..
+        ((skill[2] or 0) > 0 and (" " .. skill[2]) or "")
+    end
   end
   if ctx.skillsKnown then
     -- Specialization: a profession id (the profession is required) or a specialization spell.
     local spec = QGet(Q, id, "requiredSpecialization")
     if spec and spec > 0 then
       if PROFESSION_SKILLS[spec] then
-        if not ctx.skills[spec] then return nil end
+        if not ctx.skills[spec] then missing.texts[#missing.texts + 1] = K.SKILL_NAMES[spec] or L["profession"] end
       elseif IsSpellKnown and not IsSpellKnown(spec) then
         return nil
       end
@@ -880,7 +905,15 @@ local function CheckAvailable(id, ctx)
           if ctx.skills[pair[1]] then hasOne = true end
         end
       end
-      if needOne and not hasOne then return nil end
+      if needOne and not hasOne then
+        local names = {}
+        for _, pair in ipairs(ranks) do
+          if type(pair) == "table" and pair[1] and (pair[2] or 0) > 0 then
+            names[#names + 1] = (K.SKILL_NAMES[pair[1]] or tostring(pair[1])) .. " " .. pair[2]
+          end
+        end
+        missing.texts[#missing.texts + 1] = table.concat(names, L[" or "])
+      end
     end
   end
 
@@ -908,6 +941,7 @@ local function CheckAvailable(id, ctx)
     isProf = m and IsProfMeta(m) or false,
     opensChain = m and #NextQuests(m) > 0 or false,
     repMissing = MissingReputation(QGet(Q, id, "requiredMinRep")),
+    missing = #missing.texts > 0 and missing or nil,
     repeatable = HasBit(QGet(Q, id, "specialFlags") or 0, 1),
     lowLevel = lowLevel,
   }
@@ -942,6 +976,23 @@ local function StartScan()
       C_Timer.After(0, step)
     else
       scan.running, scan.dirty = false, false
+      -- Quests with missing quest prerequisites are kept only if each prerequisite can be done
+      -- now (in the log or available): "do this first" hints, not whole distant chains.
+      local reachable = {}
+      for _, en in ipairs(results) do if not en.missing then reachable[en.id] = true end end
+      local kept = {}
+      for _, en in ipairs(results) do
+        local ok = true
+        if en.missing then
+          for _, anyOf in ipairs(en.missing.quests) do
+            local one = false
+            for _, q in ipairs(anyOf) do if reachable[q] or IsInLog(q) then one = true break end end
+            if not one then ok = false break end
+          end
+        end
+        if ok then kept[#kept + 1] = en end
+      end
+      results = kept
       scan.entries = results
       if Refresh then Refresh() end
     end
@@ -1582,7 +1633,7 @@ local function NearItems(radius)
 
   local showLow = Settings().showLowLevel
   for _, en in ipairs(scan.entries or {}) do
-    if (showLow or not en.lowLevel) and not en.future then
+    if (showLow or not en.lowLevel) and not en.future and not en.missing then
       local p, d = Nearest(StartPoints(en.id), pos)
       if d then
         -- Quest giver location: the nearest point (an NPC may have several locations).
@@ -1911,7 +1962,7 @@ function Geo.Followers(task, ctx, plevel)
     if not seen[b] then
       seen[b] = true
       local ok, en = pcall(CheckAvailable, b, c)
-      if ok and en and not en.repMissing and not en.repeatable
+      if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
         and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + 2 then
         local f = Geo.TakeTask(en, plevel, from)
@@ -2197,7 +2248,7 @@ local function BuildTasks(pos, plevel)
   -- Quests to pick up (including slightly too high ones for now): nearest first.
   local near = {}
   for _, en in ipairs(scan.entries or {}) do
-    if not en.lowLevel and not en.repMissing and not en.repeatable
+    if not en.lowLevel and not en.repMissing and not en.missing and not en.repeatable
       and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
       and (en.level or 0) <= math.max(plevel, en.reqLevel or 0) + 2 then
       local p, d = Nearest(StartPoints(en.id), pos)
@@ -3927,6 +3978,9 @@ local function RenderAvailable()
         (#tags > 0 and Color("80c0ff", "  " .. table.concat(tags, ", ")) or "")
       local text = "  " .. StateIcons(e.id) .. e.name .. (e.isProf and "" or LevelWarning(e.level)) .. "\n       " .. info
       if e.repMissing then text = text .. "\n       " .. Color("ff6060", e.repMissing) end
+      if e.missing then
+        text = text .. "\n       " .. Color("ff6060", L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", "))
+      end
       if e.starter then text = text .. "\n       " .. Color("bbbbbb", L["Given by: "] .. e.starter) end
       local p = GeoReady() and Nearest(StartPoints(e.id), pos) or nil
       items[#items + 1] = { text = text, b2 = PinButton(p, e.name, L["pick up the quest"], e.id) }
