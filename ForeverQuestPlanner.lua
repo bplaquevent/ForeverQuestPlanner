@@ -4609,6 +4609,19 @@ function CP.RefreshButton()
   b:SetWidth(math.min(math.max(47 + w + 14, 214), 380))
 end
 
+-- Centers the Objective button horizontally on the screen, keeping its height.
+function CP.CenterCheckpointButton()
+  CP.CreateCheckpointButton()
+  local b = CP.checkpointButton
+  if not b then return end
+  local _, cy = b:GetCenter()
+  if not cy then return end
+  local y = cy * b:GetEffectiveScale() / UIParent:GetEffectiveScale() - UIParent:GetHeight() / 2
+  b:ClearAllPoints()
+  b:SetPoint("CENTER", UIParent, "CENTER", 0, y)
+  Settings().checkpointPos = { "CENTER", 0, y }
+end
+
 function CP.UpdateCheckpointButton()
   if not CP.checkpointButton then return end
   CP.checkpointButton:SetShown(CP.CHECKPOINT_TOGGLE.get())
@@ -5305,6 +5318,11 @@ function Geo.CreateSettingsPanel(f)
   -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
   local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 446)
   Geo.SettingsCheck(rb, L["Show objective"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
+  local center = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
+  center:SetSize(260, 22)
+  center:SetPoint("TOPRIGHT", -12, -28)
+  center:SetText(L["Center the objective horizontally"])
+  center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   Geo.SettingsCheck(rb, L["Use the hearthstone"], 250, -28,
     function() return not Settings().noHearth end,
     function(v)
