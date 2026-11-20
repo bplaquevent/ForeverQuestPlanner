@@ -4611,6 +4611,49 @@ function CP.RefreshButton()
   -- Width fitted to the text, within reasonable limits.
   local w = math.max(b.title:GetStringWidth() or 0, b.sub:GetStringWidth() or 0)
   b:SetWidth(math.min(math.max(47 + w + 14, 214), 380))
+  b.compassTarget = CP.CompassTarget()
+end
+
+-- Compass target, in world coordinates: the active pin, otherwise the focused step.
+function CP.CompassTarget()
+  if Settings().compass == false then return nil end
+  local pin = ActivePin()
+  if pin and pin.ui and pin.x and C_Map.GetWorldPosFromMapPos and CreateVector2D then
+    local ok, cont, w = pcall(C_Map.GetWorldPosFromMapPos, pin.ui, CreateVector2D(pin.x, pin.y))
+    if ok and cont and w then
+      local x, y = w:GetXY()
+      return { c = cont, x = x, y = y }
+    end
+  end
+  local s = CP.checkpointButton and CP.checkpointButton.current
+  if s and s.p and s.p.c and s.p.x then return s.p end
+  return nil
+end
+
+-- Rotates the arrow every frame. World coordinates: x towards the north, y towards
+-- the west; GetPlayerFacing: 0 = north, counterclockwise, like SetRotation.
+function CP.UpdateCompass(b)
+  local t = b.compassTarget
+  local me = t and PlayerPos()
+  local facing = me and GetPlayerFacing and GetPlayerFacing()
+  local d = facing and Dist(me, t) -- nil on another continent or in an instance
+  if not d then
+    b.arrow:Hide()
+    b.dist:Hide()
+    b.icon:Show()
+    return
+  end
+  b.icon:Hide()
+  b.arrow:Show()
+  b.dist:Show()
+  b.dist:SetText(d < 1000 and string.format(L["%d yd"], d) or string.format(L["%.1f kyd"], d / 1000))
+  if d < 5 then
+    b.arrow:SetRotation(0)
+    b.arrow:SetVertexColor(0.25, 1, 0.25) -- arrived: green
+  else
+    b.arrow:SetRotation(math.atan2(t.y - me.y, t.x - me.x) - facing)
+    b.arrow:SetVertexColor(1, 0.82, 0)
+  end
 end
 
 -- Centers the Objective button horizontally on the screen, keeping its height.
@@ -4667,6 +4710,27 @@ function CP.CreateCheckpointButton()
   icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
   if icon.SetTexCoord then icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
   b.icon = icon
+  -- Compass: arrow pointing at the active marker, with the distance below.
+  local arrow = b:CreateTexture(nil, "OVERLAY")
+  arrow:SetSize(30, 30)
+  arrow:SetPoint("CENTER", frameTex, "CENTER", 0, 3)
+  arrow:SetTexture("Interface\\Minimap\\MinimapArrow")
+  arrow:SetVertexColor(1, 0.82, 0)
+  arrow:Hide()
+  local dist = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  dist:SetPoint("BOTTOM", frameTex, "BOTTOM", 0, 1)
+  dist:SetScale(0.8)
+  dist:Hide()
+  b.arrow, b.dist = arrow, dist
+  local elapsed = 1
+  b:SetScript("OnUpdate", function(_, e)
+    elapsed = elapsed + e
+    if elapsed >= 0.5 then -- target and player zone: twice per second is enough
+      elapsed = 0
+      b.compassTarget = CP.CompassTarget()
+    end
+    CP.UpdateCompass(b)
+  end)
   -- Golden title + gray subtitle.
   local title = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   title:SetPoint("BOTTOMLEFT", b, "LEFT", 47, 1)
@@ -5329,12 +5393,19 @@ function Geo.CreateSettingsPanel(f)
       Settings().noHearth = not v or nil
       Geo.planCache = nil
     end, panel)
-  -- Objective button: shown, locked, centered.
+  -- Objective button: shown, locked, compass, centered.
   local obj = Geo.SettingsBox(rb, L["Objective"], 8, -52, 776, 56)
   Geo.SettingsCheck(obj, L["Show"], 10, -26, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
   Geo.SettingsCheck(obj, L["Lock"], 220, -26,
     function() return Settings().checkpointLocked end,
     function(v) Settings().checkpointLocked = v or nil end, panel)
+  Geo.SettingsCheck(obj, L["Compass"], 380, -26,
+    function() return Settings().compass ~= false end,
+    function(v)
+      if v then Settings().compass = nil else Settings().compass = false end -- shown by default
+      local b = CP.checkpointButton
+      if b then b.compassTarget = CP.CompassTarget() end
+    end, panel)
   local center = CreateFrame("Button", nil, obj, "UIPanelButtonTemplate")
   center:SetSize(260, 22)
   center:SetPoint("TOPRIGHT", -10, -26)
