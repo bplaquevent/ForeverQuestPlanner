@@ -81,6 +81,7 @@ K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your le
 -- examined, but a quest only enters the Roadbook from the step where the expected level reaches its
 -- required level (see Geo.StartIndex).
 K.LOOKAHEAD_LEVELS = 5
+K.MAX_QUESTS = 40 -- quest log size on the Forever server
 
 local CLASS_SORTS = { [-395] = true, [-372] = true, [-263] = true, [-262] = true, [-261] = true, [-162] = true,
   [-161] = true, [-141] = true, [-82] = true, [-81] = true, [-61] = true }
@@ -669,6 +670,7 @@ local function Analyze()
   local result = { abandon = {}, turnIn = {}, groups = {}, later = {}, dungeons = {}, kept = 0 }
   local byDungeon = {}
   if not e then return result end
+  result.count = #e.quests
 
   local plevel = UnitLevel("player")
   local className = UnitClass("player")
