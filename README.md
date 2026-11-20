@@ -31,7 +31,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 ### Other tabs
 - **Around me**: quests to turn in, steps in progress and available quests within 200 m, 500 m, 1500 m or the whole zone.
 - **Quest log**: quests by category, tracking, pins, abandon recommendations (class, profession, XP, items, chain, money), text export.
-- **Available**: available quests by zone, dungeons, class and professions.
+- **Available**: quests you can pick up at your level, by zone, dungeons, class and professions; missing prerequisites (previous quest, profession, reputation) are listed.
 - Search, state filters, collapsible categories.
 - **Settings** (gear icon): priority bonuses, look-ahead, time estimates.
 
