@@ -4321,13 +4321,6 @@ function CP.IsStepFocused(s)
 end
 
 -- The map pin currently sits on this step.
-function CP.IsStepPinned(st)
-  local pin = ActivePin()
-  return pin and st and st.task and st.p and pin.questId == st.task.id and pin.area == st.p.area
-    and pin.label == CP.StepPinLabel(st)
-    and math.abs((pin.mx or -1) - (st.p.mx or -2)) < 0.05 and math.abs((pin.my or -1) - (st.p.my or -2)) < 0.05 or false
-end
-
 function CP.CurrentFocus()
   local s = CP.focused
   if s and CP.IsStepFocused(s) then return s end
@@ -4622,27 +4615,48 @@ end
 
 -- Click on the button: focus the next step only if the current one is done in the
 -- game; Shift-click: skip the current step even if it is not done.
-function CP.ValidateUnsafe(recompute, skip)
+function CP.ValidateUnsafe(recompute)
   if recompute or not Geo.Frozen() then
     CP.Recompute()
     return
   end
   local cur = CP.CurrentFocus()
-  if cur and skip and cur.escort and not CP.StepDone(cur) then
-    local now = GetTime and GetTime() or 0
-    if not (CP.skipConfirm and now - CP.skipConfirm < 5) then
-      CP.skipConfirm = now
-      Print(L["Escort in progress: Shift-click again within 5 s to skip it anyway."])
-      return
-    end
-    CP.skipConfirm = nil
-  end
-  if cur and not skip and not CP.StepDone(cur) then
-    CP.FocusStep(cur) -- put the pin back on the current step
-    Print(L["Step not finished yet: "] .. CP.StepText(cur) .. L[". Shift-click the button to skip it."])
+  if cur and not CP.StepDone(cur) then
+    CP.FocusStep(cur) -- tracking active: the pin is placed on the current step again
+    Print(L["Focus: "] .. CP.StepText(cur))
     return
   end
   if cur then Geo.MarkDone(cur) end
+  CP.FocusNext(false, cur) -- no tracking yet, or step done: first step left to do
+end
+
+-- Shift-click: stops following the objective (focus, addon pin and compass); click resumes it.
+function CP.StopTracking()
+  if not CP.CurrentFocus() then
+    Print(L["No objective tracked."])
+    return
+  end
+  CP.ClearFocus()
+  ClearPin()
+  CP.RefreshButton()
+  Print(L["Objective tracking stopped: click the Objective button to resume it."])
+  if Refresh then Refresh() end
+end
+
+-- Ctrl-Alt-click: removes the current step. A quest step removes the whole quest (confirmation,
+-- then a new Roadbook); any other step (flight, hearthstone…) is skipped.
+function CP.RemoveCurrentStep()
+  local cur = CP.CurrentFocus()
+  if not cur then
+    Print(L["No objective tracked."])
+    return
+  end
+  if cur.task and cur.task.id then
+    CP.AskExclude(cur)
+    return
+  end
+  Print(L["Step skipped: "] .. CP.StepText(cur))
+  Geo.MarkDone(cur)
   CP.FocusNext(false, cur)
 end
 
@@ -4657,10 +4671,7 @@ end
 
 function CP.AskExclude(s)
   local id = s and s.task and s.task.id
-  if not id then
-    Print(L["This step is not a quest: Shift-click to skip it."])
-    return
-  end
+  if not id then return end
   StaticPopup_Show("FQP_EXCLUDE", s.task.title or tostring(id), nil, { id = id, title = s.task.title })
 end
 
@@ -4675,8 +4686,8 @@ StaticPopupDialogs["FQP_EXCLUDE"] = {
   preferredIndex = 3,
 }
 
-function CP.Validate(recompute, skip)
-  local ok, err = xpcall(function() CP.ValidateUnsafe(recompute, skip) end, function(e)
+function CP.Validate(recompute)
+  local ok, err = xpcall(function() CP.ValidateUnsafe(recompute) end, function(e)
     return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
   end)
   if not ok then Print(L["|cffff6060Error while validating the checkpoint|r (copy it to report it):\n"] .. err) end
@@ -4851,7 +4862,7 @@ function CP.RefreshButton()
     b.current = s
   else
     b.title:SetText(L["Objective"])
-    b.sub:SetText(L["No step tracked · click to compute"])
+    b.sub:SetText(L["No objective tracked · click to follow it"])
     b.current = nil
   end
   -- Width fitted to the text, within reasonable limits.
@@ -4863,6 +4874,8 @@ end
 -- Compass target, in world coordinates: the active pin, otherwise the focused step.
 function CP.CompassTarget()
   if Settings().compass == false then return nil end
+  local s = CP.checkpointButton and CP.checkpointButton.current
+  if not s then return nil end -- no objective followed: no compass
   local pin = ActivePin()
   if pin and pin.ui and pin.x and C_Map.GetWorldPosFromMapPos and CreateVector2D then
     local ok, cont, w = pcall(C_Map.GetWorldPosFromMapPos, pin.ui, CreateVector2D(pin.x, pin.y))
@@ -4871,8 +4884,7 @@ function CP.CompassTarget()
       return { c = cont, x = x, y = y }
     end
   end
-  local s = CP.checkpointButton and CP.checkpointButton.current
-  if s and s.p and s.p.c and s.p.x then return s.p end
+  if s.p and s.p.c and s.p.x then return s.p end
   return nil
 end
 
@@ -4988,7 +5000,7 @@ function CP.CreateCheckpointButton()
   sub:SetPoint("RIGHT", b, "RIGHT", -8, 0)
   sub:SetJustifyH("LEFT")
   sub:SetTextColor(0.75, 0.75, 0.75)
-  sub:SetText(L["No step tracked · click to compute"])
+  sub:SetText(L["No objective tracked · click to follow it"])
   title:SetWordWrap(false)
   sub:SetWordWrap(false)
   b.label, b.title, b.sub = L["Objective"], title, sub
@@ -5026,10 +5038,16 @@ function CP.CreateCheckpointButton()
     if button == "RightButton" then
       if CP.OpenWindow then CP.OpenWindow("xp") end -- right-click: window opened on the Roadbook
     else
-      if IsAltKeyDown and IsAltKeyDown() then
-        CP.AskExclude(b.current) -- Alt-click: remove the quest from the Roadbook
+      local alt = IsAltKeyDown and IsAltKeyDown()
+      local ctrl = IsControlKeyDown and IsControlKeyDown()
+      if alt and ctrl then
+        CP.RemoveCurrentStep()   -- Ctrl-Alt-click: remove the step from the Roadbook
+      elseif alt then
+        CP.Validate(true)        -- Alt-click: compute a new Roadbook
+      elseif IsShiftKeyDown and IsShiftKeyDown() then
+        CP.StopTracking()        -- Shift-click: stop following the objective
       else
-        CP.Validate(IsControlKeyDown and IsControlKeyDown(), IsShiftKeyDown and IsShiftKeyDown())
+        CP.Validate(false)       -- click: follow the objective
       end
     end
   end)
@@ -5043,10 +5061,10 @@ function CP.CreateCheckpointButton()
       GameTooltip:AddLine(L["No Roadbook step has the focus."], 1, 1, 1, true)
     end
     GameTooltip:AddLine(L["The focus moves to the next step on its own when this one is done."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Click: focus the next step if the current one is done (otherwise the pin is placed on it again)."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Shift-click: skip the current step without finishing it."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Alt-click: remove this quest from the Roadbook (badly defined, not found…) and compute a new one."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Ctrl-click: compute a new Roadbook."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Click: follow the objective (step to do, pin, compass)."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Shift-click: stop following the objective."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Alt-click: compute a new Roadbook."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Ctrl-Alt-click: remove the step from the Roadbook (a quest: the whole quest, then a new Roadbook)."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Right-click: open the Roadbook."], 0.7, 0.7, 0.7, true)
     if not Settings().checkpointLocked then GameTooltip:AddLine(L["Drag: move the button."], 0.7, 0.7, 0.7, true) end
     GameTooltip:Show()
@@ -5158,8 +5176,7 @@ local function RenderXP()
   for _ in pairs(Settings().excluded) do nEx = nEx + 1 end
   if nEx > 0 then l3[#l3 + 1] = Plural(nEx, L["quest"]) .. L[" removed by you"] end
   local head = { table.concat(l1, sep), table.concat(l2, sep), table.concat(l3, sep) }
-  local items = { { text = Color("aaaaaa", table.concat(head, "\n")),
-    b3 = { text = L["Recalculate"], fn = function() CP.Recompute() end } } }
+  local items = { { text = Color("aaaaaa", table.concat(head, "\n")) } }
 
   -- Split the plan into sections per zone, in route order.
   local net, plevel = info.net, info.plevel
@@ -5258,32 +5275,17 @@ local function RenderXP()
         text = text .. "\n       " .. Color("40ff40", L["---- level "] .. lvs[st.i] .. L[" reached (~"] .. FormatTime(s.at) .. ") ----")
       end
       if #xpQuery == 0 or MatchWords(Normalize(text), xpQuery) then
-        -- Track / Untrack (quests in the log) and Pin / Remove pin (on this step's location).
-        -- The exclusive "focus" (tracking + pin) is driven by the floating Objective button.
+        -- Only button: remove the quest from the Roadbook. Tracking and the pin follow the
+        -- floating Objective button (exclusive focus).
         local qid, step = task.id, s
-        local track, pin
+        local exclude
         if CP.StepDone(step) then
           -- step done: checked, no button
           text = text:gsub("^  (%d+%. )", "  %1|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t" .. Color("40ff40", L["[Done] "]), 1)
-        else
-          if qid and IsInLog(qid) then
-            local watched = IsWatched(qid)
-            track = { text = watched and L["Untrack"] or L["Track"], fn = function()
-              SetWatched(qid, not watched)
-              C_Timer.After(0.2, Refresh)
-            end }
-          end
-          if CP.IsStepPinned(step) then
-            pin = UnpinButton()
-          elseif QDB.ok and step.p then
-            pin = { text = L["Pin"], fn = function()
-              PinPoint(step.p, task.title, CP.StepPinLabel(step), qid)
-              C_Timer.After(0.2, Refresh)
-            end }
-          end
+        elseif qid then
+          exclude = { text = L["Remove from the Roadbook"], fn = function() CP.AskExclude(step) end }
         end
-        local exclude = qid and not CP.StepDone(step) and { text = L["Remove"], fn = function() CP.AskExclude(step) end } or nil
-        segItems[#segItems + 1] = { text = text, b1 = exclude, b2 = track, b3 = pin, questID = task.id }
+        segItems[#segItems + 1] = { text = text, b3 = exclude, questID = task.id }
       end
     end
     if #segItems > 0 then
@@ -5670,14 +5672,25 @@ function Geo.CreateSettingsPanel(f)
   local restore = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
   restore:SetSize(260, 22)
   restore:SetPoint("TOPRIGHT", -18, -28) -- aligned with "Center horizontally" below
-  restore:SetText(L["Restore removed quests"])
-  restore:SetScript("OnClick", function()
+  local function RemovedCount()
     local n = 0
     for _ in pairs(Settings().excluded) do n = n + 1 end
+    return n
+  end
+  local function UpdateRestore()
+    local n = RemovedCount()
+    restore:SetText(L["Restore removed quests"] .. (n > 0 and (" (" .. n .. ")") or ""))
+    restore:SetEnabled(n > 0)
+  end
+  panel.updaters[#panel.updaters + 1] = UpdateRestore
+  restore:SetScript("OnClick", function()
+    local n = RemovedCount()
+    if n == 0 then return end
     Settings().excluded = {}
     Geo.planCache = nil
-    Print(Plural(n, L["quest"]) .. L[" added back to the Roadbook: Ctrl-click the Objective button to recompute."])
-    if Refresh then Refresh() end
+    Print(Plural(n, L["quest"]) .. L[" added back: computing a new Roadbook."])
+    UpdateRestore()
+    CP.Recompute()
   end)
   -- Objective button: shown, locked, compass, centered.
   local obj = Geo.SettingsBox(rb, L["Objective"], 8, -58, 776, 62)
@@ -6032,6 +6045,11 @@ local function CreateMainFrame()
     xpQuery = ParseQuery(text)
     Refresh()
   end, nil, L["Duration:"])
+  local recompute = CreateFrame("Button", nil, panels.xp, "UIPanelButtonTemplate")
+  recompute:SetSize(150, 22)
+  recompute:SetPoint("TOPRIGHT", -12, -70) -- same place as "Export quest log" in the Quest log tab
+  recompute:SetText(L["Recalculate"])
+  recompute:SetScript("OnClick", function() CP.Recompute() end)
 
   f:SetScript("OnShow", function()
     -- Same sound as opening the game's quest log.
