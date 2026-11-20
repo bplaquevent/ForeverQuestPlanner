@@ -4699,7 +4699,9 @@ function CP.CreateCheckpointButton()
   b:RegisterForDrag("LeftButton")
   local pos = Settings().checkpointPos
   if pos then b:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3]) else b:SetPoint("CENTER", UIParent, "CENTER", 0, -220) end
-  b:SetScript("OnDragStart", function(self) self:StartMoving() end)
+  b:SetScript("OnDragStart", function(self)
+    if not Settings().checkpointLocked then self:StartMoving() end -- "Lock the objective" option
+  end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
     local point, _, _, x, y = self:GetPoint()
@@ -4727,7 +4729,7 @@ function CP.CreateCheckpointButton()
     GameTooltip:AddLine(L["Shift-click: skip the current step without finishing it."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Ctrl-click: compute a new Roadbook."], 0.7, 0.7, 0.7, true)
     GameTooltip:AddLine(L["Right-click: open the Roadbook."], 0.7, 0.7, 0.7, true)
-    GameTooltip:AddLine(L["Drag: move the button."], 0.7, 0.7, 0.7, true)
+    if not Settings().checkpointLocked then GameTooltip:AddLine(L["Drag: move the button."], 0.7, 0.7, 0.7, true) end
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function(self)
@@ -5316,23 +5318,28 @@ function Geo.CreateSettingsPanel(f)
   end)
 
   -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
-  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 446)
-  Geo.SettingsCheck(rb, L["Show objective"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
-  local center = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
+  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -100, 792, 500)
+  -- Objective button: shown, locked, centered.
+  local obj = Geo.SettingsBox(rb, L["Objective"], 8, -26, 776, 56)
+  Geo.SettingsCheck(obj, L["Show objective"], 10, -26, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
+  Geo.SettingsCheck(obj, L["Lock the objective"], 220, -26,
+    function() return Settings().checkpointLocked end,
+    function(v) Settings().checkpointLocked = v or nil end, panel)
+  local center = CreateFrame("Button", nil, obj, "UIPanelButtonTemplate")
   center:SetSize(260, 22)
-  center:SetPoint("TOPRIGHT", -12, -28)
+  center:SetPoint("TOPRIGHT", -10, -26)
   center:SetText(L["Center the objective horizontally"])
   center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
-  Geo.SettingsCheck(rb, L["Use the hearthstone"], 250, -28,
+  Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -88,
     function() return not Settings().noHearth end,
     function(v)
       Settings().noHearth = not v or nil
       Geo.planCache = nil
     end, panel)
   local boxes = {
-    Geo.SettingsBox(rb, L["Priorities (bonus in % of your level's XP)"], 8, -58, 776, 262),
-    Geo.SettingsBox(rb, L["Look-ahead"], 8, -326, 384, 112),
-    Geo.SettingsBox(rb, L["Time estimates"], 400, -326, 384, 112),
+    Geo.SettingsBox(rb, L["Priorities (bonus in % of your level's XP)"], 8, -114, 776, 262),
+    Geo.SettingsBox(rb, L["Look-ahead"], 8, -382, 384, 112),
+    Geo.SettingsBox(rb, L["Time estimates"], 400, -382, 384, 112),
   }
   local sec, n = 0, 0
   for _, d in ipairs(K.PARAMS) do
@@ -5434,7 +5441,7 @@ function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
     w = CreateFrame("Frame", "ForeverQuestPlannerSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    w:SetSize(820, 600)
+    w:SetSize(820, 672)
     w:SetPoint("CENTER", 40, -20)
     w:SetFrameStrata("DIALOG")
     w:SetToplevel(true)
