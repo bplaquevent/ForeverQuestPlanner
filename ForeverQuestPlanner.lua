@@ -5746,16 +5746,6 @@ local function CreateMinimapButton()
     GameTooltip:AddLine(L["|cffffff00Right-click|r: settings"], 1, 1, 1)
     GameTooltip:AddLine(L["|cffffff00Drag|r: move the icon"], 1, 1, 1)
     GameTooltip:AddLine(QDB.ok and L["QuestieDB: active"] or L["QuestieDB: missing"], 0.6, 0.8, 1)
-    local pin = ActivePin()
-    if pin then
-      GameTooltip:AddLine(L["Pin: "] .. (pin.title or "?") .. " - " .. (pin.label or L["objective"]), 1, 0.4, 1)
-      GameTooltip:AddLine(pin.place or "", 0.8, 0.8, 0.8)
-    end
-    local entry = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-    if entry and entry.updated then
-      GameTooltip:AddLine(" ")
-      GameTooltip:AddLine(L["Last capture: "] .. entry.updated .. " (" .. (entry.count or 0) .. L[" quests)"], 0.7, 0.7, 0.7)
-    end
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
