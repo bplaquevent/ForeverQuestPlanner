@@ -6393,7 +6393,7 @@ local function CreateMainFrame()
   local exportButton = CreateFrame("Button", nil, panels.groups, "UIPanelButtonTemplate")
   exportButton:SetSize(150, 22)
   exportButton:SetPoint("TOPRIGHT", -12, -70)
-  exportButton:SetText(L["Export quest log"])
+  exportButton:SetText(L["Export"])
   exportButton:SetScript("OnClick", function() SelectTab("export") end)
 
   panels.avail = CreateFilterPanel(f, {
@@ -6440,7 +6440,7 @@ local function CreateMainFrame()
   end, nil, L["Duration:"])
   local recompute = CreateFrame("Button", nil, panels.xp, "UIPanelButtonTemplate")
   recompute:SetSize(150, 22)
-  recompute:SetPoint("TOPRIGHT", -12, -70) -- same place as "Export quest log" in the Quest log tab
+  recompute:SetPoint("TOPRIGHT", -12, -70) -- same place as "Export" in the Quest log tab
   recompute:SetText(L["Recalculate"])
   recompute:SetScript("OnClick", function() CP.Recompute() end)
 
