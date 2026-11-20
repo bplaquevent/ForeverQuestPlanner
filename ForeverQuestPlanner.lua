@@ -4074,6 +4074,14 @@ function CP.IsStepFocused(s)
     and math.abs((rec.mx or -1) - (s.p.mx or -2)) < 0.05 and math.abs((rec.my or -1) - (s.p.my or -2)) < 0.05 or false
 end
 
+-- The map pin currently sits on this step.
+function CP.IsStepPinned(st)
+  local pin = ActivePin()
+  return pin and st and st.task and st.p and pin.questId == st.task.id and pin.area == st.p.area
+    and pin.label == CP.StepPinLabel(st)
+    and math.abs((pin.mx or -1) - (st.p.mx or -2)) < 0.05 and math.abs((pin.my or -1) - (st.p.my or -2)) < 0.05 or false
+end
+
 function CP.CurrentFocus()
   local s = CP.focused
   if s and CP.IsStepFocused(s) then return s end
@@ -4538,7 +4546,7 @@ function CP.RefreshButton()
     b.sub:SetText(d)
     b.current = s
   else
-    b.title:SetText(L["Update focus"])
+    b.title:SetText(L["Objective"])
     b.sub:SetText(L["No step tracked · click to compute"])
     b.current = nil
   end
@@ -4593,7 +4601,7 @@ function CP.CreateCheckpointButton()
   title:SetPoint("BOTTOMLEFT", b, "LEFT", 47, 1)
   title:SetPoint("RIGHT", b, "RIGHT", -8, 0)
   title:SetJustifyH("LEFT")
-  title:SetText(L["Update focus"])
+  title:SetText(L["Objective"])
   local sub = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   sub:SetPoint("TOPLEFT", b, "LEFT", 47, -2)
   sub:SetPoint("RIGHT", b, "RIGHT", -8, 0)
@@ -4602,7 +4610,7 @@ function CP.CreateCheckpointButton()
   sub:SetText(L["No step tracked · click to compute"])
   title:SetWordWrap(false)
   sub:SetWordWrap(false)
-  b.label, b.title, b.sub = L["Update focus"], title, sub
+  b.label, b.title, b.sub = L["Objective"], title, sub
   -- Hover: soft highlight and lighter border; click: slight press.
   local hl = b:CreateTexture(nil, "HIGHLIGHT")
   hl:SetPoint("TOPLEFT", 4, -4)
@@ -4665,7 +4673,7 @@ function CP.CreateCheckpointButton()
 end
 
 CP.CHECKPOINT_TOGGLE = {
-  label = L["Show checkpoint button"],
+  label = L["Show objective"],
   get = function() return Settings().checkpoint end,
   set = function(v)
     Settings().checkpoint = v or nil
@@ -4850,26 +4858,31 @@ local function RenderXP()
         text = text .. "\n       " .. Color("40ff40", L["---- level "] .. lvs[st.i] .. L[" reached (~"] .. FormatTime(s.at) .. ") ----")
       end
       if #xpQuery == 0 or MatchWords(Normalize(text), xpQuery) then
-        -- Focus: exclusive tracking of the quest (if it is in the log) + pin on the step.
+        -- Track / Untrack (quests in the log) and Pin / Remove pin (on this step's location).
+        -- The exclusive "focus" (tracking + pin) is driven by the floating Objective button.
         local qid, step = task.id, s
-        local focus
+        local track, pin
         if CP.StepDone(step) then
           -- step done: checked, no button
           text = text:gsub("^  (%d+%. )", "  %1|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t" .. Color("40ff40", L["[Done] "]), 1)
-        elseif CP.IsStepFocused(step) then
-          focus = { text = L["Remove focus"], fn = function()
-            ClearPin()
-            CP.ClearFocus()
-            if qid and IsInLog(qid) then SetWatched(qid, false) end
-            C_Timer.After(0.2, Refresh)
-          end }
-        elseif QDB.ok and step.p then
-          focus = { text = L["Focus"], fn = function()
-            CP.FocusStep(step)
-            C_Timer.After(0.2, Refresh)
-          end }
+        else
+          if qid and IsInLog(qid) then
+            local watched = IsWatched(qid)
+            track = { text = watched and L["Untrack"] or L["Track"], fn = function()
+              SetWatched(qid, not watched)
+              C_Timer.After(0.2, Refresh)
+            end }
+          end
+          if CP.IsStepPinned(step) then
+            pin = UnpinButton()
+          elseif QDB.ok and step.p then
+            pin = { text = L["Pin"], fn = function()
+              PinPoint(step.p, task.title, CP.StepPinLabel(step), qid)
+              C_Timer.After(0.2, Refresh)
+            end }
+          end
         end
-        segItems[#segItems + 1] = { text = text, b3 = focus, questID = task.id }
+        segItems[#segItems + 1] = { text = text, b2 = track, b3 = pin, questID = task.id }
       end
     end
     if #segItems > 0 then

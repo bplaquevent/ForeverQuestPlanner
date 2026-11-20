@@ -20,7 +20,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Saved plan**: it no longer changes until the end or until you ask for a recompute.
 
 ### Focus and floating button
-- **Focus** a step: exclusive tracking of the quest + a pin on the map.
+- Each Roadbook step has **Track** and **Pin** buttons; the floating **Objective** button focuses a step (exclusive tracking + pin).
 - Automatically moves to the next step (quest picked up, objective done, quest turned in, flight master activated, take-off, zeppelin or boat arrival, hearthstone…).
 - Movable floating button showing a summary of the current step:
   - **click**: next step if the current one is done;
