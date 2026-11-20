@@ -5124,7 +5124,8 @@ function CP.RefreshButton()
   local s = CP.CurrentFocus()
   if s then
     local t, d = CP.StepSummary(s)
-    if s.task and s.task.id and s.task.level then t = t .. " " .. Geo.LevelBadge(s.task.level) end -- quest level
+    -- Quest step: white title, then the same badges as in the tabs (colored level, elite, types).
+    if s.task and s.task.id then t = Color("ffffff", t) .. Geo.QuestBadges({ id = s.task.id, level = s.task.level }) end
     b.title:SetText(t)
     b.sub:SetText(d)
     b.current = s
@@ -5135,7 +5136,7 @@ function CP.RefreshButton()
   end
   -- Width fitted to the text, within reasonable limits.
   local w = math.max(b.title:GetStringWidth() or 0, b.sub:GetStringWidth() or 0)
-  b:SetWidth(math.min(math.max(47 + w + 14, 214), 380))
+  b:SetWidth(math.min(math.max(47 + w + 14, 214), 480))
   b.compassTarget = CP.CompassTarget()
 end
 
