@@ -5195,68 +5195,198 @@ function Geo.ParamText(d, v)
   return tostring(v) .. (d.unit or "")
 end
 
+-- Bordered group box ("panel") with a title, used to sort the settings by family.
+function Geo.SettingsBox(parent, title, x, y, w, h)
+  local box = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  box:SetPoint("TOPLEFT", x, y)
+  box:SetSize(w, h)
+  if box.SetBackdrop then
+    box:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = true, tileSize = 16, edgeSize = 12,
+      insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    box:SetBackdropColor(0, 0, 0, 0.35)
+    box:SetBackdropBorderColor(0.8, 0.65, 0.35, 0.8)
+  end
+  local t = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  t:SetPoint("TOPLEFT", 10, -8)
+  t:SetText(title)
+  return box
+end
+
+function Geo.SettingsCheck(box, label, x, y, get, set, panel)
+  local cb = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
+  cb:SetSize(22, 22)
+  cb:SetPoint("TOPLEFT", x, y)
+  cb.label = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  cb.label:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+  cb.label:SetText(label)
+  cb:SetScript("OnClick", function(self)
+    set(self:GetChecked() and true or false)
+    if Refresh then Refresh() end
+  end)
+  panel.updaters[#panel.updaters + 1] = function() cb:SetChecked(get() and true or false) end
+  return cb
+end
+
+function Geo.SettingsRadios(box, caption, x, y, options, get, set, panel, step)
+  local cap = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  cap:SetPoint("TOPLEFT", x, y - 5)
+  cap:SetText(caption)
+  local cx = x + (cap:GetStringWidth() or 50) + 6
+  local buttons = {}
+  for _, o in ipairs(options) do
+    local ok, rb = pcall(CreateFrame, "CheckButton", nil, box, "UIRadioButtonTemplate")
+    if not ok or not rb then rb = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate") end
+    rb:SetSize(16, 16)
+    rb:SetPoint("TOPLEFT", cx, y - 3)
+    rb.label = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rb.label:SetPoint("LEFT", rb, "RIGHT", 2, 0)
+    rb.label:SetText(o.label)
+    rb:SetScript("OnClick", function()
+      set(o.key)
+      for _, other in ipairs(buttons) do other:SetChecked(other.key == o.key) end
+      if Refresh then Refresh() end
+    end)
+    rb.key = o.key
+    buttons[#buttons + 1] = rb
+    cx = cx + (step or 60)
+  end
+  panel.updaters[#panel.updaters + 1] = function()
+    local v = get()
+    for _, rb in ipairs(buttons) do rb:SetChecked(rb.key == v) end
+  end
+end
+
+function Geo.SettingsSlider(box, d, x, y, panel)
+  local name = "ForeverQuestPlannerParam" .. d.key
+  local ok, sl = pcall(CreateFrame, "Slider", name, box, "OptionsSliderTemplate")
+  if not ok or not sl then
+    sl = CreateFrame("Slider", name, box)
+    sl:SetOrientation("HORIZONTAL")
+    sl:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+  end
+  sl:SetSize(200, 16)
+  sl:SetPoint("TOPLEFT", x + 160, y - 6)
+  sl:SetMinMaxValues(d.min, d.max)
+  sl:SetValueStep(d.step)
+  if sl.SetObeyStepOnDrag then sl:SetObeyStepOnDrag(true) end
+  for _, suffix in ipairs({ "Low", "High", "Text" }) do
+    local r = _G[name .. suffix]
+    if r then r:SetText("") end
+  end
+  local label = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  label:SetPoint("TOPLEFT", x, y - 2)
+  label:SetWidth(155)
+  label:SetJustifyH("LEFT")
+  label:SetText(d.label)
+  local value = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  value:SetPoint("TOP", sl, "BOTTOM", 0, -1)
+  sl.valueText, sl.def = value, d
+  sl:SetScript("OnValueChanged", function(self, v, userInput)
+    v = math.floor(v / d.step + 0.5) * d.step
+    self.valueText:SetText(Geo.ParamText(d, v) .. ((math.abs(v - d.default) < 1e-6) and "" or
+      Color("888888", L["  (default "] .. Geo.ParamText(d, d.default) .. ")")))
+    if userInput ~= false and not panel.updating then Geo.SetParam(d, v) end
+  end)
+  sl:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(d.label)
+    GameTooltip:AddLine(L["Default value: "] .. Geo.ParamText(d, d.default), 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L["The Roadbook is recomputed with the new value."], 0.7, 0.7, 0.7, true)
+    GameTooltip:Show()
+  end)
+  sl:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  panel.sliders[#panel.sliders + 1] = sl
+end
+
+-- Every addon option, grouped by family.
 function Geo.CreateSettingsPanel(f)
   local panel = CreateFrame("Frame", nil, f)
   panel:SetAllPoints(f)
-  panel.sliders = {}
-  local col, y, x0 = 0, -34, 20
-  local colWidth = 390
+  panel.sliders, panel.updaters = {}, {}
+
+  -- General
+  local gen = Geo.SettingsBox(panel, L["General"], 14, -32, 236, 112)
+  Geo.SettingsCheck(gen, L["Minimap icon"], 10, -28,
+    function() return not Settings().hideMinimap end,
+    function(v)
+      Settings().hideMinimap = not v or nil
+      local mb = _G["ForeverQuestPlannerMinimapButton"]
+      if mb then mb:SetShown(v) end
+    end, panel)
+  Geo.SettingsCheck(gen, L["Show objective"], 10, -52, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
+  local keep = CreateFrame("Button", nil, gen, "UIPanelButtonTemplate")
+  keep:SetSize(214, 22)
+  keep:SetPoint("TOPLEFT", 10, -80)
+  keep:SetText(L["Clear \"Keep\" quests"])
+  keep:SetScript("OnClick", function()
+    Settings().keep = {}
+    Print(L["\"Keep\" quest list cleared."])
+    if Refresh then Refresh() end
+  end)
+
+  -- Roadbook
+  local rb = Geo.SettingsBox(panel, L["Roadbook"], 256, -32, 222, 112)
+  Geo.SettingsRadios(rb, L["Duration:"], 10, -28, {
+    { key = 3600, label = L["1 h"] }, { key = 7200, label = L["2 h"] }, { key = 14400, label = L["4 h"] },
+  }, function() return xpHorizon end, function(v)
+    if v ~= xpHorizon then
+      xpHorizon = v
+      Settings().horizon = v
+      Geo.ClearFrozen() -- new duration: new Roadbook
+    end
+  end, panel, 52)
+  Geo.SettingsCheck(rb, L["Use the hearthstone"], 10, -52,
+    function() return not Settings().noHearth end,
+    function(v)
+      Settings().noHearth = not v or nil
+      Geo.planCache = nil
+    end, panel)
+  local recompute = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
+  recompute:SetSize(200, 22)
+  recompute:SetPoint("TOPLEFT", 10, -80)
+  recompute:SetText(L["Recalculate"])
+  recompute:SetScript("OnClick", function() CP.Recompute() end)
+
+  -- Quest lists (Around me, Available)
+  local ql = Geo.SettingsBox(panel, L["Quest lists"], 484, -32, 322, 112)
+  Geo.SettingsCheck(ql, LOW_LEVEL_TOGGLE.label, 10, -28, LOW_LEVEL_TOGGLE.get, LOW_LEVEL_TOGGLE.set, panel)
+  Geo.SettingsRadios(ql, L["Around me:"], 10, -54, {
+    { key = 200, label = "200 m" }, { key = 500, label = "500 m" }, { key = 1500, label = "1500 m" },
+    { key = "zone", label = L["Zone"] },
+  }, function() return nearRadius end, function(v)
+    nearRadius = v
+    Settings().nearRadius = v
+  end, panel, 56)
+  Geo.SettingsRadios(ql, L["Available:"], 10, -80, {
+    { key = "zone", label = L["Zone"] }, { key = "dungeon", label = L["Dungeons"] },
+    { key = "class", label = L["Class"] }, { key = "all", label = L["All"] },
+  }, function() return availFilter end, function(v)
+    availFilter = v
+    Settings().availFilter = v
+  end, panel, 60)
+
+  -- Slider families (priorities, look-ahead, time estimates).
+  local boxes = {
+    Geo.SettingsBox(panel, L["Priorities (bonus in % of your level's XP)"], 14, -150, 792, 262),
+    Geo.SettingsBox(panel, L["Look-ahead"], 14, -418, 390, 118),
+    Geo.SettingsBox(panel, L["Time estimates"], 416, -418, 390, 118),
+  }
+  local sec, n = 0, 0
   for _, d in ipairs(K.PARAMS) do
     if d.section then
-      if col == 1 then y = y - 46 end
-      col = 0
-      local h = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-      h:SetPoint("TOPLEFT", x0, y - 4)
-      h:SetText(d.section)
-      y = y - 24
-    else
-      local x = x0 + col * colWidth
-      local name = "ForeverQuestPlannerParam" .. d.key
-      local ok, sl = pcall(CreateFrame, "Slider", name, panel, "OptionsSliderTemplate")
-      if not ok or not sl then
-        sl = CreateFrame("Slider", name, panel)
-        sl:SetOrientation("HORIZONTAL")
-        sl:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
-      end
-      sl:SetSize(220, 16)
-      sl:SetPoint("TOPLEFT", x + 150, y - 6)
-      sl:SetMinMaxValues(d.min, d.max)
-      sl:SetValueStep(d.step)
-      if sl.SetObeyStepOnDrag then sl:SetObeyStepOnDrag(true) end
-      for _, suffix in ipairs({ "Low", "High", "Text" }) do
-        local r = _G[name .. suffix]
-        if r then r:SetText("") end
-      end
-      local label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      label:SetPoint("TOPLEFT", x, y - 2)
-      label:SetWidth(145)
-      label:SetJustifyH("LEFT")
-      label:SetText(d.label)
-      local value = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-      value:SetPoint("TOP", sl, "BOTTOM", 0, -1)
-      sl.valueText, sl.def = value, d
-      sl:SetScript("OnValueChanged", function(self, v, userInput)
-        v = math.floor(v / d.step + 0.5) * d.step
-        self.valueText:SetText(Geo.ParamText(d, v) .. ((math.abs(v - d.default) < 1e-6) and "" or Color("888888", L["  (default "] .. Geo.ParamText(d, d.default) .. ")")))
-        if userInput ~= false and not panel.updating then Geo.SetParam(d, v) end
-      end)
-      sl:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(d.label)
-        GameTooltip:AddLine(L["Default value: "] .. Geo.ParamText(d, d.default), 0.8, 0.8, 0.8)
-        GameTooltip:AddLine(L["The Roadbook is recomputed with the new value."], 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
-      end)
-      sl:SetScript("OnLeave", function() GameTooltip:Hide() end)
-      panel.sliders[#panel.sliders + 1] = sl
-      if col == 0 then
-        col = 1
-      else
-        col = 0
-        y = y - 46
-      end
+      sec, n = sec + 1, 0
+    elseif boxes[sec] then
+      local cols = (sec == 1) and 2 or 1
+      local col, row = n % cols, math.floor(n / cols)
+      Geo.SettingsSlider(boxes[sec], d, 12 + col * 392, -30 - row * 46, panel)
+      n = n + 1
     end
   end
+
   local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   reset:SetSize(170, 24)
   reset:SetPoint("BOTTOMLEFT", 16, 26)
@@ -5271,9 +5401,10 @@ function Geo.CreateSettingsPanel(f)
   note:SetPoint("LEFT", reset, "RIGHT", 12, 0)
   note:SetWidth(580)
   note:SetJustifyH("LEFT")
-  note:SetText(L["Settings are saved and apply to the next Roadbook computation. Hover a slider to see its default value."])
+  note:SetText(L["Settings are saved. Priorities and estimates apply to the next Roadbook computation; \"Defaults\" resets them."])
   function panel.Update()
     panel.updating = true
+    for _, fn in ipairs(panel.updaters) do fn() end
     for _, sl in ipairs(panel.sliders) do
       sl:SetValue(K[sl.def.key])
       local fn = sl:GetScript("OnValueChanged")
@@ -5339,7 +5470,7 @@ function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
     w = CreateFrame("Frame", "ForeverQuestPlannerSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    w:SetSize(800, 470)
+    w:SetSize(820, 600)
     w:SetPoint("CENTER", 40, -20)
     w:SetFrameStrata("DIALOG")
     w:SetToplevel(true)
@@ -5533,7 +5664,10 @@ local function CreateMainFrame()
     { key = "dungeon", label = L["Dungeons"] },
     { key = "class", label = L["Class & professions"] },
     { key = "all", label = L["All"] },
-  }, function() return availFilter end, function(v) availFilter = v end, function(text)
+  }, function() return availFilter end, function(v)
+    availFilter = v
+    Settings().availFilter = v
+  end, function(text)
     availQuery = ParseQuery(text)
     Refresh()
   end, LOW_LEVEL_TOGGLE, L["Quests:"])
@@ -5543,7 +5677,10 @@ local function CreateMainFrame()
     { key = 500, label = "500 m" },
     { key = 1500, label = "1500 m" },
     { key = "zone", label = L["Current zone"] },
-  }, function() return nearRadius end, function(v) nearRadius = v end, function(text)
+  }, function() return nearRadius end, function(v)
+    nearRadius = v
+    Settings().nearRadius = v
+  end, function(text)
     nearQuery = ParseQuery(text)
     Refresh()
   end, LOW_LEVEL_TOGGLE, L["Radius:"])
@@ -5556,6 +5693,7 @@ local function CreateMainFrame()
   }, function() return xpHorizon end, function(v)
     if v ~= xpHorizon then
       xpHorizon = v
+      Settings().horizon = v
       Geo.ClearFrozen() -- new duration: new Roadbook
     end
   end, function(text)
@@ -5707,6 +5845,11 @@ end
 f:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGIN" then
     Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
+    -- Options saved from the settings window or the tabs.
+    local st = Settings()
+    if st.horizon then xpHorizon = st.horizon end
+    if st.nearRadius then nearRadius = st.nearRadius end
+    if st.availFilter then availFilter = st.availFilter end
     pcall(Geo.ApplyParams)
     local ok, err = pcall(InitQuestieDB)
     if not ok then Print(L["QuestieDB initialization error: "] .. tostring(err)) end
