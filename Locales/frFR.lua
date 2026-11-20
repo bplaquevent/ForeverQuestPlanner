@@ -387,3 +387,4 @@ L["Click: follow the objective (step to do, pin, compass)."] = "Clic : suivre l'
 L["Shift-click: stop following the objective."] = "Maj-clic : arrêter le suivi de l'objectif."
 L["Alt-click: compute a new Roadbook."] = "Alt-clic : calculer un nouveau Roadbook."
 L["Ctrl-Alt-click: remove the step from the Roadbook (a quest: the whole quest, then a new Roadbook)."] = "Ctrl-Alt-clic : retirer l'étape du Roadbook (une quête : la quête entière, puis un nouveau Roadbook)."
+L["Include elite quests"] = "Inclure les quêtes élites"

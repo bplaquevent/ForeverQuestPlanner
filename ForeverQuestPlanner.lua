@@ -2311,9 +2311,12 @@ function Geo.IsEliteQuest(id, tag)
   return v
 end
 
--- Highest quest level the Roadbook takes on, from your level (or the required level, if higher).
+-- Highest quest level the Roadbook takes on, from your level (or the required level, if higher);
+-- elite quests are excluded when the "Include elite quests" option is unchecked.
 function Geo.MaxQuestLevel(id, plevel, reqLevel, tag)
-  return math.max(plevel, reqLevel or 0) + (Geo.IsEliteQuest(id, tag) and K.MAX_ELITE_GAP or K.MAX_LEVEL_GAP)
+  local elite = Geo.IsEliteQuest(id, tag)
+  if elite and Settings().noElite then return -math.huge end -- "Include elite quests" unchecked
+  return math.max(plevel, reqLevel or 0) + (elite and K.MAX_ELITE_GAP or K.MAX_LEVEL_GAP)
 end
 
 -- XP of an average quest among the Roadbook candidates (set by BuildTasks), the unit of priorities.
@@ -5726,6 +5729,22 @@ function Geo.CreateSettingsPanel(f)
       n = n + 1
     end
   end
+  -- Elite quests on/off, on the free row of the "Difficulty" box; off: their slider is greyed.
+  local function UpdateEliteSlider()
+    local sl = _G["ForeverQuestPlannerParamMAX_ELITE_GAP"]
+    if sl and sl.Enable then
+      if Settings().noElite then sl:Disable() else sl:Enable() end
+      sl:SetAlpha(Settings().noElite and 0.4 or 1)
+    end
+  end
+  Geo.SettingsCheck(boxes[2], L["Include elite quests"], 10, -122,
+    function() return not Settings().noElite end,
+    function(v)
+      Settings().noElite = not v or nil
+      Geo.planCache = nil
+      UpdateEliteSlider()
+    end, panel)
+  panel.updaters[#panel.updaters + 1] = UpdateEliteSlider
 
   local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   reset:SetSize(170, 24)
