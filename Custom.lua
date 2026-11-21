@@ -129,7 +129,7 @@ end
 -- Adds a quest (and the prerequisites it still needs) to the custom Roadbook.
 -- quiet: no message and no update (adding in bulk). Returns true, number of prerequisites added.
 function Geo.CustomAdd(id, title, level, quiet)
-  if not (id and QDB.ok) or Geo.InCustom(id) then return false, 0 end
+  if not id or Geo.InCustom(id) then return false, 0 end
   title = title or QGet(QDB.Quest, id, "name") or ("#" .. id)
   if IsCompleted(id) then
     if not quiet then Print(L["Quest already done: "] .. title) end
@@ -320,8 +320,8 @@ end
 
 function Geo.FlightMasterStep(fm)
   return { kind = "fm", p = fm.p, work = K.OVERHEAD / 2,
-    fmHub = { id = fm.id, name = AreaName(fm.p.area) or fm.name, p = fm.p },
-    task = { title = L["Activate the flight path of "] .. (AreaName(fm.p.area) or "?"), npc = fm.name, xp = 0, fm = true } }
+    fmHub = { id = fm.id, node = fm.node, name = AreaName(fm.p.area) or fm.name, p = fm.p },
+    task = { title = L["Activate the flight path of "] .. (AreaName(fm.p.area) or fm.name), npc = fm.name, xp = 0, fm = true } }
 end
 
 -- No quest picked up before its required level (unless it can never be reached: warned).
@@ -670,7 +670,7 @@ function Geo.PlanCustom()
     route = withFM
     for _, st in ipairs(route) do
       if st.kind == "fm" and not st.fmHub and st.fmId then
-        st.fmHub = { id = st.fmId, name = AreaName(st.p.area) or st.task.npc, p = st.p }
+        st.fmHub = { id = st.fmId, node = st.fmNode, name = AreaName(st.p.area) or st.task.npc, p = st.p }
       end
     end
   end

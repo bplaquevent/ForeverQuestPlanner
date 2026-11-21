@@ -7,8 +7,8 @@ local Dist, EntityPoints, EquippedItemLevel, Geo, GetItemInfoCompat, HasBit = ns
 local IsClassMeta, IsCompleted, K, L, Nearest, NextQuests = ns.IsClassMeta, ns.IsCompleted, ns.K, ns.L, ns.Nearest, ns.NextQuests
 local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta, ns.QuestTargets
 local Refresh, RemainingTargets, Route, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Route, ns.SLOTS, ns.Settings, ns.StartPoints
-local State, TaxiStore, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TaxiStore, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
-local WorldPos, scan = ns.WorldPos, ns.scan
+local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
+local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
 
 ---------------------------------------------------------------------------
 -- Around me
@@ -504,7 +504,7 @@ end
 -- Index "quest -> reward items" (QuestieDB), built once per session.
 function Geo.ItemIdList()
   local okIds, ids = false, nil
-  if QDB.Item and QDB.Item.GetAllIds then okIds, ids = pcall(QDB.Item.GetAllIds) end
+  okIds, ids = pcall(QDB.Item.GetAllIds)
   if not okIds or type(ids) ~= "table" then return {} end
   if #ids == 0 and next(ids) then
     local list = {}
@@ -538,7 +538,7 @@ end
 
 -- Built in the background (500 items per frame) for the "Available" tab, then the list is refreshed.
 function Geo.BuildRewardIndexAsync()
-  if Geo.rewards or Geo.rewardsBuilding or not QDB.ok then return end
+  if Geo.rewards or Geo.rewardsBuilding then return end
   local ids, idx, i = Geo.ItemIdList(), {}, 1
   Geo.rewardsBuilding = true
   local function step()
@@ -664,7 +664,7 @@ function Geo.LaterReason(id, plevel)
         end
       end
       -- Chain leading to an endgame dungeon (access, attunement).
-      local dg = m.sort and m.sort > 0 and QDB.dungeonOf and QDB.dungeonOf[m.sort]
+      local dg = m.sort and m.sort > 0 and QDB.dungeonOf[m.sort]
       if not reason and dg and lvl >= maxL - K.ENDGAME_MARGIN and rootLevel >= maxL - 10 then
         reason = L["access to "] .. (AreaName(dg) or L["an endgame dungeon"])
       end
@@ -882,14 +882,13 @@ end
 
 K.MAX_PLAN_QUESTS = 50
 K.FM_DETOUR = 250      -- maximum detour (m, as the crow flies) to activate an unknown flight master
-K.FM_KNOWN_RADIUS = 150 -- a flight master closer than this to a recorded flight path is known
+K.FM_KNOWN_RADIUS = 150 -- yards: the QuestieDB flight master NPC standing at a flight node
 
 -- Service NPCs of the player's faction (QuestieDB), read once per session:
 -- flight masters (Geo.fm) and innkeepers (Geo.inn).
 function Geo.ScanServices()
   if Geo.fm then return end
   Geo.fm, Geo.inn = {}, {}
-  if not (QDB.Npc and QDB.Npc.GetAllIds) then return end
   local okIds, ids = pcall(QDB.Npc.GetAllIds)
   if not okIds or type(ids) ~= "table" then return end
   if #ids == 0 and next(ids) then
@@ -926,9 +925,27 @@ function Geo.ScanServices()
   end
 end
 
+-- Flight masters the character can use: OpenMap's flight nodes (Forever's tables: faction, class),
+-- each with the QuestieDB flight master NPC standing there (name, map pin) when there is one.
 function Geo.FlightMasters()
+  if Geo.fmNodes then return Geo.fmNodes end
   Geo.ScanServices()
-  return Geo.fm or {}
+  local out = {}
+  for id in pairs(OM.flights.nodes) do
+    if Geo.NodeUsable(id) then
+      local np = Geo.NodePoint(id)
+      local npc, nd
+      for _, fm in ipairs(Geo.fm or {}) do
+        local d = Dist(fm.p, np)
+        if d and d < K.FM_KNOWN_RADIUS and (not nd or d < nd) then npc, nd = fm, d end
+      end
+      if not npc then np.zoneName = Geo.NodeName(id) end
+      out[#out + 1] = { id = npc and npc.id or ("node" .. id), node = id, name = npc and npc.name or Geo.NodeName(id),
+        p = npc and npc.p or np }
+    end
+  end
+  Geo.fmNodes = out
+  return out
 end
 
 function Geo.Innkeepers()
@@ -936,17 +953,11 @@ function Geo.Innkeepers()
   return Geo.inn or {}
 end
 
--- Flight masters not yet activated by the character (no recorded flight path nearby).
+-- Flight masters not yet activated by the character (flight paths learned: OpenMap's list).
 function Geo.UnknownFlightMasters()
-  local known, out = {}, {}
-  for _, n in pairs(TaxiStore()) do known[#known + 1] = { c = n.c, x = n.x, y = n.y } end
+  local known, out = Geo.KnownNodes(), {}
   for _, fm in ipairs(Geo.FlightMasters()) do
-    local isKnown = false
-    for _, k in ipairs(known) do
-      local d = Dist(k, fm.p)
-      if d and d < K.FM_KNOWN_RADIUS then isKnown = true break end
-    end
-    if not isKnown then out[#out + 1] = fm end
+    if not known[fm.node] then out[#out + 1] = fm end
   end
   return out
 end
@@ -1000,8 +1011,8 @@ function Geo.AddFlightMasterStops(route, nets, plevel)
     if list then
       table.sort(list, function(x, y) return x.from < y.from end)
       for _, it in ipairs(list) do
-        out[#out + 1] = { kind = "fm", p = it.fm.p, fmId = it.fm.id, work = K.OVERHEAD / 2,
-          task = { title = L["Activate the flight path of "] .. (AreaName(it.fm.p.area) or "?"), npc = it.fm.name, xp = 0, fm = true } }
+        out[#out + 1] = { kind = "fm", p = it.fm.p, fmId = it.fm.id, fmNode = it.fm.node, work = K.OVERHEAD / 2,
+          task = { title = L["Activate the flight path of "] .. (AreaName(it.fm.p.area) or it.fm.name), npc = it.fm.name, xp = 0, fm = true } }
       end
     end
     out[#out + 1] = route[k]

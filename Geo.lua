@@ -3,7 +3,7 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, CharKey, Color, HasBit, K, L = ns.AreaName, ns.CharKey, ns.Color, ns.HasBit, ns.K, ns.L
-local QDB, QGet, Settings = ns.QDB, ns.QGet, ns.Settings
+local OM, QDB, QGet, Settings = ns.OM, ns.QDB, ns.QGet, ns.Settings
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
@@ -12,6 +12,7 @@ local Geo = { npc = {}, object = {}, targets = {}, givers = {} }
 K.CROSS_CONTINENT = 480 -- flat seconds to change continent
 K.PATH_FACTOR = 1.35    -- paths are never straight lines
 K.OVERHEAD = 20         -- dialogs, quest pick-up/turn-in
+K.INSTANCE_MATCH = 400  -- yards: an OpenMap dungeon entrance this close to QuestieDB's is the same one
 
 local function LoadDataString(v)
   if type(v) == "table" then return v end
@@ -28,8 +29,7 @@ end
 local function GeoReady()
   if Geo.ready ~= nil then return Geo.ready end
   Geo.ready = false
-  if not (QDB.ok and C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D) then return false end
-  local p = QDB.zonePrivate or {}
+  local p = QDB.zonePrivate
   Geo.areaToUi = LoadDataString(p.areaIdToUiMapId) or {}
   for k, v in pairs(LoadDataString(p.areaIdToUiMapIdOverride) or {}) do Geo.areaToUi[k] = v end
   Geo.parent = LoadDataString(p.subZoneToParentZone) or {}
@@ -42,33 +42,100 @@ end
 local function DropRate(itemId, npcId)
   if Geo.drops == nil then
     Geo.drops = false
-    if QDB.lib and QDB.lib.Support then
-      local ok, mod = pcall(QDB.lib.Support.Get, "QuestieClassicItemDrops")
-      if ok and type(mod) == "table" then Geo.drops = LoadDataString(mod.wowheadData) or false end
-    end
+    local ok, mod = pcall(QDB.lib.Support.Get, "QuestieClassicItemDrops")
+    if ok and type(mod) == "table" then Geo.drops = LoadDataString(mod.wowheadData) or false end
   end
   local t = Geo.drops and Geo.drops[itemId]
   return t and t[npcId]
 end
 
+-- Zone (AreaID) -> uiMapID (QuestieDB tables; a sub-zone takes its parent's map), or nil.
+function Geo.AreaUi(areaId)
+  local ui = areaId and Geo.areaToUi[areaId]
+  if (not ui or ui == 0) and areaId and Geo.parent[areaId] then ui = Geo.areaToUi[Geo.parent[areaId]] end
+  if not ui or ui == 0 then return nil end
+  return ui
+end
+
 -- Zone (AreaID) + 0-100 coordinates -> world point {c = continent, x, y, area, mx, my}
 local function WorldPos(areaId, x, y)
-  local ui = Geo.areaToUi[areaId]
-  if (not ui or ui == 0) and Geo.parent[areaId] then ui = Geo.areaToUi[Geo.parent[areaId]] end
-  if not ui or ui == 0 then return nil end
+  local ui = Geo.AreaUi(areaId)
+  if not ui then return nil end
   local ok, cont, pos = pcall(C_Map.GetWorldPosFromMapPos, ui, CreateVector2D(x / 100, y / 100))
   if not ok or not cont or not pos then return nil end
   local wx, wy = pos:GetXY()
   return { c = cont, x = wx, y = wy, area = areaId, mx = x, my = y }
 end
 
+-- Dungeon entrances of OpenMap (WoW Forever's tables, with the group finder's level ranges):
+-- { p = world point, min, max } each, built once. A wing is an instance of its own at the same
+-- entrance: the range covers them all.
+function Geo.Instances()
+  if Geo.instances then return Geo.instances end
+  local out = {}
+  for _, e in ipairs(OM.places.instances) do
+    local p
+    if e[1] then
+      p = { c = e[1], x = e[2], y = e[3] }
+    elseif e.map then
+      local ok, cont, pos = pcall(C_Map.GetWorldPosFromMapPos, e.map, CreateVector2D(e[2], e[3]))
+      if ok and cont and pos then
+        local wx, wy = pos:GetXY()
+        p = { c = cont, x = wx, y = wy }
+      end
+    end
+    if p then
+      local lo, hi
+      for _, w in ipairs(e[4]) do
+        if w[4] and (not lo or w[4] < lo) then lo = w[4] end
+        if w[5] and (not hi or w[5] > hi) then hi = w[5] end
+      end
+      out[#out + 1] = { p = p, min = lo, max = hi }
+    end
+  end
+  Geo.instances = out
+  return out
+end
+
+-- Entrance of the dungeon containing the zone areaId: QuestieDB's, moved to OpenMap's nearest
+-- entrance when there is one (Forever's own positions, and the dungeon's level range).
+Geo.dungeonInfo = {}
 local function DungeonEntrance(areaId)
   local d = QDB.dungeonOf[areaId]
-  local entry = d and QDB.dungeons[d]
-  local loc = entry and type(entry[4]) == "table" and entry[4][1]
-  if not loc then return nil end
-  local w = WorldPos(loc[1], loc[2], loc[3])
-  if w then w.instance = AreaName(d) end
+  if not d then return nil end
+  local info = Geo.dungeonInfo[d]
+  if info == nil then
+    info = false
+    local entry = QDB.dungeons[d]
+    local loc = type(entry[4]) == "table" and entry[4][1]
+    local w = loc and WorldPos(loc[1], loc[2], loc[3])
+    if w then
+      local best, bd
+      for _, inst in ipairs(Geo.Instances()) do
+        if inst.p.c == w.c then
+          local dx, dy = inst.p.x - w.x, inst.p.y - w.y
+          local dd = math.sqrt(dx * dx + dy * dy)
+          if dd < K.INSTANCE_MATCH and (not bd or dd < bd) then best, bd = inst, dd end
+        end
+      end
+      if best then
+        w.x, w.y, w.lmin, w.lmax = best.p.x, best.p.y, best.min, best.max
+        -- zone coordinates of the moved entrance (map pins)
+        local ui = Geo.AreaUi(w.area)
+        local ok, _, mp = pcall(C_Map.GetMapPosFromWorldPos, w.c, CreateVector2D(w.x, w.y), ui)
+        if ok and mp then
+          local mx, my = mp:GetXY()
+          if mx >= 0 and mx <= 1 and my >= 0 and my <= 1 then w.mx, w.my = mx * 100, my * 100 end
+        end
+      end
+      w.instance = AreaName(d)
+      info = w
+    end
+    Geo.dungeonInfo[d] = info
+  end
+  if not info then return nil end
+  local w = {}
+  for k, v in pairs(info) do w[k] = v end
   return w
 end
 
@@ -166,8 +233,12 @@ end
 
 local function PointText(p)
   if not p then return "?" end
-  if p.instance then return p.instance .. L[" (entrance)"] end
-  return string.format("%s (%.0f, %.0f)", AreaName(p.area) or p.zoneName or "?", p.mx or 0, p.my or 0)
+  if p.instance then
+    return p.instance .. L[" (entrance)"] .. (p.lmin and (" " .. Geo.LevelRange(p.lmin, p.lmax)) or "")
+  end
+  -- zone level range (OpenMap), coloured for the player's level
+  local lv = p.area and Geo.areaToUi and Geo.ZoneLevelText(Geo.AreaUi(p.area))
+  return string.format("%s%s (%.0f, %.0f)", AreaName(p.area) or p.zoneName or "?", lv and (" " .. lv) or "", p.mx or 0, p.my or 0)
 end
 
 local function AllInstance(points)
@@ -177,82 +248,190 @@ local function AllInstance(points)
 end
 
 ---------------------------------------------------------------------------
--- Transport network: known flight masters, zeppelins, boats
+-- Transport network: flight paths, boats, zeppelins and airships, read from OpenMap
+-- (OpenMap.MapFlights / MapPlaces: WoW Forever's own tables, kept up to date by OpenMap).
 ---------------------------------------------------------------------------
-K.FLIGHT_SPEED = 30     -- m/s while flying
+K.FLIGHT_SPEED = 30     -- yards/s while flying
 K.FLIGHT_OVERHEAD = 30  -- dialog, take-off, landing
 K.TRANSPORT_TIME = 180  -- average wait + crossing
 K.DANGER_MARGIN = 2     -- dangerous zone if its minimum level > player level + margin
 K.DANGER_FACTOR = 1.5   -- extra cost of walking in a dangerous zone (detours, fights)
 K.K_HUBS = 3            -- number of transport points considered at departure and arrival
+K.DOCK_MERGE = 60       -- yards: transport ends this close are one dock
+K.NODE_MATCH = 150      -- yards: a flight master this close to a flight node is that node
+-- Boat and zeppelin lines OpenMap gives no faction to: the same rule as its Map/Routes.lua
+-- (zeppelins are the Horde's, these two goblin lines everyone's, every other boat the Alliance's).
+K.TRANSPORT_NEUTRAL = { ["Booty Bay - Ratchet"] = true, ["Steamwheedle Port - Powderfuse Port"] = true }
+K.TRANSPORT_MODE = { boat = "bateau", zeppelin = "zeppelin", airship = "airship" }
 
--- Classic coordinates, converted for Forever by QuestieDB when the zone has changed.
-local DOCKS = {
-  { key = "ogz", name = L["Orgrimmar zeppelin tower"], area = 14, x = 50.7, y = 13.0, faction = "Horde" },
-  { key = "ucz", name = L["Tirisfal zeppelin tower"], area = 85, x = 60.8, y = 58.8, faction = "Horde" },
-  { key = "ggz", name = L["Grom'gol zeppelin tower"], area = 33, x = 31.6, y = 29.6, faction = "Horde" },
-  { key = "rat", name = L["Ratchet docks"], area = 17, x = 63.7, y = 38.6 },
-  { key = "bb", name = L["Booty Bay docks"], area = 33, x = 25.9, y = 73.1 },
-  { key = "men", name = L["Menethil Harbor"], area = 11, x = 5.0, y = 60.0, faction = "Alliance" },
-  { key = "the", name = L["Theramore docks"], area = 15, x = 71.6, y = 56.4, faction = "Alliance" },
-  { key = "aub", name = L["Auberdine docks"], area = 148, x = 32.6, y = 43.2, faction = "Alliance" },
-  { key = "rut", name = "Rut'theran", area = 141, x = 54.9, y = 96.8, faction = "Alliance" },
-}
-local LINKS = {
-  { "ogz", "ucz", "zeppelin" }, { "ogz", "ggz", "zeppelin" }, { "ucz", "ggz", "zeppelin" },
-  { "rat", "bb", "bateau" }, { "men", "the", "bateau" }, { "men", "aub", "bateau" }, { "aub", "rut", "bateau" },
-}
+local function PlayerFactionBit()
+  local f = UnitFactionGroup and UnitFactionGroup("player")
+  return (f == "Alliance" and 1) or (f == "Horde" and 2) or 0
+end
 
-local function TaxiStore()
-  local s = Settings()
-  s.taxi = s.taxi or {}
-  local k = CharKey()
-  s.taxi[k] = s.taxi[k] or {}
-  return s.taxi[k]
+-- A flight node the character can use: its faction, and its class when it flies only one (Nighthaven).
+function Geo.NodeUsable(id)
+  local n = OM.flights.nodes[id]
+  if not (n and HasBit(n[5], PlayerFactionBit())) then return false end
+  return not n[6] or n[6] == select(2, UnitClass("player"))
+end
+
+-- Flight node -> world point.
+function Geo.NodePoint(id)
+  local n = OM.flights.nodes[id]
+  return n and { c = n[2], x = n[3], y = n[4] } or nil
+end
+
+-- The game's names of the flight nodes (client language) and name -> node, from the game's own
+-- flight node list (C_TaxiMap.GetTaxiNodesForMap on both continents).
+function Geo.TaxiNames()
+  if Geo.taxiNames then return Geo.taxiNames end
+  local byName, byId = {}, {}
+  for _, mapID in ipairs({ 1414, 1415 }) do
+    local ok, list = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
+    for _, info in ipairs(ok and type(list) == "table" and list or {}) do
+      if info.nodeID and type(info.name) == "string" and info.name ~= "" then
+        byName[info.name], byId[info.nodeID] = info.nodeID, info.name
+      end
+    end
+  end
+  for id, n in pairs(OM.flights.nodes) do
+    if type(n[1]) == "string" and not byName[n[1]] then byName[n[1]] = id end
+  end
+  if next(byId) then Geo.taxiNames = { byName = byName, byId = byId } end
+  return { byName = byName, byId = byId }
+end
+
+function Geo.NodeName(id)
+  local n = OM.flights.nodes[id]
+  return Geo.TaxiNames().byId[id] or (n and n[1]) or "?"
+end
+
+-- Flight nodes learned by the character: OpenMap's list (it records them at every flight master),
+-- by name, turned into node numbers. Returns the set and its size.
+function Geo.KnownNodes()
+  local char = OM.worldmap.char
+  local learned = type(char) == "table" and type(char.flightsKnown) == "table" and char.flightsKnown or {}
+  local n = 0
+  for _ in pairs(learned) do n = n + 1 end
+  local c = Geo.knownCache
+  if c and c.learned == learned and c.n == n then return c.set, c.count end
+  local byName = Geo.TaxiNames().byName
+  local set, count = {}, 0
+  for name in pairs(learned) do
+    local id = byName[name]
+    if id and not set[id] and Geo.NodeUsable(id) then set[id], count = true, count + 1 end
+  end
+  Geo.knownCache = { learned = learned, n = n, set = set, count = count }
+  return set, count
 end
 
 local function TaxiCount()
-  local n = 0
-  for _ in pairs(TaxiStore()) do n = n + 1 end
-  return n
+  local _, count = Geo.KnownNodes()
+  return count
 end
 
--- Called when a flight master's map opens: records the character's known flight paths.
-local function RecordTaxiNodes()
-  if not (GetTaxiMapID and C_Map and C_Map.GetWorldPosFromMapPos) then return end
-  local mapID = GetTaxiMapID()
-  if not mapID then return end
-  local store = TaxiStore()
-  local function save(name, pos)
-    if not name or not pos then return end
-    local ok, cont, w = pcall(C_Map.GetWorldPosFromMapPos, mapID, pos)
-    if ok and cont and w then
-      local x, y = w:GetXY()
-      store[name] = { c = cont, x = x, y = y, name = name }
-    end
+-- Learned flight masters: node -> { c, x, y, name, node }.
+local function KnownFlights()
+  local out = {}
+  for id in pairs((Geo.KnownNodes())) do
+    local p = Geo.NodePoint(id)
+    p.name, p.node = Geo.NodeName(id), id
+    out[id] = p
   end
-  if C_TaxiMap and C_TaxiMap.GetAllTaxiNodes then
-    local ok, nodes = pcall(C_TaxiMap.GetAllTaxiNodes, mapID)
-    if ok and type(nodes) == "table" then
-      for _, n in ipairs(nodes) do
-        local unreachable = Enum and Enum.FlightPathState and n.state == Enum.FlightPathState.Unreachable
-        if not unreachable then save(n.name, n.position) end
-      end
-    end
-  elseif NumTaxiNodes and TaxiNodeName and TaxiNodeGetType and TaxiNodePosition then
-    for i = 1, NumTaxiNodes() do
-      if TaxiNodeGetType(i) ~= "NONE" then
-        local x, y = TaxiNodePosition(i)
-        if x and y then save(TaxiNodeName(i), CreateVector2D(x, y)) end
-      end
-    end
-  end
+  return out
 end
 
--- Zone (name, minimum level) at a world point; cached by 200 m squares.
+-- Flight node at a point (a flight master's position), nil if none is close enough.
+function Geo.NodeAt(p)
+  if not p then return nil end
+  local best, bd
+  for id, n in pairs(OM.flights.nodes) do
+    if n[2] == p.c then
+      local dx, dy = n[3] - p.x, n[4] - p.y
+      local d = math.sqrt(dx * dx + dy * dy)
+      if d < K.NODE_MATCH and (not bd or d < bd) then best, bd = id, d end
+    end
+  end
+  return best
+end
+
+-- Flight lengths (yards) from node `from` to every node reachable over `learned` nodes only
+-- (the ends included): Dijkstra over OpenMap's flight paths. Nodes the flight map shows as
+-- unreachable are exactly those no such path joins.
+function Geo.FlightDists(from, learned)
+  if not Geo.flightEdges then
+    local edges = {}
+    for _, e in ipairs(OM.flights.paths) do
+      edges[e[1]] = edges[e[1]] or {}
+      table.insert(edges[e[1]], { e[2], e[3] })
+    end
+    Geo.flightEdges = edges
+  end
+  local dist, done = { [from] = 0 }, {}
+  while true do
+    local k, kd
+    for id, d in pairs(dist) do
+      if not done[id] and (not kd or d < kd) then k, kd = id, d end
+    end
+    if not k then break end
+    done[k] = true
+    for _, e in ipairs(Geo.flightEdges[k] or {}) do
+      local to = e[1]
+      if learned[to] and not done[to] then
+        local nd = kd + e[2]
+        if not dist[to] or nd < dist[to] then dist[to] = nd end
+      end
+    end
+  end
+  return dist
+end
+
+-- Faction allowed on a boat/zeppelin/airship line (nil: everyone).
+function Geo.TransportFaction(t)
+  if t.faction then return t.faction end
+  if t[1] == "zeppelin" then return "Horde" end
+  if t[1] == "airship" or K.TRANSPORT_NEUTRAL[t[2]] then return nil end
+  return "Alliance"
+end
+
+function Geo.IsShip(mode)
+  return mode == "zeppelin" or mode == "bateau" or mode == "airship"
+end
+
+-- Docks of the character's faction and the lines between them (directed), built once.
+function Geo.Docks()
+  if Geo.docks then return Geo.docks end
+  local faction = UnitFactionGroup and UnitFactionGroup("player")
+  local docks, links = {}, {}
+  local function dockAt(c, x, y, mode, route)
+    for i, d in ipairs(docks) do
+      if d.p.c == c and math.abs(d.p.x - x) < K.DOCK_MERGE and math.abs(d.p.y - y) < K.DOCK_MERGE then return i end
+    end
+    local zone
+    local ok, ui = pcall(C_Map.GetMapPosFromWorldPos, c, CreateVector2D(x, y))
+    local info = ok and ui and C_Map.GetMapInfo(ui)
+    zone = info and info.name or route
+    docks[#docks + 1] = { name = (K.MODE_NAME[mode] or mode) .. " (" .. zone .. ")", p = { c = c, x = x, y = y } }
+    return #docks
+  end
+  for _, t in ipairs(OM.places.transports) do
+    local f = Geo.TransportFaction(t)
+    local mode = K.TRANSPORT_MODE[t[1]]
+    if mode and (not f or f == faction) then
+      local a = dockAt(t[3], t[4], t[5], mode, t[2])
+      local b = dockAt(t[6], t[7], t[8], mode, t[2])
+      links[#links + 1] = { a, b, mode }
+    end
+  end
+  Geo.docks = { docks = docks, links = links }
+  return Geo.docks
+end
+
+-- Zone (name, minimum level) at a world point; cached by 200 m squares. Levels: OpenMap.MapLevels
+-- (the client's tables have none); zones it does not list (cities...) have no level.
 local zoneCache = {}
 local function ZoneAt(p)
-  if not (C_Map.GetMapPosFromWorldPos and C_Map.GetMapInfoAtPosition and C_Map.GetMapLevels) then return nil end
   local key = p.c .. ":" .. math.floor(p.x / 200) .. ":" .. math.floor(p.y / 200)
   local z = zoneCache[key]
   if z == nil then
@@ -262,14 +441,28 @@ local function ZoneAt(p)
       local mx, my = mp:GetXY()
       local okI, info = pcall(C_Map.GetMapInfoAtPosition, ui, mx, my)
       local zoneMap = (okI and info and info.mapID) or ui
-      local okL, minL = pcall(C_Map.GetMapLevels, zoneMap)
-      if okL and minL and minL > 0 then
-        z = { name = (okI and info and info.name) or AreaName(0), min = minL }
+      local lv = OM.levels[zoneMap]
+      if lv and lv[1] then
+        z = { name = (okI and info and info.name) or AreaName(0), min = lv[1] }
       end
     end
     zoneCache[key] = z
   end
   return z or nil
+end
+
+-- Level range "lo-hi" in the quest colours for the player (OpenMap's own colouring).
+function Geo.LevelRange(lo, hi)
+  if not lo then return "" end
+  local ok, code, range = pcall(OM.worldmap.LevelColor, lo, hi or lo)
+  if not ok or not code then return lo .. "-" .. (hi or lo) end
+  return code .. range .. "|r"
+end
+
+-- Level range of the zone (uiMapID), coloured, or nil.
+function Geo.ZoneLevelText(uiMapID)
+  local lv = uiMapID and OM.levels[uiMapID]
+  return lv and lv[1] and Geo.LevelRange(lv[1], lv[2]) or nil
 end
 
 -- Walking time between two points; also returns the dangerous zone crossed.
@@ -289,62 +482,56 @@ local function WalkCost(a, b, net, plevel)
 end
 
 -- Transport point graph + shortest paths (Floyd-Warshall, about fifty nodes).
--- extra: flight masters not known yet, used as if their flight path were activated
--- ({ name, p }, custom Roadbook: flight paths activated on the way).
+-- extra: flight masters not learned yet, used as if their flight path were activated
+-- ({ name, p, node }, custom Roadbook: flight paths activated on the way).
 local function BuildNetwork(speed, extra)
   local hubs = {}
-  local faction = UnitFactionGroup and UnitFactionGroup("player")
-  for name, n in pairs(TaxiStore()) do
-    hubs[#hubs + 1] = { kind = "taxi", name = name, p = { c = n.c, x = n.x, y = n.y } }
+  local learned = {}
+  for id in pairs((Geo.KnownNodes())) do learned[id] = true end
+  for id in pairs(learned) do
+    hubs[#hubs + 1] = { kind = "taxi", name = Geo.NodeName(id), p = Geo.NodePoint(id), node = id }
   end
   for _, h in ipairs(extra or {}) do
-    hubs[#hubs + 1] = { kind = "taxi", name = h.name, p = { c = h.p.c, x = h.p.x, y = h.p.y }, guess = true }
-  end
-  local dockIndex = {}
-  for _, dock in ipairs(DOCKS) do
-    if not dock.faction or dock.faction == faction then
-      local x, y = dock.x, dock.y
-      if QDB.lib and QDB.lib.EraToForever then
-        local ok, fx, fy = pcall(QDB.lib.EraToForever, dock.area, x, y)
-        if ok and fx and fy then x, y = fx, fy end
-      end
-      local w = WorldPos(dock.area, x, y)
-      if w then
-        hubs[#hubs + 1] = { kind = "dock", name = dock.name, p = w }
-        dockIndex[dock.key] = #hubs
-      end
+    local id = h.node or Geo.NodeAt(h.p)
+    if not (id and learned[id]) then
+      if id then learned[id] = true end
+      hubs[#hubs + 1] = { kind = "taxi", name = h.name, p = { c = h.p.c, x = h.p.x, y = h.p.y }, node = id, guess = true }
     end
+  end
+  local dk = Geo.Docks()
+  local dockIndex = {}
+  for k, dock in ipairs(dk.docks) do
+    hubs[#hubs + 1] = { kind = "dock", name = dock.name, p = dock.p }
+    dockIndex[k] = #hubs
   end
 
   local n = #hubs
   local D, nxt, via = {}, {}, {}
   for i = 1, n do
     D[i], nxt[i], via[i] = {}, {}, {}
+    local a = hubs[i]
+    local fd = (a.kind == "taxi" and a.node) and Geo.FlightDists(a.node, learned) or nil
     for j = 1, n do
       nxt[i][j] = j
       if i == j then
         D[i][j] = 0
       else
-        local a, b = hubs[i], hubs[j]
+        local b = hubs[j]
         local d = Dist(a.p, b.p)
         local best, how = math.huge, nil
-        if d then
-          best, how = d * K.PATH_FACTOR / speed, "walk"
-          if a.kind == "taxi" and b.kind == "taxi" then
-            local fl = d * 1.2 / K.FLIGHT_SPEED + K.FLIGHT_OVERHEAD
-            if fl < best then best, how = fl, "flight" end
-          end
+        if d then best, how = d * K.PATH_FACTOR / speed, "walk" end
+        local len = fd and b.kind == "taxi" and b.node and fd[b.node]
+        if len then
+          local fl = len / K.FLIGHT_SPEED + K.FLIGHT_OVERHEAD
+          if fl < best then best, how = fl, "flight" end
         end
         D[i][j], via[i][j] = best, how
       end
     end
   end
-  for _, l in ipairs(LINKS) do
+  for _, l in ipairs(dk.links) do
     local i, j = dockIndex[l[1]], dockIndex[l[2]]
-    if i and j then
-      if K.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = K.TRANSPORT_TIME, l[3] end
-      if K.TRANSPORT_TIME < D[j][i] then D[j][i], via[j][i] = K.TRANSPORT_TIME, l[3] end
-    end
+    if i and j and K.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = K.TRANSPORT_TIME, l[3] end
   end
   for k = 1, n do
     local Dk = D[k]
@@ -431,7 +618,7 @@ local function RouteText(a, b, net, plevel)
           parts[#parts + 1] = Color("80c0ff", L["flight "] .. flightFrom .. " -> " .. hubs[nx].name)
           flightFrom = nil
         end
-      elseif mode == "zeppelin" or mode == "bateau" then
+      elseif Geo.IsShip(mode) then
         parts[#parts + 1] = Color("80c0ff", (K.MODE_NAME[mode] or mode) .. " -> " .. hubs[nx].name)
       else
         walk(hubs[cur].p, hubs[nx].p, hubs[nx].name)
@@ -632,6 +819,6 @@ end
 
 -- Shared with the next files.
 ns.AllInstance, ns.BuildNetwork, ns.Dist, ns.EntityPoints, ns.Geo, ns.GeoReady = AllInstance, BuildNetwork, Dist, EntityPoints, Geo, GeoReady
-ns.Nearest, ns.PlayerPos, ns.PointText, ns.QuestTargets, ns.RecordTaxiNodes, ns.RemainingTargets = Nearest, PlayerPos, PointText, QuestTargets, RecordTaxiNodes, RemainingTargets
-ns.Route, ns.RouteText, ns.StartPoints, ns.TaxiCount, ns.TaxiStore, ns.TravelSpeed = Route, RouteText, StartPoints, TaxiCount, TaxiStore, TravelSpeed
+ns.Nearest, ns.PlayerPos, ns.PointText, ns.QuestTargets, ns.RemainingTargets = Nearest, PlayerPos, PointText, QuestTargets, RemainingTargets
+ns.Route, ns.RouteText, ns.StartPoints, ns.TaxiCount, ns.KnownFlights, ns.TravelSpeed = Route, RouteText, StartPoints, TaxiCount, KnownFlights, TravelSpeed
 ns.UnitTime, ns.WorldPos = UnitTime, WorldPos

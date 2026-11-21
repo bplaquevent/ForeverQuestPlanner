@@ -8,7 +8,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 
 ### Roadbook
 - Quest route optimized for **XP only**, with two goals: **for a play session** of 1 h, 2 h or 4 h (the most XP within that time) or **to reach a level** (from your level + 1 to the max level: the fastest route to it). Pick-ups, objectives and turn-ins, grouped by zone.
-- Travel using your **known flight masters**, zeppelins and boats, with a penalty for zones that are too high for you.
+- Travel over the **real flight network** of WoW Forever (only the flight paths you have learned, flight time from the length of each path), the boats, zeppelins and airships of your faction (one-way lines included), with a penalty for zones that are too high for you. Flight network, transport lines and zone levels come from **OpenMap**; the flight paths you have learned are the ones OpenMap records at each flight master (open a flight master's map once).
 - **Level forecast**: quest XP and monster XP (Classic formula, rested XP). Quests are taken on from the level expected along the route (required level and "Max quest level" setting), with the XP they give at that level. With a far level goal, the Roadbook is a **stage** (up to ~300 quests / 40 h): at its end, **Generate** plans the next stage from your real level.
 - **Quest chains** evaluated as a whole (XP, rewards and required level of every step).
 - **Monster spots**: spawn points are grouped into hunting spots and the most efficient spot is chosen (travel + density).
@@ -59,8 +59,12 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 
 ## Dependencies
 
-- **[QuestieDB](https://github.com/Questie/QuestieDB)** (strongly recommended): positions, XP, quest chains, monsters, items. Without it, only the quest log and the export work.
-- **Questie** (optional).
+Both are required: the addon does not start without them.
+
+- **[QuestieDB](https://github.com/Questie/QuestieDB)**: positions, XP, quest chains, monsters, items.
+- **[OpenMap](https://github.com/openmap-world/openmap)**: WoW Forever's flight network and the flight paths you have learned, boat, zeppelin and airship lines, dungeon entrances with their level range, zone level ranges (shown next to zone names, coloured for your level).
+
+Optional: **Questie**.
 
 ## Installation
 
@@ -96,7 +100,8 @@ To add a language, copy `frFR.lua`, change the locale code and translate the val
 
 ## Limitations
 
-- Positions, drop rates and quest chains come from QuestieDB: missing or wrong data ends up in the plan.
+- Positions, drop rates and quest chains come from QuestieDB, travel data from OpenMap: missing or wrong data ends up in the plan.
+- FQP reads OpenMap's own data tables, which are not its documented API: a change there is reported at login (the addon then stays off until it is updated).
 - Times are estimates (30 s per monster by default, configurable).
 - Quests that take place inside a dungeon instance are not planned.
 

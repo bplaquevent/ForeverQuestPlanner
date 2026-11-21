@@ -217,7 +217,7 @@ end
 local function Refresh() ns.Refresh() end -- the real one is in UI/Window.lua
 
 local function StartScan()
-  if scan.running or not QDB.ok then return end
+  if scan.running then return end
   local okIds, ids = pcall(QDB.Quest.GetAllIds)
   if not okIds or type(ids) ~= "table" then
     scan.error = L["Unable to read the QuestieDB quest list."]

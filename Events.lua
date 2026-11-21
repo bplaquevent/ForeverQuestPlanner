@@ -2,9 +2,9 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local CP, CharKey, CreateMinimapButton, ExportAndSave, Geo, InitQuestieDB = ns.CP, ns.CharKey, ns.CreateMinimapButton, ns.ExportAndSave, ns.Geo, ns.InitQuestieDB
-local K, L, OnWaypointChanged, PlayerPos, Print, RecordTaxiNodes = ns.K, ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print, ns.RecordTaxiNodes
-local Refresh, ScheduleSnapshot, Settings, Snapshot, State, ToggleMainFrame = ns.Refresh, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.ToggleMainFrame
+local CP, CharKey, CreateMinimapButton, ExportAndSave, Geo, InitDeps = ns.CP, ns.CharKey, ns.CreateMinimapButton, ns.ExportAndSave, ns.Geo, ns.InitDeps
+local K, L, OnWaypointChanged, PlayerPos, Print = ns.K, ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print
+local Color, Refresh, ScheduleSnapshot, Settings, Snapshot, State, ToggleMainFrame = ns.Color, ns.Refresh, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.ToggleMainFrame
 local scan = ns.scan
 
 ---------------------------------------------------------------------------
@@ -35,6 +35,14 @@ else
 end
 f:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGIN" then
+    -- QuestieDB and OpenMap are required: without them (or with an unsupported version) the addon stays off.
+    local okD, err = pcall(InitDeps)
+    if not okD or err then
+      f.disabled = tostring(err)
+      f:UnregisterAllEvents()
+      Print(Color("ff4040", f.disabled))
+      return
+    end
     Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
     -- Options saved from the settings window or the tabs.
     local st = Settings()
@@ -55,8 +63,6 @@ f:SetScript("OnEvent", function(_, event, ...)
     end
     Geo.ResetActiveIfEmpty()
     pcall(Geo.ApplyParams)
-    local ok, err = pcall(InitQuestieDB)
-    if not ok then Print(L["QuestieDB initialization error: "] .. tostring(err)) end
     CreateMinimapButton()
     if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
     ScheduleSnapshot()
@@ -107,8 +113,6 @@ f:SetScript("OnEvent", function(_, event, ...)
     C_Timer.After(0.2, function() pcall(CP.RefreshButton) end)
     if State.mainFrame and State.mainFrame:IsShown() then C_Timer.After(0.1, Refresh) end
   elseif event == "TAXIMAP_OPENED" then
-    local ok, err = pcall(RecordTaxiNodes)
-    if not ok then Print(L["Error recording flight masters: "] .. tostring(err)) end
     pcall(CP.OnGameEvent, event, ...)
   else
     ScheduleSnapshot()
@@ -135,6 +139,10 @@ end)
 ---------------------------------------------------------------------------
 SLASH_FOREVERQUESTPLANNER1 = "/fqp"
 SlashCmdList.FOREVERQUESTPLANNER = function(msg)
+  if f.disabled then
+    Print(Color("ff4040", f.disabled))
+    return
+  end
   msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
   if msg == "save" then
     ExportAndSave()

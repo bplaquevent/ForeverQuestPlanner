@@ -250,10 +250,6 @@ end
 function Geo.RenderCustomXP()
   local panel = panels.custom
   if panel.busy then panel.busy:Hide() end
-  if not QDB.ok then
-    ShowMessage(panel, "custom", L["QuestieDB is not loaded: this tab needs the locations and XP from its database."])
-    return
-  end
   if not GeoReady() then
     ShowMessage(panel, "custom", L["Unable to convert QuestieDB positions to this client's map."])
     return
@@ -295,7 +291,7 @@ function Geo.RenderCustomXP()
     if type(req) == "number" and req > plevel then notes[#notes + 1] = Color(D.warn, string.format(L["level %d required"], req)) end
     if it.pre then notes[#notes + 1] = Color(D.chain, string.format(L["prerequisite of \"%s\""], titleOf[it.pre] or ("#" .. it.pre))) end
     local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
-    local dg = sort > 0 and QDB.dungeonOf and QDB.dungeonOf[sort]
+    local dg = sort > 0 and QDB.dungeonOf[sort]
     if dg then notes[#notes + 1] = Color(D.meta, L["dungeon: "] .. (AreaName(dg) or "?")) end
     local text = "  " .. StateIcons(it.id) .. Geo.QuestTitle(it.title, { id = it.id, level = it.level }) ..
       Geo.DescLine(status, unpack(notes))
@@ -338,10 +334,6 @@ end
 local function RenderXP()
   local panel = panels.xp
   if panel.busy then panel.busy:Hide() end
-  if not QDB.ok then
-    ShowMessage(panel, "xp", L["QuestieDB is not loaded: this tab needs the locations and XP from its database."])
-    return
-  end
   if not GeoReady() then
     ShowMessage(panel, "xp", L["Unable to convert QuestieDB positions to this client's map."])
     return
