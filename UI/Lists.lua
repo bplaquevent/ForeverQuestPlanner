@@ -6,7 +6,7 @@ local ChainInfo, ChainText, CharKey, Color, FormatNumber, Geo = ns.ChainInfo, ns
 local GeoReady, IsClassMeta, IsInLog, K, L, Nearest = ns.GeoReady, ns.IsClassMeta, ns.IsInLog, ns.K, ns.L, ns.Nearest
 local PlayerPos, PointText, Print, QDB, QGet, QuestMeta = ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta
 local QuestTargets, Refresh, RemainingTargets, Settings, Snapshot, State = ns.QuestTargets, ns.Refresh, ns.RemainingTargets, ns.Settings, ns.Snapshot, ns.State
-local TrivialRange, TurnInText = ns.TrivialRange, ns.TurnInText
+local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.TurnInText, ns.StartPoints, ns.EntityPoints
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -276,14 +276,30 @@ local function ListRow(panel, i)
   r.b2 = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.b3 = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   for _, b in ipairs({ r.b1, r.b2, r.b3 }) do b:SetHeight(20) end
+  -- Section title line: thin golden rule under the text.
+  r.rule = r:CreateTexture(nil, "BORDER")
+  r.rule:SetPoint("BOTTOMLEFT", 6, 2)
+  r.rule:SetPoint("BOTTOMRIGHT", -6, 2)
+  r.rule:SetHeight(1)
+  r.rule:SetColorTexture(1, 0.82, 0, 0.6)
+  r.rule:Hide()
   panel.rows[i] = r
   return r
 end
 
+-- spec = { text, fn, tip = { title, text } }: tip shown on hover.
 local function SetButton(b, spec)
   if spec then
     b:SetText(spec.text)
     b:SetScript("OnClick", spec.fn)
+    local tip = spec.tip
+    b:SetScript("OnEnter", tip and function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_TOP")
+      GameTooltip:AddLine(tip[1])
+      if tip[2] then GameTooltip:AddLine(tip[2], 0.8, 0.8, 0.8, true) end
+      GameTooltip:Show()
+    end or nil)
+    b:SetScript("OnLeave", tip and function() GameTooltip:Hide() end or nil)
     b:Show()
   else
     b:Hide()
@@ -345,10 +361,16 @@ local function RenderList(panel, tabKey, items, forceOpen)
   local y, zebra, n, closed, capped = -4, 0, 0, false, false
   for _, it in ipairs(items) do
     local ckey = it.key and (tabKey .. ":" .. it.key)
-    if it.header then closed = (not forceOpen) and ckey and not expanded[ckey] and true or false end
-    if n >= K.MAX_VISIBLE_ROWS and not it.header then
+    if it.section then closed = false end -- a section ends the previous category
+    if it.header then
+      -- open = true: category expanded by default (expanded[ckey] == false once collapsed).
+      local isClosed = it.open and expanded[ckey] == false or (not it.open and not expanded[ckey])
+      closed = (not forceOpen) and ckey and isClosed and true or false
+    end
+    if n >= K.MAX_VISIBLE_ROWS and not it.header and not it.section then
       capped = capped or not closed -- too many expanded lines: only the bars stay visible
-    elseif it.header or not closed then
+    elseif it.header or it.section or not closed then
+      if it.section and n > 0 then y = y - 10 end -- space above a section title
       n = n + 1
       local r = ListRow(panel, n)
       r:ClearAllPoints()
@@ -365,6 +387,8 @@ local function RenderList(panel, tabKey, items, forceOpen)
         end
       end
       local hasButtons = it.b1 or it.b2 or it.b3
+      r.text:SetFontObject(it.section and "GameFontNormalLarge" or "GameFontHighlight")
+      r.rule:SetShown(it.section and true or false)
       r.text:SetWidth(CONTENT_WIDTH - (hasButtons and (grid.total + 12) or 16))
       if it.stripe then
         r.stripe:SetColorTexture(it.stripe[1], it.stripe[2], it.stripe[3], 1)
@@ -372,7 +396,15 @@ local function RenderList(panel, tabKey, items, forceOpen)
       else
         r.stripe:Hide()
       end
-      if it.header then
+      if it.section then
+        r.bg:SetColorTexture(0, 0, 0, 0)
+        r.text:SetText(it.text or "")
+        r:EnableMouse(false)
+        r:SetScript("OnMouseUp", nil)
+        r:SetScript("OnEnter", nil)
+        r:SetScript("OnLeave", nil)
+        zebra = 0
+      elseif it.header then
         local c = CAT_COLORS[it.kind] or CAT_COLORS.zone
         r.bg:SetColorTexture(c[1], c[2], c[3], 0.9)
         local prefix = ckey and ((closed and "[+]  ") or "[-]  ") or ""
@@ -383,7 +415,11 @@ local function RenderList(panel, tabKey, items, forceOpen)
         if ckey then
           r:EnableMouse(true)
           r:SetScript("OnMouseUp", function()
-            expanded[ckey] = not expanded[ckey] or nil
+            if it.open then
+              if expanded[ckey] == false then expanded[ckey] = nil else expanded[ckey] = false end
+            else
+              expanded[ckey] = not expanded[ckey] or nil
+            end
             Refresh()
           end)
         else
@@ -420,7 +456,7 @@ local function RenderList(panel, tabKey, items, forceOpen)
         end
         r.text:SetText(Geo.IndentWrap(it.text or "", r.text:GetWidth()))
       end
-      local h = math.max(it.header and 24 or 26, r.text:GetStringHeight() + 12)
+      local h = math.max(it.header and 24 or 26, r.text:GetStringHeight() + (it.section and 14 or 12))
       r:SetHeight(h)
       y = y - h - (it.header and 3 or 0)
     end
@@ -433,6 +469,8 @@ local function RenderList(panel, tabKey, items, forceOpen)
     r:Show()
     for _, b in ipairs({ r.b1, r.b2, r.b3 }) do b:Hide() end
     r.stripe:Hide()
+    r.rule:Hide()
+    r.text:SetFontObject("GameFontHighlight")
     r.bg:SetColorTexture(1, 0.5, 0.15, 0.2)
     r:EnableMouse(false)
     r:SetScript("OnMouseUp", nil)
@@ -517,15 +555,6 @@ local function WatchOnly(questID)
   SetWatched(questID, true)
 end
 
-local function SetWatchedList(quests, on)
-  local failed = 0
-  for _, q in ipairs(quests) do
-    SetWatched(q.id, on)
-    if on and not IsWatched(q.id) then failed = failed + 1 end
-  end
-  if failed > 0 then Print(failed .. L[" quest(s) not tracked: the game's tracking limit was reached."]) end
-end
-
 -- Most useful point of a quest: nearest remaining objective, otherwise the turn-in NPC.
 local function ObjectivePoint(q)
   local pos = PlayerPos()
@@ -541,6 +570,7 @@ local function ObjectivePoint(q)
   local f = Nearest(t.finish, pos)
   return f, L["turn in the quest"]
 end
+Geo.ObjectivePoint = ObjectivePoint
 
 -- Pin placed by the addon, remembered per character.
 local function PinStore()
@@ -813,6 +843,7 @@ local function QuestStates(questId)
     st.available = true
   end
   if IsPinned(questId) then st.pinned = true end
+  if Geo.InCustom(questId) then st.custom = true end
   return st
 end
 
@@ -867,27 +898,96 @@ local function PinPoint(p, title, label, questId)
   end
 end
 
-local function SetMapPin(q)
-  if not (QDB.ok and GeoReady()) then
-    Print(L["Cannot place a pin: QuestieDB is required to know objective locations."])
-    return
+-- Map (uiMap) of a point, or nil.
+function Geo.PointUi(p)
+  if not p then return nil end
+  local ui = p.ui or Geo.areaToUi[p.area]
+  if (not ui or ui == 0) and Geo.parent[p.area] then ui = Geo.areaToUi[Geo.parent[p.area]] end
+  return (ui and ui ~= 0) and ui or nil
+end
+
+-- Map of the quest's zone (QuestieDB zoneOrSort), when no position is known.
+function Geo.QuestZoneUi(id)
+  local sort = QDB.ok and QGet(QDB.Quest, id, "zoneOrSort") or 0
+  if not (type(sort) == "number" and sort > 0 and GeoReady()) then return nil end
+  return Geo.PointUi({ area = sort })
+end
+
+-- Where to pick up a quest: its giver, otherwise the monsters / objects dropping the item that
+-- starts it, otherwise its first located objective, otherwise its turn-in NPC.
+function Geo.GiverPoint(id, pos)
+  local p = Nearest(StartPoints(id), pos)
+  if p then return p, L["pick up the quest"] end
+  local by = QGet(QDB.Quest, id, "startedBy")
+  local items = type(by) == "table" and by[3]
+  for _, itemId in ipairs(type(items) == "table" and items or {}) do
+    local pts = {}
+    for _, n in ipairs(QGet(QDB.Item, itemId, "npcDrops") or {}) do
+      for _, w in ipairs(EntityPoints("npc", n)) do pts[#pts + 1] = w end
+    end
+    for _, o in ipairs(QGet(QDB.Item, itemId, "objectDrops") or {}) do
+      for _, w in ipairs(EntityPoints("object", o)) do pts[#pts + 1] = w end
+    end
+    local q = Nearest(pts, pos)
+    if q then return q, L["item that starts the quest"] end
   end
-  local p, label = ObjectivePoint(q)
-  PinPoint(p, q.title, label or L["objective"], q.id)
+  local t = QuestTargets(id)
+  for _, tg in ipairs(t) do
+    local q = Nearest(tg.points, pos)
+    if q then return q, tg.name or L["objective"] end
+  end
+  local f = Nearest(t.finish, pos)
+  if f then return f, L["turn in the quest"] end
+  return nil
 end
 
-local function UnpinButton()
-  return { text = L["Remove pin"], fn = function()
-    ClearPin()
-    Print(L["Pin removed."])
-    if Refresh then Refresh() end
-  end }
+-- Opens the world map on a map (the addon window is closed so that it does not hide it).
+function Geo.OpenWorldMap(ui)
+  if State.mainFrame and State.mainFrame:IsShown() then State.mainFrame:Hide() end
+  if not WorldMapFrame then return end
+  if not WorldMapFrame:IsShown() then
+    if ToggleWorldMap then pcall(ToggleWorldMap) elseif ShowUIPanel then pcall(ShowUIPanel, WorldMapFrame) end
+  end
+  if ui and WorldMapFrame.SetMapID then pcall(WorldMapFrame.SetMapID, WorldMapFrame, ui) end
 end
 
-local function PinButton(p, title, label, questId)
-  if IsPinned(questId) then return UnpinButton() end
-  if not (QDB.ok and p) then return nil end
-  return { text = L["Pin"], fn = function() PinPoint(p, title, label, questId) end }
+-- "Map" button: pin on the quest's place (getPoint() -> point, label), then the world map on it.
+function Geo.ShowOnMap(getPoint, title, questId)
+  local p, label
+  if QDB.ok and GeoReady() then p, label = getPoint() end
+  if p then
+    PinPoint(p, title, label or L["objective"], questId)
+    Geo.OpenWorldMap(Geo.PointUi(p))
+  else
+    Print(L["Unknown position for \""] .. (title or "?") .. L["\"."])
+    Geo.OpenWorldMap(questId and Geo.QuestZoneUi(questId))
+  end
+end
+
+function Geo.MapButton(getPoint, title, questId)
+  return { text = L["Map"], fn = function() Geo.ShowOnMap(getPoint, title, questId) end,
+    tip = { L["Map"], L["Places the map pin on this quest (giver, objective or turn-in) and opens the world map on it."] } }
+end
+
+-- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.
+K.CUSTOM_TIP = "Custom Roadbook: your own quest list, done along the fastest route (Roadbook tab, \"Custom\" mode)."
+function Geo.CustomButton(id, title, level)
+  if not (QDB.ok and id) then return nil end
+  local inList = Geo.InCustom(id)
+  return { text = inList and L["Remove"] or L["Add"],
+    tip = { inList and L["Remove from the custom Roadbook"] or L["Add to the custom Roadbook"], L[K.CUSTOM_TIP] },
+    fn = function()
+      if Geo.InCustom(id) then Geo.CustomRemove(id) else Geo.CustomAdd(id, title, level) end
+    end }
+end
+
+-- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
+function Geo.CustomBulkButtons(list)
+  if not QDB.ok then return nil, nil end
+  return { text = L["Add all"], fn = function() Geo.CustomAddList(list) end,
+      tip = { L["Add every quest of this category to the custom Roadbook"], L[K.CUSTOM_TIP] } },
+    { text = L["Remove all"], fn = function() Geo.CustomRemoveList(list) end,
+      tip = { L["Remove every quest of this category from the custom Roadbook"], L[K.CUSTOM_TIP] } }
 end
 
 ---------------------------------------------------------------------------
@@ -973,7 +1073,7 @@ end
 -- Shared with the next files.
 ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSearchBox, ns.EntryHaystack = ActivePin, CONTENT_WIDTH, ClearPin, CreateScrollPanel, CreateSearchBox, EntryHaystack
 ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.Normalize, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, Normalize, OnWaypointChanged
-ns.ParseQuery, ns.PassStates, ns.PinButton, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinButton, PinIcon, PinPoint, Plural
-ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetMapPin, ns.SetWatched, ns.SetWatchedList = QuestHaystack, RenderExport, RenderList, SetMapPin, SetWatched, SetWatchedList
-ns.ShowMessage, ns.StateIcons, ns.UnpinButton, ns.WatchOnly, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UnpinButton, WatchOnly, expandedCategories, journalStates
+ns.ParseQuery, ns.PassStates, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinIcon, PinPoint, Plural
+ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetWatched = QuestHaystack, RenderExport, RenderList, SetWatched
+ns.ShowMessage, ns.StateIcons, ns.WatchOnly, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, WatchOnly, expandedCategories, journalStates
 ns.nearStates, ns.panels, ns.tabButtons = nearStates, panels, tabButtons

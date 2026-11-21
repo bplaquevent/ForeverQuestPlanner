@@ -148,7 +148,7 @@ local function CreateMainFrame()
     State.todoQuery = ParseQuery(text)
     Refresh()
   end)
-  AddStateFilters(panels.groups, { turnin = true, inprogress = true, watched = true, pinned = true, abandon = true }, journalStates)
+  AddStateFilters(panels.groups, { turnin = true, inprogress = true, watched = true, pinned = true, abandon = true, custom = true }, journalStates)
   local exportButton = CreateFrame("Button", nil, panels.groups, "UIPanelButtonTemplate")
   exportButton:SetSize(150, 22)
   exportButton:SetPoint("TOPRIGHT", -12, -70)
@@ -164,6 +164,7 @@ local function CreateMainFrame()
     { key = "pvp", label = L["PvP"] },
     { key = "class", label = L["Class & professions"] },
     { key = "all", label = L["All"] },
+    { key = "custom", label = L["Custom Roadbook"] },
   }, function() return State.availFilter end, function(v)
     State.availFilter = v
     Settings().availFilter = v
@@ -184,7 +185,7 @@ local function CreateMainFrame()
     State.nearQuery = ParseQuery(text)
     Refresh()
   end, LOW_LEVEL_TOGGLE, L["Radius:"])
-  AddStateFilters(panels.near, { turnin = true, inprogress = true, watched = true, pinned = true, available = true }, nearStates)
+  AddStateFilters(panels.near, { turnin = true, inprogress = true, watched = true, pinned = true, available = true, custom = true }, nearStates)
 
   panels.xp = CreateFilterPanel(f, {
     { key = 3600, label = "1 h" },
@@ -200,11 +201,51 @@ local function CreateMainFrame()
     State.xpQuery = ParseQuery(text)
     Refresh()
   end, nil, L["Duration:"])
-  local recompute = CreateFrame("Button", nil, panels.xp, "UIPanelButtonTemplate")
-  recompute:SetSize(150, 22)
-  recompute:SetPoint("TOPRIGHT", -12, -70) -- same place as "Export" in the Quest log tab
-  recompute:SetText(L["Recalculate"])
-  recompute:SetScript("OnClick", function() CP.Recompute() end)
+  -- "Start": computes the Roadbook of the selected mode and follows its first step.
+  local start = CreateFrame("Button", nil, panels.xp, "UIPanelButtonTemplate")
+  start:SetSize(120, 22)
+  start:SetPoint("TOPRIGHT", -12, -70) -- same place as "Export" in the Quest log tab
+  start:SetText(L["Start"])
+  start:SetScript("OnClick", function() CP.Recompute() end)
+  start:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:AddLine(L["Start"])
+    GameTooltip:AddLine(L["Computes the Roadbook of the selected mode and follows its first step with the Objective button."], 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  start:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  -- Mode: automatic (best XP for the duration) or custom (your quest list, fastest route).
+  local modes, prev = {}, start
+  for _, m in ipairs({ { key = "custom", label = L["Custom"] }, { key = "auto", label = L["Automatic"] } }) do
+    local okR, b = pcall(CreateFrame, "CheckButton", nil, panels.xp, "UIRadioButtonTemplate")
+    if not okR or not b then b = CreateFrame("CheckButton", nil, panels.xp, "UICheckButtonTemplate") end
+    b:SetSize(18, 18)
+    b.label = panels.xp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.label:SetText(m.label)
+    b.label:SetPoint("RIGHT", prev, "LEFT", prev == start and -12 or -14, 0)
+    b:SetPoint("RIGHT", b.label, "LEFT", -2, 0)
+    b:SetScript("OnClick", function() CP.SetMode(m.key) end)
+    b:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+      GameTooltip:AddLine(m.label)
+      GameTooltip:AddLine(m.key == "custom" and L["Your own quest list (+ button in the other tabs), done along the fastest route."]
+        or L["Quests chosen for the best XP within the duration."], 0.8, 0.8, 0.8, true)
+      GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    modes[m.key] = b
+    prev = b
+  end
+  -- The duration only applies to the automatic Roadbook.
+  function panels.xp.UpdateMode()
+    local custom = Geo.CustomMode()
+    for k, b in pairs(modes) do b:SetChecked((k == "custom") == custom) end
+    for _, b in pairs(panels.xp.buttons) do
+      b:SetShown(not custom)
+      b.label:SetShown(not custom)
+    end
+    if panels.xp.caption then panels.xp.caption:SetShown(not custom) end
+  end
 
   f:SetScript("OnShow", function()
     -- Same sound as opening the game's quest log.

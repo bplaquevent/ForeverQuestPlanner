@@ -289,11 +289,16 @@ local function WalkCost(a, b, net, plevel)
 end
 
 -- Transport point graph + shortest paths (Floyd-Warshall, about fifty nodes).
-local function BuildNetwork(speed)
+-- extra: flight masters not known yet, used as if their flight path were activated
+-- ({ name, p }, custom Roadbook: flight paths activated on the way).
+local function BuildNetwork(speed, extra)
   local hubs = {}
   local faction = UnitFactionGroup and UnitFactionGroup("player")
   for name, n in pairs(TaxiStore()) do
     hubs[#hubs + 1] = { kind = "taxi", name = name, p = { c = n.c, x = n.x, y = n.y } }
+  end
+  for _, h in ipairs(extra or {}) do
+    hubs[#hubs + 1] = { kind = "taxi", name = h.name, p = { c = h.p.c, x = h.p.x, y = h.p.y }, guess = true }
   end
   local dockIndex = {}
   for _, dock in ipairs(DOCKS) do

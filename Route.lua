@@ -59,13 +59,20 @@ function Geo.Boardings(choice, net)
   return out
 end
 
+-- Network of the leg arriving at route[k]: a single network, or a function k -> network
+-- (custom Roadbook: flight paths activated on the way become usable after their step).
+function Geo.LegNet(net, k)
+  if type(net) == "function" then return net(k) end
+  return net
+end
+
 -- Adds a step at the boarding point of each transport used by the route.
-function Geo.AddTransportStops(route, net, plevel)
-  if #net.hubs == 0 then return route end
+function Geo.AddTransportStops(route, nets, plevel)
   local out = { route[1] }
   for k = 2, #route do
     local cur = route[k]
-    if cur.kind ~= "hearth" and not cur.glue then -- escort: on foot, with the NPC
+    local net = Geo.LegNet(nets, k)
+    if cur.kind ~= "hearth" and not cur.glue and #net.hubs > 0 then -- escort: on foot, with the NPC
       local _, choice = Route(out[#out].p, cur.p, net, plevel)
       if choice then
         for _, b in ipairs(Geo.Boardings(choice, net)) do
@@ -569,10 +576,15 @@ local function PlanXP(horizon)
 end
 
 -- Roadbook computation in the background (spread over several frames) with caching.
+-- horizon: duration (automatic Roadbook) or "custom" (custom Roadbook, its quest list in the key).
 function Geo.PlanKey(horizon)
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   local b = Geo.BindStore()[CharKey()]
-  return table.concat({ horizon, tostring(Settings().noHearth), UnitLevel("player"),
+  local list = {}
+  if horizon == "custom" then
+    for _, it in ipairs(Geo.CustomList()) do list[#list + 1] = it.id end
+  end
+  return table.concat({ horizon, table.concat(list, ","), tostring(Settings().noHearth), UnitLevel("player"),
     UnitXP and UnitXP("player") or 0, e and e.updated or "", tostring(scan.entries), TaxiCount(),
     tostring(b and b.name), tostring(Settings().mountSpeed), Geo.paramsVersion or 0 }, "|")
 end
@@ -582,7 +594,8 @@ end
 function Geo.RequestPlan(horizon, cb, force)
   local key = Geo.PlanKey(horizon)
   local pos = PlayerPos()
-  local c = Geo.planCache
+  local cacheField = horizon == "custom" and "customCache" or "planCache"
+  local c = Geo[cacheField]
   if not force and c and c.key == key and pos and c.pos and (Dist(pos, c.pos) or math.huge) < K.REPLAN_DISTANCE then
     return true
   end
@@ -594,11 +607,14 @@ function Geo.RequestPlan(horizon, cb, force)
   end
   if Geo.co and Geo.runningKey == key then return false end
   Geo.runningKey = key
-  local co = coroutine.create(function() return PlanXP(horizon) end)
+  local co = coroutine.create(function()
+    if horizon == "custom" then return Geo.PlanCustom() end
+    return PlanXP(horizon)
+  end)
   Geo.co = co
   local function finish(result)
     Geo.co = nil
-    Geo.planCache = result
+    Geo[cacheField] = result
     local cbs = Geo.planCbs or {}
     Geo.planCbs = nil
     for _, f in ipairs(cbs) do

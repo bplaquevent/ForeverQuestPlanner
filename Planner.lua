@@ -973,12 +973,17 @@ end
 
 -- Adds an "activate the flight master" step when the route passes near an unknown
 -- flight master (only on parts done on foot or mounted).
-function Geo.AddFlightMasterStops(route, net, plevel)
-  local unknown = Geo.UnknownFlightMasters()
+function Geo.AddFlightMasterStops(route, nets, plevel)
+  local unknown, planned = {}, {}
+  for _, st in ipairs(route) do if st.fmHub then planned[st.fmHub.id or 0] = true end end
+  for _, fm in ipairs(Geo.UnknownFlightMasters()) do
+    if not planned[fm.id] then unknown[#unknown + 1] = fm end -- already a step of the route
+  end
   if #unknown == 0 or #route < 2 then return route end
   local legs = {}
   for k = 2, #route do
     local a, b = route[k - 1].p, route[k].p
+    local net = Geo.LegNet(nets, k)
     local _, choice = Route(a, b, net, plevel)
     local segs = {}
     if route[k].kind == "hearth" or route[k].glue then
@@ -1015,7 +1020,7 @@ function Geo.AddFlightMasterStops(route, net, plevel)
     if list then
       table.sort(list, function(x, y) return x.from < y.from end)
       for _, it in ipairs(list) do
-        out[#out + 1] = { kind = "fm", p = it.fm.p, work = K.OVERHEAD / 2,
+        out[#out + 1] = { kind = "fm", p = it.fm.p, fmId = it.fm.id, work = K.OVERHEAD / 2,
           task = { title = L["Activate the flight path of "] .. (AreaName(it.fm.p.area) or "?"), npc = it.fm.name, xp = 0, fm = true } }
       end
     end
@@ -1025,4 +1030,4 @@ function Geo.AddFlightMasterStops(route, net, plevel)
 end
 
 -- Shared with the next files.
-ns.BuildTasks, ns.CurrentMapSet, ns.InsertStops, ns.MakeTravel, ns.NearItems = BuildTasks, CurrentMapSet, InsertStops, MakeTravel, NearItems
+ns.BuildTasks, ns.CurrentMapSet, ns.InsertStops, ns.MakeStops, ns.MakeTravel, ns.NearItems = BuildTasks, CurrentMapSet, InsertStops, MakeStops, MakeTravel, NearItems

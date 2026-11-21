@@ -49,6 +49,7 @@ function CP.EscortFailed(s)
 end
 
 function CP.StepPinLabel(s)
+  if s.kind == "dungeon" then return L["enter the dungeon"] end
   if s.kind == "fm" then return L["activate the flight master"] end
   if s.kind == "bind" then return L["bind the hearthstone"] end
   if s.kind == "hearth" then return L["hearthstone"] end
@@ -60,7 +61,7 @@ end
 
 function CP.StepText(s)
   if s.kind == "fm" or s.kind == "bind" then return (s.task.title or "?") .. " (" .. (s.task.npc or "?") .. ")" end
-  if s.kind == "hearth" or s.kind == "travel" then return s.task.title or "?" end
+  if s.kind == "hearth" or s.kind == "travel" or s.kind == "dungeon" then return s.task.title or "?" end
   local tag = (s.escort and L["Escort"]) or (s.kind == "take" and L["Pick up"]) or (s.kind == "obj" and L["Objective"]) or L["Turn in"]
   local extra = s.kind == "obj" and s.r and (L[": "] .. (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count) or ""
   return tag .. " - " .. (s.task.title or "?") .. extra
@@ -123,30 +124,57 @@ function Geo.CopyPoint(p)
     teleport = p.teleport, instance = p.instance }
 end
 
+-- Quest steps done inside a dungeon (dungeon step of the custom Roadbook).
+function Geo.SerializeMembers(members)
+  if not members then return nil end
+  local out = {}
+  for _, m in ipairs(members) do
+    local t = m.task or {}
+    out[#out + 1] = { kind = m.kind, id = t.id, title = t.title, level = t.level, xp = m.xp,
+      objName = m.r and m.r.tg and m.r.tg.name, objKind = m.r and m.r.tg and m.r.tg.kind, count = m.r and m.r.count }
+  end
+  return out
+end
+
+function Geo.DeserializeMembers(list)
+  if not list then return nil end
+  local out = {}
+  for _, m in ipairs(list) do
+    out[#out + 1] = { kind = m.kind, xp = m.xp, task = { id = m.id, title = m.title, level = m.level },
+      r = m.objName and { tg = { name = m.objName, kind = m.objKind }, count = m.count } or nil }
+  end
+  return out
+end
+
 function Geo.SerializeStep(st)
   local t = st.task or {}
   return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots, quick = st.quick,
     escort = st.escort, glue = st.glue,
+    fmHub = st.fmHub and { id = st.fmHub.id, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil,
+    members = Geo.SerializeMembers(t.members),
     spotN = st.spot and st.spot.n, done = st.done, p = Geo.CopyPoint(st.p),
     objName = st.r and st.r.tg and st.r.tg.name, objKind = st.r and st.r.tg and st.r.tg.kind, count = st.r and st.r.count,
     first = t.stops and t.stops[1] == st or nil,
     task = { id = t.id, title = t.title, level = t.level, xp = t.xp, starter = t.starter, reqLevel = t.reqLevel,
       depTitle = t.dep and t.dep.title, tags = t.tags, npc = t.npc, mode = t.mode, from = t.from, dest = t.dest,
-      destP = Geo.CopyPoint(t.destP), kind = t.kind, quick = t.quick } }
+      destP = Geo.CopyPoint(t.destP), kind = t.kind, quick = t.quick, dungeon = t.dungeon, warn = t.warn,
+      levelWarn = t.levelWarn, orderWarn = t.orderWarn } }
 end
 
 function Geo.DeserializeStep(rec, tasks)
   local tr = rec.task or {}
-  local key = tostring(tr.id) .. "|" .. tostring(tr.title) .. "|" .. tostring(rec.kind == "travel" and rec.at or "")
+  local key = tostring(tr.id) .. "|" .. tostring(tr.title) .. "|" .. tostring((rec.kind == "travel" or rec.kind == "dungeon") and rec.at or "")
   local task = tasks[key]
   if not task then
     task = { id = tr.id, title = tr.title, level = tr.level, xp = tr.xp, starter = tr.starter, reqLevel = tr.reqLevel,
       dep = tr.depTitle and { title = tr.depTitle } or nil, tags = tr.tags, npc = tr.npc, mode = tr.mode,
-      from = tr.from, dest = tr.dest, destP = tr.destP, kind = tr.kind, quick = tr.quick, stops = {} }
+      from = tr.from, dest = tr.dest, destP = tr.destP, kind = tr.kind, quick = tr.quick, stops = {},
+      dungeon = tr.dungeon, warn = tr.warn, levelWarn = tr.levelWarn, orderWarn = tr.orderWarn,
+      members = Geo.DeserializeMembers(rec.members) }
     tasks[key] = task
   end
   local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots, quick = rec.quick,
-    escort = rec.escort, glue = rec.glue,
+    escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub,
     spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task,
     r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind }, count = rec.count } or nil }
   if rec.first then task.stops[1] = st end
@@ -164,9 +192,10 @@ function Geo.Freeze(route, info)
   local steps = {}
   for i = 2, #route do steps[#steps + 1] = Geo.SerializeStep(route[i]) end
   local slim = { count = info.count, xp = info.xp, total = info.total, mobXP = info.mobXP, levels = info.levels,
-    speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.net and info.net.taxi }
-  Geo.FrozenStore()[CharKey()] = { horizon = State.xpHorizon, saved = date and date("%H:%M") or "", start = Geo.CopyPoint(route[1].p),
-    steps = steps, info = slim }
+    speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.net and info.net.taxi,
+    custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered }
+  Geo.FrozenStore()[Geo.FrozenKey()] = { horizon = not info.custom and State.xpHorizon or nil, saved = date and date("%H:%M") or "",
+    start = Geo.CopyPoint(route[1].p), steps = steps, info = slim }
   Geo.frozen = { route = route, info = info }
   CP.lastPlan = {}
   for i = 2, #route do CP.lastPlan[#CP.lastPlan + 1] = route[i] end
@@ -175,7 +204,7 @@ end
 -- Saved plan (reloaded after a /reload), or nil.
 function Geo.Frozen()
   if Geo.frozen then return Geo.frozen end
-  local rec = Geo.FrozenStore()[CharKey()]
+  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
   if not (rec and rec.steps and #rec.steps > 0) then return nil end
   -- After a /reload, the QuestieDB map mappings are not loaded yet.
   if not (QDB.ok and GeoReady()) then return nil end
@@ -194,8 +223,8 @@ end
 
 function Geo.ClearFrozen()
   Geo.frozen = nil
-  Geo.FrozenStore()[CharKey()] = nil
-  Geo.planCache = nil
+  Geo.FrozenStore()[Geo.FrozenKey()] = nil
+  if Geo.CustomMode() then Geo.customCache = nil else Geo.planCache = nil end
 end
 
 -- Marks a step as done (and saves it).
@@ -203,7 +232,7 @@ function Geo.MarkDone(st, value)
   if value == nil then value = true end
   st.done = value or nil
   local fz = Geo.frozen
-  local rec = Geo.FrozenStore()[CharKey()]
+  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
   if fz and rec and rec.steps then
     for i = 2, #fz.route do
       if fz.route[i] == st and rec.steps[i - 1] then rec.steps[i - 1].done = value or nil end
@@ -217,7 +246,7 @@ function Geo.InjectQuickWins()
   local fz = Geo.Frozen()
   if not (fz and QDB.ok) then return 0 end
   local route = fz.route
-  local rec = Geo.FrozenStore()[CharKey()]
+  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
   local pending = {}
   for i = 2, #route do
     local st = route[i]
@@ -276,6 +305,12 @@ end
 -- Step already done: marked, or observed in the game (quest picked up, objective done, quest turned in…).
 function CP.StepDone(st)
   if st.done then return true end
+  if st.kind == "dungeon" then -- every quest step done inside
+    for _, m in ipairs(st.task.members or {}) do
+      if not CP.StepDone(m) then return false end
+    end
+    return true
+  end
   local id = st.task and st.task.id
   if st.kind == "take" then
     if id and Geo.IsEscort(id) and CP.IsFailed(id) then return false end -- failed escort: pick it up again
@@ -310,7 +345,9 @@ function Geo.Recompute(cb)
   Geo.ClearFrozen()
   Snapshot()
   if CP.checkpointButton and CP.checkpointButton.sub then CP.checkpointButton.sub:SetText(L["Computing the Roadbook…"]) end
-  Geo.RequestPlan(State.xpHorizon, function(route, err, info)
+  local custom = Geo.CustomMode()
+  Geo.RequestPlan(custom and "custom" or State.xpHorizon, function(route, err, info)
+    if Geo.CustomMode() ~= custom then return end -- mode changed meanwhile: result of the other Roadbook
     if route and #route >= 2 then Geo.Freeze(route, info) end
     if cb then cb(route, err, info) end
     if Refresh then C_Timer.After(0.1, Refresh) end
@@ -339,9 +376,57 @@ function CP.FocusNext(silent, after)
         return
       end
     end
+    if Geo.CustomMode() then
+      Print(L["Custom Roadbook finished: every quest of the list is done."])
+      CP.ClearFocus()
+      ClearPin()
+      Geo.ClearFrozen()
+      CP.RefreshButton()
+      if Refresh then C_Timer.After(0.2, Refresh) end
+      return
+    end
     Print(L["Roadbook finished: computing a new Roadbook."])
   end
   CP.Recompute()
+end
+
+-- Same Roadbook step in two computations (quest, kind, objective or place).
+function CP.SameStep(a, b)
+  if a.kind ~= b.kind then return false end
+  local ta, tb = a.task or {}, b.task or {}
+  if ta.id or tb.id then
+    if ta.id ~= tb.id then return false end
+    if a.kind == "obj" then
+      return (a.r and a.r.tg and a.r.tg.name) == (b.r and b.r.tg and b.r.tg.name)
+    end
+    return true
+  end
+  return ta.title == tb.title
+end
+
+-- Flight node named `name` (known flight paths) at the planned destination: a flight master
+-- activated on the way has a planned name that may differ from the game's.
+function CP.NearDest(name, destP)
+  local node = name and TaxiStore()[name]
+  local d = node and destP and Dist(node, destP)
+  return d ~= nil and d < K.LANDING_RADIUS
+end
+
+-- Roadbook mode ("auto" or "custom"): each mode has its own saved Roadbook; the objective
+-- followed belongs to the previous mode, so it is stopped.
+function CP.SetMode(mode)
+  local rec = Geo.CustomRec()
+  if rec.mode == mode then return end
+  rec.mode = mode
+  Geo.frozen = nil
+  CP.lastPlan = nil
+  if CP.CurrentFocus() then
+    CP.ClearFocus()
+    ClearPin()
+  end
+  CP.RefreshButton()
+  Print(mode == "custom" and L["Custom Roadbook selected: click \"Start\" to follow it."] or L["Automatic Roadbook selected."])
+  if Refresh then Refresh() end
 end
 
 -- Full recompute (Ctrl-click on the button, or end of the Roadbook) then focus on the first step.
@@ -350,8 +435,12 @@ function CP.Recompute(attempt)
     Print(L["Cannot compute: the Roadbook requires QuestieDB."])
     return
   end
+  if Geo.CustomMode() and #Geo.CustomList() == 0 then
+    Print(L["The custom Roadbook is empty: add quests with the + button of the other tabs."])
+    return
+  end
   -- Available quests change after a pick-up or turn-in: wait for their scan to finish.
-  if scan.running or scan.dirty or not scan.entries then
+  if not Geo.CustomMode() and (scan.running or scan.dirty or not scan.entries) then
     if not scan.running then StartScan() end
     attempt = (attempt or 0) + 1
     if attempt > 40 then
@@ -361,6 +450,7 @@ function CP.Recompute(attempt)
     C_Timer.After(0.5, function() CP.Recompute(attempt) end)
     return
   end
+  local was = CP.CurrentFocus()
   Geo.Recompute(function(route, err)
     if not route or #route < 2 then
       Print(err or L["The Roadbook is empty: no step to follow."])
@@ -370,6 +460,13 @@ function CP.Recompute(attempt)
     local first
     for i = 2, #route do
       if not CP.StepDone(route[i]) then first = route[i] break end
+    end
+    -- Custom Roadbook recomputed while followed: the current objective stays if it is still there.
+    if was and Geo.CustomMode() then
+      for i = 2, #route do
+        local st = route[i]
+        if not CP.StepDone(st) and CP.SameStep(st, was) then first = st break end
+      end
     end
     if first then
       CP.FocusStep(first)
@@ -444,6 +541,10 @@ end
 function CP.AskExclude(s)
   local id = s and s.task and s.task.id
   if not id then return end
+  if Geo.CustomMode() then -- custom Roadbook: the quest leaves the list (and the route is computed again)
+    Geo.CustomRemove(id)
+    return
+  end
   StaticPopup_Show("FQP_EXCLUDE", s.task.title or tostring(id), nil, { id = id, title = s.task.title })
 end
 
@@ -538,7 +639,7 @@ function CP.TakeOff(s)
   local chosen = CP.taxiChosen
   CP.taxiChosen = nil
   CP.flightStep = s
-  if s.task.mode == "vol" and chosen and s.task.dest and chosen ~= s.task.dest then
+  if s.task.mode == "vol" and chosen and s.task.dest and chosen ~= s.task.dest and not CP.NearDest(chosen, s.task.destP) then
     Print(string.format(L["Wrong destination: %s instead of %s. The route will be computed again on landing."], chosen, s.task.dest))
     return
   end
@@ -558,7 +659,7 @@ function CP.CheckLanding(st)
     if d and (not nd or d < nd) then node, nd = n, d end
   end
   if node and nd < K.LANDING_RADIUS then
-    if node.name == t.dest then return end
+    if node.name == t.dest or CP.NearDest(node.name, t.destP) then return end
   else
     local d = t.destP and Dist(pos, t.destP)
     if not t.destP or (d and d < K.LANDING_RADIUS) then return end
@@ -581,7 +682,7 @@ function CP.Reroute(st, pos)
   for _ = fi, ti - 1 do table.remove(route, fi) end
   local legs = {}
   if target and target.kind ~= "hearth" and not target.glue then
-    local net = fz.info.net or BuildNetwork(TravelSpeed())
+    local net = BuildNetwork(TravelSpeed()) -- flight paths known now (some may have been activated on the way)
     local _, choice = Route(pos, target.p, net, UnitLevel("player"))
     if choice then
       for _, b in ipairs(Geo.Boardings(choice, net)) do
@@ -594,7 +695,7 @@ function CP.Reroute(st, pos)
     end
   end
   for k, leg in ipairs(legs) do table.insert(route, fi + k - 1, leg) end
-  local rec = Geo.FrozenStore()[CharKey()]
+  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
   if rec then
     rec.steps = {}
     for i = 2, #route do rec.steps[#rec.steps + 1] = Geo.SerializeStep(route[i]) end
@@ -652,6 +753,10 @@ function CP.OnGameEvent(event, a1, a2)
     end
   elseif s.kind == "fm" then
     if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
+  elseif s.kind == "dungeon" then
+    if (event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED") and CP.StepDone(s) then
+      CP.AutoUpdate(L["Dungeon done"])
+    end
   elseif (event == "QUEST_TURNED_IN" or event == "QUEST_REMOVED") and s.kind ~= "take" then
     if qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(event == "QUEST_TURNED_IN" and L["Quest turned in"] or L["Quest removed"]) end
   elseif s.kind == "take" then
@@ -684,6 +789,11 @@ function CP.StepSummary(s)
   elseif s.kind == "travel" then
     return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.mode == "vol" and L["Flight"] or K.MODE_NAME[task.mode] or task.mode or L["Transport"]) ..
       L[" to "] .. (task.dest or "?"), L["Departure: "] .. (task.from or "?") .. " · " .. place
+  elseif s.kind == "dungeon" then
+    local left = 0
+    for _, m in ipairs(task.members or {}) do if not CP.StepDone(m) then left = left + 1 end end
+    return K.DUNGEON_ICON .. " " .. (task.title or "?"),
+      string.format(L["%d quest step(s) inside"], left) .. " · " .. place .. " · ~" .. FormatTime(s.work or 0)
   elseif s.kind == "fm" then
     return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.title or L["Flight Master"]),
       L["Talk to "] .. (task.npc or "?") .. " · " .. place
