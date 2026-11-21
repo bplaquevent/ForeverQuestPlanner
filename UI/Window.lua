@@ -8,11 +8,24 @@ local IsPinned, IsWatched, K, L, MatchWords, Normalize = ns.IsPinned, ns.IsWatch
 local PinIcon, Plural, PointText, Print, QDB, QGet = ns.PinIcon, ns.Plural, ns.PointText, ns.Print, ns.QDB, ns.QGet
 local Refresh, RemainingObjectives = ns.Refresh, ns.RemainingObjectives
 local RenderAvailable, RenderExport, RenderList, RenderNear, RenderTodo, RouteText = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear, ns.RenderTodo, ns.RouteText
-local Settings, ShowMessage, StartScan, State, StateIcons, TurnInText = ns.Settings, ns.ShowMessage, ns.StartScan, ns.State, ns.StateIcons, ns.TurnInText
-local panels, scan, tabButtons = ns.panels, ns.scan, ns.tabButtons
+local Settings, ShowMessage, State, StateIcons, TurnInText = ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons, ns.TurnInText
+local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
 
--- Header of a Roadbook: plan, level, travel and hearthstone in three short lines.
-function Geo.RouteHeader(route, info, doneCount, frozenRec)
+-- State of a Roadbook: active (followed by the Objective button), paused, not started, finished.
+function Geo.RoadbookStatus(kind, doneCount, total)
+  local D = K.DESC
+  if Geo.ActiveKind() == kind then
+    if CP.CurrentFocus() then return Color(D.good, L["Active"]) end
+    return Color(D.good, L["Active"]) .. Color(D.meta, L[" (click the Objective button to follow it)"])
+  end
+  if doneCount >= total then return Color(D.good, L["Finished"]) end
+  if doneCount > 0 then return Color(D.warn, L["Paused"]) .. Color(D.meta, L[" (\"Start\" resumes it)"]) end
+  return Color(D.meta, L["Not started"]) .. Color(D.meta, L[" (\"Start\" to follow it)"])
+end
+
+-- Header of a Roadbook: state, plan, level, travel and hearthstone in four short lines.
+function Geo.RouteHeader(route, info, doneCount, kind)
+  local frozenRec = Geo.FrozenRec(kind)
   local need = (UnitXPMax and UnitXP) and (UnitXPMax("player") - UnitXP("player")) or nil
   local sep = Color("777777", "  ·  ")
   local l1
@@ -22,7 +35,17 @@ function Geo.RouteHeader(route, info, doneCount, frozenRec)
     if (info.dungeons or 0) > 0 then l1[#l1 + 1] = Plural(info.dungeons, L["dungeon visit"]) end
     if (info.discovered or 0) > 0 then l1[#l1 + 1] = Color("c890ff", Plural(info.discovered, L["flight path to activate"])) end
   else
-    l1 = { Color("ffffff", Plural(info.count, L["quest"]) .. " · " .. FormatNumber(info.xp) .. " XP") }
+    if info.goal then
+      local g = info.goal
+      local goalText = g.kind == "level" and (L["Goal: level "] .. g.value) or (L["Goal: session of "] .. FormatTime(g.value))
+      if info.goalStage and info.levels then
+        goalText = goalText .. Color("ffffff", string.format(L[" (stage up to level %d: at its end, \"Generate\" plans the next one)"], info.levels[#info.levels]))
+      end
+      l1 = { Color("ffd100", goalText) }
+      l1[#l1 + 1] = Color("ffffff", Plural(info.count, L["quest"]) .. " · " .. FormatNumber(info.xp) .. " XP")
+    else
+      l1 = { Color("ffffff", Plural(info.count, L["quest"]) .. " · " .. FormatNumber(info.xp) .. " XP") }
+    end
     if info.mobXP and info.mobXP > 0 then l1[#l1 + 1] = L["monsters: "] .. FormatNumber(info.mobXP) .. " XP" end
     l1[#l1 + 1] = "~" .. FormatTime(info.total) .. " · ~" ..
       (info.total > 0 and FormatNumber(info.xp / info.total * 3600) or "0") .. " XP/h"
@@ -56,12 +79,13 @@ function Geo.RouteHeader(route, info, doneCount, frozenRec)
   if info.custom then
     if (info.skipped or 0) > 0 then l3[#l3 + 1] = Color("ff6060", Plural(info.skipped, L["quest"]) .. L[" cannot be planned"]) end
   else
-    if info.skipped > 0 then l3[#l3 + 1] = Plural(info.skipped, L["quest"]) .. L[" ignored"] end
+    if (info.skipped or 0) > 0 then l3[#l3 + 1] = Plural(info.skipped, L["quest"]) .. L[" ignored"] end
     local nEx = 0
-    for _ in pairs(Settings().excluded) do nEx = nEx + 1 end
-    if nEx > 0 then l3[#l3 + 1] = Plural(nEx, L["quest"]) .. L[" removed by you"] end
+    for _ in pairs(Geo.Excluded(kind)) do nEx = nEx + 1 end
+    if nEx > 0 then l3[#l3 + 1] = Plural(nEx, L["quest"]) .. L[" skipped by you"] end
   end
-  return table.concat(l1, sep) .. "\n" .. table.concat(l2, sep) .. "\n" .. table.concat(l3, sep)
+  return Geo.RoadbookStatus(kind, doneCount, #route - 1) .. "\n" ..
+    table.concat(l1, sep) .. "\n" .. table.concat(l2, sep) .. "\n" .. table.concat(l3, sep)
 end
 
 -- Quest steps done during a dungeon visit, one line each.
@@ -79,12 +103,14 @@ function Geo.DungeonMemberLines(task)
 end
 
 -- Steps of a Roadbook, in sections per zone, in route order, added to `items`.
--- remove(step): button of a quest step not done.
-function Geo.RouteStepItems(items, route, info, remove)
+-- remove(step): button of a quest step not done; query: search of the tab.
+function Geo.RouteStepItems(items, route, info, remove, query)
   local plevel = info.plevel
   info.netCache = info.netCache or { [""] = { net = info.net } }
   local nets = Geo.RouteNets(route, info.speed or 7, plevel, info.netCache)
   local segments, current = {}, nil
+  local tracking = CP.CurrentFocus() ~= nil and Geo.frozen[Geo.ActiveKind()] ~= nil
+    and Geo.frozen[Geo.ActiveKind()].route == route
   for i = 2, #route do
     local s = route[i]
     local zone = s.p.instance or AreaName(s.p.area) or s.p.zoneName or "?"
@@ -93,6 +119,7 @@ function Geo.RouteStepItems(items, route, info, remove)
       segments[#segments + 1] = current
     end
     current.steps[#current.steps + 1] = { s = s, prev = route[i - 1], i = i }
+    if tracking and CP.IsStepFocused(s) then current.focused = true end
     if s.kind == "turnin" or s.kind == "obj" or s.kind == "dungeon" then current.xp = current.xp + (s.xp or 0) end
   end
 
@@ -185,15 +212,12 @@ function Geo.RouteStepItems(items, route, info, remove)
       local net = (nets[st.i] or nets[1]).net
       local way = s.kind ~= "hearth" and RouteText(st.prev.p, s.p, net, plevel) or nil
       if way and way ~= L["right here"] then text = text .. Geo.DescLine(Color("ffffff", L["Route: "]) .. way) end
-      if task.tags and task.stops and s == task.stops[1] then
-        text = text .. Geo.DescLine("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:12:12|t " .. Color(D.prio, L["Priority: "] .. table.concat(task.tags, K.DESC_SEP)))
-      end
       local lvs = info.levels
       if lvs and st.i and lvs[st.i] and lvs[st.i - 1] and lvs[st.i] > lvs[st.i - 1] then
         text = text .. Geo.DescLine(Color(D.good, L["---- level "] .. lvs[st.i] .. L[" reached (~"] .. FormatTime(s.at or 0) .. ") ----"))
       end
-      if #State.xpQuery == 0 or MatchWords(Normalize(text), State.xpQuery) then
-        -- Only button: remove the quest from the Roadbook. Tracking and the pin follow the
+      if #query == 0 or MatchWords(Normalize(text), query) then
+        -- Only button: skip the quest (custom Roadbook: remove it). Tracking and the pin follow the
         -- floating Objective button (exclusive focus).
         local qid, step = task.id, s
         local button
@@ -207,23 +231,44 @@ function Geo.RouteStepItems(items, route, info, remove)
       end
     end
     if #segItems > 0 then
-      items[#items + 1] = { header = true, kind = "step", key = "seg" .. si, label = label }
+      -- While the Roadbook is followed, the section of the current step is expanded by default.
+      items[#items + 1] = { header = true, kind = "step", key = "seg" .. si, label = label, open = seg.focused }
       for _, it in ipairs(segItems) do items[#items + 1] = it end
     end
   end
 end
 
--- Custom Roadbook tab: the chosen quests, then the computed route once started.
-function Geo.RenderCustomXP(panel)
+-- Roadbook being computed: the list is emptied and the waiting animation is shown instead.
+function Geo.RenderBusy(panel, kind)
+  local busy = Geo.computing ~= nil and Geo.computing == kind
+  if panel.busy then panel.busy:SetShown(busy) end
+  if busy then RenderList(panel, Geo.TabOf(kind), {}) end
+  return busy
+end
+
+-- Custom Roadbook tab: the chosen quests, then the computed route.
+function Geo.RenderCustomXP()
+  local panel = panels.custom
+  if panel.busy then panel.busy:Hide() end
+  if not QDB.ok then
+    ShowMessage(panel, "custom", L["QuestieDB is not loaded: this tab needs the locations and XP from its database."])
+    return
+  end
+  if not GeoReady() then
+    ShowMessage(panel, "custom", L["Unable to convert QuestieDB positions to this client's map."])
+    return
+  end
   local list = Geo.CustomList()
   if #list == 0 then
-    ShowMessage(panel, "xp", L["The custom Roadbook is empty."] .. "\n\n" ..
-      L["Add quests with the + button at the left of the quests, in the Quest log, Available, Around me tabs or the automatic Roadbook; the prerequisite quests they still need are added with them."] .. "\n\n" ..
-      L["Then click \"Start\": the fastest route to do them all is computed (flights, boats, hearthstone, flight paths worth activating, one visit per dungeon) and the Objective button follows it."])
+    -- No Roadbook: same presentation as the automatic one.
+    RenderList(panel, "custom", { { section = true, text = L["Objectives"] },
+      { text = Color("ffd100", L["No Roadbook. Add quests with the \"Add\" button (or \"Add all\" on a category) in the Around me, Quest log and Available tabs, with the prerequisites they still need: the fastest route to do them all is computed at each change and the Objective button follows it."]) } })
     pcall(CP.RefreshButton)
     return
   end
-  local fz = Geo.Frozen()
+  if Geo.RenderBusy(panel, "custom") then pcall(CP.RefreshButton) return end
+  local query = State.customQuery
+  local fz = Geo.Frozen("custom")
   local D = K.DESC
   local why = {}
   for _, u in ipairs((fz and fz.info.unplanned) or Geo.customUnplanned or {}) do why[u.id] = u.reason end
@@ -233,8 +278,10 @@ function Geo.RenderCustomXP(panel)
   local titleOf = {}
   for _, it in ipairs(list) do titleOf[it.id] = it.title end
   local plevel = UnitLevel("player")
-  local items = { { section = true, text = L["My quest list"] },
-    { header = true, kind = "class", key = "customlist", open = true,
+  local items = { { section = true, text = L["Quests"] },
+    { text = Color("aaaaaa", L["\"Add\" button of the other tabs to add quests"]) },
+    -- Collapsed by default while the Roadbook is followed: the route matters more than the list.
+    { header = true, kind = "class", key = "customlist", open = not (Geo.ActiveKind() == "custom" and CP.CurrentFocus()),
     label = L["Quests of the custom Roadbook - "] .. Plural(#list, L["quest"]),
     b3 = { text = L["Empty the list"], fn = function() StaticPopup_Show("FQP_CUSTOM_CLEAR") end } } }
   for _, it in ipairs(list) do
@@ -256,33 +303,41 @@ function Geo.RenderCustomXP(panel)
     if rest ~= "" then text = text .. Geo.DescLine(Color(D.action, rest)) end
     if not Geo.ForPlayer(it.id) then text = text .. Geo.DescLine(Color(D.bad, L["not for your class or race"])) end
     if why[it.id] then text = text .. Geo.DescLine(Color(D.bad, L["Cannot be planned: "] .. why[it.id])) end
-    if #State.xpQuery == 0 or MatchWords(Normalize(text), State.xpQuery) then
+    if #query == 0 or MatchWords(Normalize(text), query) then
       local id = it.id
       items[#items + 1] = { text = text, questID = q and id or nil, linkQuest = id,
         b3 = { text = L["Remove"], fn = function() Geo.CustomRemove(id) end } }
     end
   end
-  items[#items + 1] = { section = true, text = L["Route"] }
+  items[#items + 1] = { section = true, text = L["Objectives"] }
   if fz then
-    pcall(Geo.InjectQuickWins)
+    pcall(Geo.InjectQuickWins, "custom")
     local route, info = fz.route, fz.info
     local doneCount = 0
     for i = 2, #route do if CP.StepDone(route[i]) then doneCount = doneCount + 1 end end
-    items[#items + 1] = { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, Geo.FrozenStore()[Geo.FrozenKey()])) }
+    items[#items + 1] = { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, "custom")) }
     Geo.RouteStepItems(items, route, info, function(step)
       return { text = L["Remove"], fn = function() Geo.CustomRemove(step.task.id) end }
-    end)
-  elseif Geo.co then
-    items[#items + 1] = { text = Color("ffd100", L["Computing the Roadbook, please wait…"]) }
+    end, query)
   else
-    items[#items + 1] = { text = Color("ffd100", L["Click \"Start\" to compute the fastest route through these quests and follow it with the Objective button."]) }
+    local c = Geo.customCache
+    if c and c.err and not c.route then
+      items[#items + 1] = { text = Color("ff6060", c.err) }
+    elseif not c and not Geo.customAutoTried then
+      -- List made by a former version (or the computation was cancelled): computed once now.
+      Geo.customAutoTried = true
+      C_Timer.After(0, function() CP.Recompute("custom", true) end)
+    end
+    items[#items + 1] = { text = Color("ffd100", L["The route is computed again each time a quest is added or removed."]) }
   end
-  RenderList(panel, "xp", items, #State.xpQuery > 0)
+  RenderList(panel, "custom", items, #query > 0)
   pcall(CP.RefreshButton)
 end
 
+-- Automatic Roadbook tab.
 local function RenderXP()
   local panel = panels.xp
+  if panel.busy then panel.busy:Hide() end
   if not QDB.ok then
     ShowMessage(panel, "xp", L["QuestieDB is not loaded: this tab needs the locations and XP from its database."])
     return
@@ -291,52 +346,28 @@ local function RenderXP()
     ShowMessage(panel, "xp", L["Unable to convert QuestieDB positions to this client's map."])
     return
   end
-  if Geo.CustomMode() then
-    Geo.RenderCustomXP(panel)
+  if Geo.RenderBusy(panel, "auto") then return end
+
+  -- Saved Roadbook: it no longer changes until "Generate" (or a skipped quest).
+  local fz = Geo.Frozen("auto")
+  if not fz then
+    -- No Roadbook: it is only computed with "Generate" (never automatically).
+    local last = Geo.planCache
+    local items = { { section = true, text = L["Objectives"] } }
+    if last and last.err and not last.route then items[#items + 1] = { text = Color("ff6060", last.err) } end
+    items[#items + 1] = { text = Color("ffd100", L["No Roadbook. Choose a goal above, then click \"Generate\": the route earning the XP fastest is computed and the Objective button follows it."]) }
+    RenderList(panel, "xp", items)
     return
   end
-  if scan.dirty or not scan.entries then
-    if not scan.running then StartScan() end
-    if scan.running or scan.dirty then
-      ShowMessage(panel, "xp", L["Scanning available quests…"])
-      return
-    end
-  end
-
-  -- Saved Roadbook: it no longer changes until its end or a recompute request.
-  local fz = Geo.Frozen()
-  if not fz then
-    if Geo.co then
-      ShowMessage(panel, "xp", L["Computing the Roadbook, please wait…"])
-      return
-    end
-    local last = Geo.planCache
-    if last and last.err and not last.route and Geo.lastErrShown ~= last then
-      Geo.lastErrShown = last
-      RenderList(panel, "xp", { { text = Color("ff6060", last.err),
-        b3 = { text = L["Start"], fn = function() CP.Recompute() end } } })
-      return
-    end
-    Geo.Recompute()
-    if not Geo.Frozen() then
-      ShowMessage(panel, "xp", L["Computing the Roadbook, please wait…"])
-      return
-    end
-    fz = Geo.Frozen()
-  end
-  pcall(Geo.InjectQuickWins)
+  pcall(Geo.InjectQuickWins, "auto")
   local route, info = fz.route, fz.info
   local doneCount = 0
   for i = 2, #route do if CP.StepDone(route[i]) then doneCount = doneCount + 1 end end
-  if doneCount >= #route - 1 then
-    Geo.Recompute()
-    ShowMessage(panel, "xp", L["Roadbook finished: computing a new Roadbook…"])
-    return
-  end
-  local items = { { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, Geo.FrozenStore()[Geo.FrozenKey()])) } }
+  local items = { { section = true, text = L["Objectives"] },
+    { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, "auto")) } }
   Geo.RouteStepItems(items, route, info, function(step)
-    return { text = L["Remove from the Roadbook"], fn = function() CP.AskExclude(step) end }
-  end)
+    return { text = L["Skip the step"], fn = function() CP.SkipQuest(step, "auto") end }
+  end, State.xpQuery)
   -- Quests kept for max level: reward or access only useful at endgame.
   if info.later and #info.later > 0 then
     local laterItems = {}
@@ -364,7 +395,7 @@ local function RenderXP()
   pcall(CP.RefreshButton)
 end
 
--- Second line: toggle state buttons (several allowed), the list moves down one line.
+-- State check boxes (several allowed), one row of the filter box.
 local STATE_DEFS = {
   { key = "turnin", label = L["To turn in"], icon = function() return ICON.turnin end },
   { key = "inprogress", label = L["In progress"], icon = function() return ICON.inprogress end },
@@ -372,22 +403,61 @@ local STATE_DEFS = {
   { key = "pinned", label = L["Pin"], icon = function() return PinIcon() end },
   { key = "available", label = L["To pick up"], icon = function() return ICON.available end },
   { key = "abandon", label = L["To abandon"], icon = function() return "|TInterface\\RaidFrame\\ReadyCheck-NotReady:16:16|t" end },
-  { key = "custom", label = L["Custom Roadbook"], icon = function() return "|TInterface\\Icons\\INV_Misc_Book_09:16:16|t" end },
+  { key = "custom", label = L["Custom Roadbook"], icon = function() return "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:16:16|t" end },
 }
+
+-- Filter box, under the search box (same frame as the goal box of the automatic Roadbook): one row
+-- per kind of filter, the list starts below it.
+K.FILTER_BOX_TOP, K.FILTER_ROW_H = -96, 26
+local function FilterBox(panel)
+  if panel.box then return panel.box end
+  local box = CreateFrame("Frame", nil, panel, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  box:SetPoint("TOPLEFT", 14, K.FILTER_BOX_TOP)
+  box:SetPoint("TOPRIGHT", -14, K.FILTER_BOX_TOP)
+  if box.SetBackdrop then
+    box:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = true, tileSize = 16, edgeSize = 12,
+      insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    box:SetBackdropColor(0, 0, 0, 0.35)
+    box:SetBackdropBorderColor(0.8, 0.65, 0.35, 0.8)
+  end
+  box.rows = 0
+  panel.box = box
+  return box
+end
+
+-- Adds a row to the filter box: returns the y of its middle (in the box); the box grows and the list
+-- moves down.
+local function AddFilterRow(panel)
+  local box = FilterBox(panel)
+  box.rows = box.rows + 1
+  local h = 12 + K.FILTER_ROW_H * box.rows
+  box:SetHeight(h)
+  if panel.scroll then
+    panel.scroll:ClearAllPoints()
+    panel.scroll:SetPoint("TOPLEFT", State.mainFrame, "TOPLEFT", 12, K.FILTER_BOX_TOP - h - 6)
+    panel.scroll:SetPoint("BOTTOMRIGHT", State.mainFrame, "BOTTOMRIGHT", -32, 24)
+  end
+  return -(6 + K.FILTER_ROW_H / 2 + K.FILTER_ROW_H * (box.rows - 1))
+end
 
 local function AddStateFilters(panel, keys, selected)
   panel.stateChecks = {}
-  local x = 12
-  local label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  label:SetPoint("TOPLEFT", x, -104)
+  local box = FilterBox(panel)
+  local y = AddFilterRow(panel)
+  local label = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  label:SetPoint("LEFT", box, "TOPLEFT", 10, y)
   label:SetText(L["Show:"])
-  x = x + 54
+  local x = 10 + (label:GetStringWidth() or 46) + 6
   for _, def in ipairs(STATE_DEFS) do
     if keys[def.key] then
-      local cb = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+      local cb = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
       cb:SetSize(22, 22)
-      cb:SetPoint("TOPLEFT", x, -98)
-      cb.label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      cb:SetPoint("LEFT", box, "TOPLEFT", x, y)
+      cb.label = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
       cb.label:SetPoint("LEFT", cb, "RIGHT", 0, 0)
       cb.label:SetText(def.icon() .. " " .. def.label)
       cb:SetScript("OnClick", function(self)
@@ -395,77 +465,88 @@ local function AddStateFilters(panel, keys, selected)
         Refresh()
       end)
       panel.stateChecks[def.key] = cb
-      x = x + 112
+      x = x + 22 + (cb.label:GetStringWidth() or 90) + 18 -- each box as wide as its label
     end
   end
-  panel.scroll:ClearAllPoints()
-  panel.scroll:SetPoint("TOPLEFT", State.mainFrame, "TOPLEFT", 12, -124)
-  panel.scroll:SetPoint("BOTTOMRIGHT", State.mainFrame, "BOTTOMRIGHT", -32, 24)
   function panel.HighlightStates()
     for k, cb in pairs(panel.stateChecks) do cb:SetChecked(selected[k] and true or false) end
   end
 end
 
+K.SEARCH_WIDTH = 200 -- search box, centered at the top of every tab
+local filterMenus = 0 -- dropdown templates need a global name
+-- Tab panel: search box centered at the top; single choice filter (dropdown) and option (check box) on
+-- the first row of the filter box below it.
 local function CreateFilterPanel(f, filters, getCurrent, setCurrent, onSearch, toggle, caption)
   local c = CreateFrame("Frame", nil, f)
   c:SetAllPoints(f)
-  c.buttons = {}
-  local x = 14
-  -- Single choice: radio buttons (game template, otherwise a checkbox used as a radio).
-  if #filters > 0 and caption then
-    local cap = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cap:SetPoint("TOPLEFT", x, -76)
-    cap:SetText(caption)
-    c.caption = cap
-    x = x + (cap:GetStringWidth() or 40) + 8
-  end
-  for _, flt in ipairs(filters) do
-    local ok, b = pcall(CreateFrame, "CheckButton", nil, c, "UIRadioButtonTemplate")
-    if not ok or not b then b = CreateFrame("CheckButton", nil, c, "UICheckButtonTemplate") end
-    b:SetSize(18, 18)
-    b:SetPoint("TOPLEFT", x, -73)
-    b.label = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    b.label:SetPoint("LEFT", b, "RIGHT", 2, 0)
-    b.label:SetText(flt.label)
-    b:SetScript("OnClick", function()
-      setCurrent(flt.key)
-      Refresh()
-    end)
-    c.buttons[flt.key] = b
-    x = x + 18 + 2 + (b.label:GetStringWidth() or 50) + 14
-  end
   if onSearch then
-    -- Search box: 140 px, narrower if the filters and the option would not fit in the window.
-    local toggleW = 0
-    if toggle then
-      local probe = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      probe:SetText(toggle.label)
-      toggleW = 8 + 24 + 2 + (probe:GetStringWidth() or 100)
-      probe:Hide()
+    c.search = CreateSearchBox(c, K.SEARCH_WIDTH, onSearch)
+    c.search:SetPoint("TOP", 0, -71)
+  end
+  c.scroll = CreateScrollPanel(c, nil, -98)
+  local box, y, x = nil, 0, 10
+  if #filters > 0 or toggle then
+    box = FilterBox(c)
+    y = AddFilterRow(c)
+  end
+  local dd
+  if #filters > 0 then
+    if caption then
+      local cap = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      cap:SetPoint("LEFT", box, "TOPLEFT", x, y)
+      cap:SetText(caption)
+      x = x + (cap:GetStringWidth() or 40) + 2
     end
-    local w = math.max(90, math.min(140, (f:GetWidth() or 820) - 16 - x - 12 - toggleW))
-    c.search = CreateSearchBox(c, w, onSearch)
-    c.search:SetPoint("TOPLEFT", x + 12, -71)
-    x = x + 12 + w
+    -- Dropdown as wide as its longest choice.
+    local probe = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local w = 40
+    for _, flt in ipairs(filters) do
+      probe:SetText(flt.label)
+      w = math.max(w, (probe:GetStringWidth() or 80) + 16)
+    end
+    probe:Hide()
+    filterMenus = filterMenus + 1
+    dd = CreateFrame("Frame", "ForeverQuestPlannerFilter" .. filterMenus, box, "UIDropDownMenuTemplate")
+    dd:SetPoint("LEFT", box, "TOPLEFT", x - 12, y - 2) -- the template has a margin on the left
+    UIDropDownMenu_SetWidth(dd, w)
+    UIDropDownMenu_Initialize(dd, function(_, level)
+      for _, flt in ipairs(filters) do
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = flt.label
+        info.checked = getCurrent() == flt.key
+        info.func = function()
+          CloseDropDownMenus()
+          setCurrent(flt.key)
+          Refresh()
+        end
+        UIDropDownMenu_AddButton(info, level)
+      end
+    end)
+    x = x - 12 + w + 50 - 16 + 16 -- visible right edge of the dropdown, then a gap
   end
   if toggle then
-    local cb = CreateFrame("CheckButton", nil, c, "UICheckButtonTemplate")
+    local cb = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
     cb:SetSize(24, 24)
-    cb:SetPoint("TOPLEFT", x + 8, -69)
-    cb.label = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cb:SetPoint("LEFT", box, "TOPLEFT", x, y)
+    cb.label = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     cb.label:SetPoint("LEFT", cb, "RIGHT", 2, 0)
     cb.label:SetText(toggle.label)
-    cb:SetChecked(toggle.get() and true or false)
     cb:SetScript("OnClick", function(self)
       toggle.set(self:GetChecked() and true or false)
       Refresh()
     end)
     c.toggle = cb
   end
-  c.scroll = CreateScrollPanel(c, nil, -98)
   function c.Highlight()
-    local cur = getCurrent()
-    for k, b in pairs(c.buttons) do b:SetChecked(k == cur) end
+    if dd then
+      local cur = getCurrent()
+      for _, flt in ipairs(filters) do
+        if flt.key == cur then UIDropDownMenu_SetText(dd, flt.label) end
+      end
+    end
+    -- Option shared by several tabs: its box follows the setting.
+    if c.toggle then c.toggle:SetChecked(toggle.get() and true or false) end
   end
   return c
 end
@@ -501,6 +582,12 @@ local function SelectTab(name)
       if key == highlighted then b:LockHighlight() else b:UnlockHighlight() end
     end
   end
+  -- Opening the Roadbook: back to the default folding (current step's section only while following it).
+  if name == "xp" or name == "custom" then
+    for k in pairs(expandedCategories) do
+      if k:find("^" .. name .. ":") then expandedCategories[k] = nil end
+    end
+  end
   StopNearTicker()
   if name == "near" and C_Timer.NewTicker then
     nearTicker = C_Timer.NewTicker(3, function()
@@ -528,6 +615,7 @@ Refresh = function()
 end
 
 RefreshUnsafe = function()
+  if Geo.UpdateTabLeds then Geo.UpdateTabLeds() end
   if State.currentTab == "export" then
     RenderExport()
   elseif State.currentTab == "avail" then
@@ -541,7 +629,10 @@ RefreshUnsafe = function()
     panels.xp.Highlight()
     if panels.xp.UpdateMode then panels.xp.UpdateMode() end
     RenderXP()
-
+  elseif State.currentTab == "custom" then
+    panels.custom.Highlight()
+    panels.custom.UpdateMode()
+    Geo.RenderCustomXP()
   else
     local a = Analyze()
     RenderTodo(a)
@@ -549,4 +640,5 @@ RefreshUnsafe = function()
 end
 
 -- Shared with the next files.
+ns.AddFilterRow, ns.FilterBox = AddFilterRow, FilterBox
 ns.AddStateFilters, ns.CreateFilterPanel, ns.LOW_LEVEL_TOGGLE, ns.Refresh, ns.SelectTab, ns.StopNearTicker = AddStateFilters, CreateFilterPanel, LOW_LEVEL_TOGGLE, Refresh, SelectTab, StopNearTicker

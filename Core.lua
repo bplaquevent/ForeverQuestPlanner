@@ -18,8 +18,8 @@ end
 
 local function Settings()
   ForeverQuestPlannerSettings = ForeverQuestPlannerSettings or {}
-  ForeverQuestPlannerSettings.keep = ForeverQuestPlannerSettings.keep or {}
-  ForeverQuestPlannerSettings.excluded = ForeverQuestPlannerSettings.excluded or {} -- quest id -> title
+  ForeverQuestPlannerSettings.keep = nil -- old "Keep" list, removed
+  ForeverQuestPlannerSettings.excluded = nil -- old global list of removed quests (now kept per Roadbook)
   return ForeverQuestPlannerSettings
 end
 
@@ -667,7 +667,8 @@ end
 local function Analyze()
   Snapshot()
   local e = ForeverQuestPlannerDB[CharKey()]
-  local result = { abandon = {}, turnIn = {}, groups = {}, later = {}, dungeons = {}, kept = 0 }
+  local result = { abandon = {}, turnIn = {}, groups = {}, later = {}, dungeons = {} }
+  State.abandonIds = {} -- for the icon in front of the titles (Geo.ToAbandon)
   local byDungeon = {}
   if not e then return result end
   result.count = #e.quests
@@ -675,7 +676,6 @@ local function Analyze()
   local plevel = UnitLevel("player")
   local className = UnitClass("player")
   local range = TrivialRange()
-  local keep = Settings().keep
   local byZone = {}
 
   for _, q in ipairs(e.quests) do
@@ -698,9 +698,9 @@ local function Analyze()
     if q.complete then
       result.turnIn[#result.turnIn + 1] = q
     else
-      if q.failed and not keep[q.id] then
+      if q.failed then
         q._abandon = L["Failed quest"]
-      elseif not (isClass or isProf or keep[q.id] or xpUseful or itemReason or itemUnknown or chainUseful or moneyUseful) then
+      elseif not (isClass or isProf or xpUseful or itemReason or itemUnknown or chainUseful or moneyUseful) then
       local why = {}
       why[#why + 1] = trivial and (L["gray (level "] .. level .. ")") or L["no XP"]
       why[#why + 1] = L["no useful item"]
@@ -714,8 +714,10 @@ local function Analyze()
       end
         q._abandon = table.concat(why, ", ")
       end
-      if q._abandon then result.abandon[#result.abandon + 1] = { quest = q, reason = q._abandon } end
-      if keep[q.id] then result.kept = result.kept + 1 end
+      if q._abandon then
+        result.abandon[#result.abandon + 1] = { quest = q, reason = q._abandon }
+        State.abandonIds[q.id] = true
+      end
       local dungeon = DungeonOf(q)
       if dungeon then
         q._tooHigh = level > plevel + 3

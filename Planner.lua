@@ -93,8 +93,11 @@ end
 ---------------------------------------------------------------------------
 -- Roadbook: XP / time planning along the route
 ---------------------------------------------------------------------------
-State.xpHorizon = 7200
+-- Goal of the automatic Roadbook: { kind = "time", value = s } or { kind = "level", value = level }.
+State.xpGoal = { kind = "time", value = 7200 }
 K.MAX_TAKE_CANDIDATES = 80
+K.TAKE_PER_LEVEL = 20               -- goal "reach level": candidates per unlock level, at least
+K.MAX_TAKE_CANDIDATES_LEVEL = 600   -- goal "reach level": most candidates
 K.LOOKAHEAD_WEIGHT = 1   -- a quest is also judged with what it unlocks, at full weight
 K.MAX_FOLLOW_DEPTH = 12  -- safety: maximum length of an evaluated quest chain
 K.SLICE_MS = 15          -- maximum computation time per frame (the computation is spread over several frames)
@@ -362,7 +365,7 @@ end
 
 -- Quest to pick up (available, or a follow-up unlocked by the plan) -> plannable task.
 function Geo.TakeTask(en, plevel, pos)
-  if Settings().excluded[en.id] then return nil end -- removed from the Roadbook by the player
+  if Geo.Excluded("auto")[en.id] then return nil end -- skipped by the player in this Roadbook
   local t = QuestTargets(en.id)
   if #t.finish == 0 then return nil end
   if (t.missing or 0) > 0 then return nil end -- an objective without a position: cannot be planned
@@ -373,16 +376,18 @@ function Geo.TakeTask(en, plevel, pos)
   local remaining = RemainingTargets(nil, t)
   for _, r in ipairs(remaining) do if AllInstance(r.tg.points) then return nil end end
   local task = { id = en.id, title = en.name, level = en.level, kind = "take", xp = en.xp or 0, targets = t,
-    remaining = remaining, starter = en.starter,
-    reqLevel = (en.reqLevel or 0) > plevel and en.reqLevel or nil }
+    remaining = remaining, starter = en.starter }
+  -- Taken on from the level expected along the route: required level and difficulty setting.
+  local unlock = Geo.UnlockLevel(en)
+  if not unlock then return nil end
+  if unlock > plevel then task.reqLevel = unlock end
   task.stops = MakeStops(task, pos, plevel)
   if not task.stops then return nil end
-  Geo.Priority(task, plevel, en.isClass)
+  Geo.CheckLater(task, plevel)
   if task.later then
     Geo.RecordLater(task)
     return nil
   end
-  if plevel >= Geo.MaxLevel() and (task.share or 0) <= 0 then return nil end
   return task
 end
 
@@ -434,7 +439,7 @@ function Geo.Followers(task, ctx, plevel)
       local ok, en = pcall(CheckAvailable, b, c)
       if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
-        and (en.level or 0) <= Geo.MaxQuestLevel(en.id, plevel, en.reqLevel) then
+        and (Geo.UnlockLevel(en) or math.huge) <= Geo.PlanCeiling(plevel) then
         local f = Geo.TakeTask(en, plevel, from)
         if f then
           f.dep, f.depth, f.done = task, (task.depth or 0) + 1, done
@@ -446,19 +451,6 @@ function Geo.Followers(task, ctx, plevel)
   return task.followers
 end
 
----------------------------------------------------------------------------
--- Roadbook priorities: class quests, interesting rewards, quests ready to turn in.
--- XP stays the main criterion: each priority adds a share (0 to 100 %) of the XP of an average
--- Roadbook quest to the quest value when choosing. 100 % = as if it gave one more average quest.
----------------------------------------------------------------------------
-K.PRIO_CLASS = 1.00        -- class quest, or a chain leading to one
-K.PRIO_ITEM_SPEC = 1.00    -- usable blue (or better) item suited to the specialization
-K.PRIO_ITEM_BLUE = 0.25    -- usable blue item, not ideal for the specialization
-K.PRIO_UPGRADE_SPEC = 0.50 -- equipment upgrade with the right stats
-K.PRIO_UPGRADE = 0.15      -- item level upgrade only
-K.PRIO_BAG = 0.50          -- bag
-K.PRIO_SPELL = 0.30        -- reward that teaches a skill: book, recipe of one of your professions
-K.READY_BONUS = 0.10       -- quest ready to turn in (quick win, frees the quest log)
 K.QUICKWIN_RADIUS = 250    -- m: turn-in added to the saved Roadbook if it is next to a step
 
 -- Armor (subclasses) and weapons usable per class (Classic). Mail / plate from level 40.
@@ -586,7 +578,7 @@ function Geo.TeachesSkill(classID, subclassID)
   return line and skills[line] ~= nil or false
 end
 
--- Interest of a reward item: share of an average quest's XP + reason, or 0.
+-- Interest of a reward item while leveling: 1 + reason, or 0 (an item useful now is not kept for max level).
 function Geo.ItemInterest(itemId, plevel)
   local name, link, quality, ilvl, _, _, _, _, equipLoc, _, _, classID, subclassID = GetItemInfoCompat(itemId)
   if not name then
@@ -594,9 +586,9 @@ function Geo.ItemInterest(itemId, plevel)
     return 0
   end
   if Geo.ItemTeachesSpell(itemId) or Geo.TeachesSkill(classID, subclassID) then
-    return K.PRIO_SPELL, name .. L[" (teaches a skill)"]
+    return 1, name .. L[" (teaches a skill)"]
   end
-  if equipLoc == "INVTYPE_BAG" then return K.PRIO_BAG, name .. L[" (bag)"] end
+  if equipLoc == "INVTYPE_BAG" then return 1, name .. L[" (bag)"] end
   local slots = SLOTS[equipLoc]
   if not slots then return 0 end
   local _, cls = UnitClass("player")
@@ -622,16 +614,14 @@ function Geo.ItemInterest(itemId, plevel)
   for _, sl in ipairs(slots) do worst = math.min(worst, EquippedItemLevel(sl)) end
   local upgrade = (ilvl or 0) > worst
   if (quality or 0) >= 3 then
-    if specOK then return K.PRIO_ITEM_SPEC, name .. L[" (blue)"] end
-    return K.PRIO_ITEM_BLUE, name .. L[" (blue, off-spec)"]
+    if specOK then return 1, name .. L[" (blue)"] end
+    return 1, name .. L[" (blue, off-spec)"]
   end
-  if upgrade and specOK then return K.PRIO_UPGRADE_SPEC, name .. L[" (upgrade)"] end
-  if upgrade then return K.PRIO_UPGRADE, name .. L[" (upgrade)"] end
+  if upgrade and specOK then return 1, name .. L[" (upgrade)"] end
+  if upgrade then return 1, name .. L[" (upgrade)"] end
   return 0
 end
 
--- Task priority (equivalent XP) and reasons shown in the Roadbook.
-K.MAX_LEVEL_UNIT = 10000 -- at max level (no more XP), reference value for priorities
 K.ENDGAME_MARGIN = 5      -- a dungeon less than 5 levels below the maximum is an endgame goal
 
 function Geo.MaxLevel()
@@ -742,6 +732,22 @@ function Geo.IsEliteQuest(id, tag)
   return v
 end
 
+-- Level from which the Roadbook takes a quest on: its required level, and its quest level minus the
+-- allowed gap ("Difficulty" settings). nil: elite quest while elite quests are excluded.
+function Geo.UnlockLevel(en)
+  local gap = Geo.MaxQuestLevel(en.id, 0, 0, en.tag)
+  if gap == -math.huge then return nil end
+  return math.max(en.reqLevel or 0, (en.level or 0) - gap)
+end
+
+-- Highest unlock level of the quests the Roadbook considers: a few levels above yours, or up to
+-- the target level of a "reach level" goal.
+function Geo.PlanCeiling(plevel)
+  local g = State.xpGoal
+  if g and g.kind == "level" then return math.max(plevel + K.LOOKAHEAD_LEVELS, g.value - 1) end
+  return plevel + K.LOOKAHEAD_LEVELS
+end
+
 -- Highest quest level the Roadbook takes on, from your level (or the required level, if higher);
 -- elite quests are excluded when the "Include elite quests" option is unchecked.
 function Geo.MaxQuestLevel(id, plevel, reqLevel, tag)
@@ -750,41 +756,13 @@ function Geo.MaxQuestLevel(id, plevel, reqLevel, tag)
   return math.max(plevel, reqLevel or 0) + (elite and K.MAX_ELITE_GAP or K.MAX_LEVEL_GAP)
 end
 
--- XP of an average quest among the Roadbook candidates (set by BuildTasks), the unit of priorities.
-function Geo.AverageXP()
-  return Geo.avgXP or K.MAX_LEVEL_UNIT
-end
-
-function Geo.Priority(task, plevel, isClass)
+-- Quest kept for max level (endgame reward or access): task.later = reason.
+function Geo.CheckLater(task, plevel)
   if plevel < Geo.MaxLevel() then task.later = Geo.LaterReason(task.id, plevel) end
-  local share, tags = 0, {}
-  if isClass then
-    share = share + K.PRIO_CLASS
-    tags[#tags + 1] = L["class quest"]
-  else
-    local chain = ChainInfo(task.id, plevel, TrivialRange())
-    if chain and chain.hasClass then
-      share = share + K.PRIO_CLASS
-      tags[#tags + 1] = L["unlocks a class quest"]
-    end
-  end
-  local best, why = 0, nil
-  for _, itemId in ipairs(Geo.RewardIndex()[task.id] or {}) do
-    local v, r = Geo.ItemInterest(itemId, plevel)
-    if v > best then best, why = v, r end
-  end
-  if best > 0 then
-    share = share + best
-    tags[#tags + 1] = L["reward: "] .. why
-  end
-  task.share = share
-  task.prio = share * Geo.AverageXP()
-  task.tags = #tags > 0 and tags or nil
 end
 
 local function BuildTasks(pos, plevel)
   local tasks, skipped = {}, 0
-  Geo.avgXP = nil -- computed below from the candidates
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   for _, q in ipairs(e and e.quests or {}) do
     local xp = q.xp or DBXP(q.id, plevel) or 0
@@ -793,8 +771,8 @@ local function BuildTasks(pos, plevel)
     -- Quest ready to turn in: always a candidate (even dungeon, group, gray or high level),
     -- you only need to visit the NPC: it is a quick win.
     local ready = q.complete and not q.failed
-    if Settings().excluded[q.id] then
-      skipped = skipped + 1 -- removed from the Roadbook by the player
+    if Geo.Excluded("auto")[q.id] then
+      skipped = skipped + 1 -- skipped by the player in this Roadbook
     elseif not ready and (q.isInstance or q.instanceName) and Geo.DungeonCombat(q.id) then
       skipped = skipped + 1 -- dungeon / raid quest (game tag): only turned in when it is ready
     elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel, nil, q.tag or "") + 1) then
@@ -808,16 +786,14 @@ local function BuildTasks(pos, plevel)
         local task = { id = q.id, title = q.title, level = q.level, kind = q.complete and "turnin" or "do",
           xp = xp, targets = t, remaining = remaining }
         task.stops = MakeStops(task, pos, plevel)
-        local m = QuestMeta(q.id)
-        Geo.Priority(task, plevel, (q.zone == UnitClass("player")) or (m and IsClassMeta(m)) or false)
+        Geo.CheckLater(task, plevel)
         if ready then
           task.later = nil -- the objective is done: turn the quest in now
-          task.share = (task.share or 0) + K.READY_BONUS
           task.quick = true
         end
         if task.later then
           Geo.RecordLater(task)
-        elseif not atMax or (task.share or 0) > 0 then
+        else
           tasks[#tasks + 1] = task
         end
       else
@@ -828,29 +804,33 @@ local function BuildTasks(pos, plevel)
     end
   end
 
-  -- Quests to pick up (including slightly too high ones for now): nearest first.
+  -- Quests to pick up, including the ones unlocked later by the expected level: the nearest ones,
+  -- plus (goal "reach level") the nearest ones of each unlock level up to the target.
   local near = {}
+  local ceiling = Geo.PlanCeiling(plevel)
   for _, en in ipairs(scan.entries or {}) do
+    local unlock = Geo.UnlockLevel(en)
     if not en.lowLevel and not en.repMissing and not en.missing and not en.repeatable
-      and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
-      and (en.level or 0) <= Geo.MaxQuestLevel(en.id, plevel, en.reqLevel) then
+      and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel()) and unlock and unlock <= ceiling then
       local p, d = Nearest(StartPoints(en.id), pos)
-      if p then near[#near + 1] = { en = en, d = d or math.huge } end
+      if p then near[#near + 1] = { en = en, d = d or math.huge, band = math.max(plevel, unlock) } end
     end
   end
   table.sort(near, function(a, b) return a.d < b.d end)
-  for i = 1, math.min(#near, K.MAX_TAKE_CANDIDATES) do
-    local task = Geo.TakeTask(near[i].en, plevel, pos)
-    if task then tasks[#tasks + 1] = task end
+  local byLevel = State.xpGoal and State.xpGoal.kind == "level"
+  local perBand, taken = {}, 0
+  for i, n in ipairs(near) do
+    local inBand = perBand[n.band] or 0
+    if taken < K.MAX_TAKE_CANDIDATES
+      or (byLevel and inBand < K.TAKE_PER_LEVEL and taken < K.MAX_TAKE_CANDIDATES_LEVEL) then
+      local task = Geo.TakeTask(n.en, plevel, pos)
+      if task then
+        tasks[#tasks + 1] = task
+        taken, perBand[n.band] = taken + 1, inBand + 1
+      end
+    end
     if i % 10 == 0 then Geo.Yield() end
   end
-  -- Unit of the priorities: XP of an average candidate quest (quest + monsters).
-  local sum, n = 0, 0
-  for _, task in ipairs(tasks) do
-    if (task.value or 0) > 0 then sum, n = sum + task.value, n + 1 end
-  end
-  Geo.avgXP = (n > 0 and plevel < Geo.MaxLevel()) and sum / n or K.MAX_LEVEL_UNIT
-  for _, task in ipairs(tasks) do task.prio = (task.share or 0) * Geo.avgXP end
   return tasks, skipped
 end
 

@@ -5,12 +5,21 @@ local ADDON_NAME, ns = ...
 local AreaName, DBXP, EVENT_SORTS, GiverText, HasBit, IsClassMeta = ns.AreaName, ns.DBXP, ns.EVENT_SORTS, ns.GiverText, ns.HasBit, ns.IsClassMeta
 local IsCompleted, IsInLog, IsProfMeta, K, L, NextQuests = ns.IsCompleted, ns.IsInLog, ns.IsProfMeta, ns.K, ns.L, ns.NextQuests
 local PROFESSION_SKILLS, PlayerBits, PlayerSkills, QDB, QGet, QuestMeta = ns.PROFESSION_SKILLS, ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta
-local TrivialRange = ns.TrivialRange
+local State, TrivialRange = ns.State, ns.TrivialRange
 
 ---------------------------------------------------------------------------
 -- Available quests (QuestieDB), scan spread over several frames
 ---------------------------------------------------------------------------
 local scan = { running = false, dirty = true, entries = nil }
+
+-- Levels above yours scanned for the Roadbook: a few by default, up to the target level with a
+-- "reach level" goal (the Roadbook takes quests on as the expected level rises).
+local function ScanLookahead()
+  local g = State.xpGoal
+  local plevel = UnitLevel("player")
+  if g and g.kind == "level" and g.value - plevel > K.LOOKAHEAD_LEVELS then return g.value - plevel end
+  return K.LOOKAHEAD_LEVELS
+end
 
 local function BuildScanContext()
   local classBit, raceBit = PlayerBits()
@@ -22,7 +31,7 @@ local function BuildScanContext()
     raceBit = raceBit,
     skills = skills,
     skillsKnown = skillsKnown,
-    lookahead = K.LOOKAHEAD_LEVELS,
+    lookahead = ScanLookahead(),
   }
 end
 

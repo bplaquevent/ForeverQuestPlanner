@@ -14,7 +14,6 @@ local scan = ns.scan
 -- Roadbook checkpoints: focus on the next step from a floating button
 ---------------------------------------------------------------------------
 local CP = {} -- Roadbook checkpoints (a table to stay under the local variables limit)
-CP.lastPlan = nil -- steps of the last computed plan (without the starting point)
 
 -- Escorts --------------------------------------------------------------------
 K.ESCORT_ICON = "|TInterface\\Icons\\Ability_Warrior_DefensiveStance:14:14|t"
@@ -187,24 +186,32 @@ function Geo.FrozenStore()
   return st.roadbook
 end
 
--- Saves a plan that was just computed.
-function Geo.Freeze(route, info)
+-- Two Roadbooks per character, each with its progress: "auto" and "custom".
+Geo.frozen = {} -- kind -> { route, info } (loaded plans)
+
+function Geo.FrozenRec(kind)
+  return kind and Geo.FrozenStore()[Geo.FrozenKey(kind)] or nil
+end
+
+-- Saves a plan of a kind. excluded: quests skipped by the player in this Roadbook (id -> title),
+-- kept when the route is adapted; a new Roadbook starts without any.
+function Geo.Freeze(route, info, excluded, kind)
   local steps = {}
   for i = 2, #route do steps[#steps + 1] = Geo.SerializeStep(route[i]) end
   local slim = { count = info.count, xp = info.xp, total = info.total, mobXP = info.mobXP, levels = info.levels,
     speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.net and info.net.taxi,
-    custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered }
-  Geo.FrozenStore()[Geo.FrozenKey()] = { horizon = not info.custom and State.xpHorizon or nil, saved = date and date("%H:%M") or "",
-    start = Geo.CopyPoint(route[1].p), steps = steps, info = slim }
-  Geo.frozen = { route = route, info = info }
-  CP.lastPlan = {}
-  for i = 2, #route do CP.lastPlan[#CP.lastPlan + 1] = route[i] end
+    custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered,
+    goal = info.goal, goalStage = info.goalStage }
+  Geo.FrozenStore()[Geo.FrozenKey(kind)] = { saved = date and date("%H:%M") or "",
+    start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, excluded = excluded }
+  Geo.frozen[kind] = { route = route, info = info }
 end
 
--- Saved plan (reloaded after a /reload), or nil.
-function Geo.Frozen()
-  if Geo.frozen then return Geo.frozen end
-  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
+-- Saved plan of a kind (reloaded after a /reload), or nil.
+function Geo.Frozen(kind)
+  if not kind then return nil end
+  if Geo.frozen[kind] then return Geo.frozen[kind] end
+  local rec = Geo.FrozenRec(kind)
   if not (rec and rec.steps and #rec.steps > 0) then return nil end
   -- After a /reload, the QuestieDB map mappings are not loaded yet.
   if not (QDB.ok and GeoReady()) then return nil end
@@ -214,39 +221,58 @@ function Geo.Frozen()
   for k, v in pairs(rec.info or {}) do info[k] = v end
   info.net = BuildNetwork(info.speed or TravelSpeed())
   info.net.taxi = TaxiCount()
-  Geo.frozen = { route = route, info = info }
-  if rec.horizon then State.xpHorizon = rec.horizon end
-  CP.lastPlan = {}
-  for i = 2, #route do CP.lastPlan[#CP.lastPlan + 1] = route[i] end
-  return Geo.frozen
+  Geo.frozen[kind] = { route = route, info = info }
+  return Geo.frozen[kind]
 end
 
-function Geo.ClearFrozen()
-  Geo.frozen = nil
-  Geo.FrozenStore()[Geo.FrozenKey()] = nil
-  if Geo.CustomMode() then Geo.customCache = nil else Geo.planCache = nil end
+-- Empties a Roadbook (its steps and its progress); the other one is not touched.
+function Geo.ClearFrozen(kind)
+  Geo.frozen[kind] = nil
+  Geo.FrozenStore()[Geo.FrozenKey(kind)] = nil
+  if kind == "custom" then Geo.customCache = nil else Geo.planCache = nil end
 end
 
--- Marks a step as done (and saves it).
+-- A Roadbook of this kind exists (saved, or being computed).
+function Geo.HasRoadbook(kind)
+  if Geo.computing == kind then return true end
+  local rec = Geo.FrozenRec(kind)
+  return (rec and rec.steps and #rec.steps > 0) or false
+end
+
+-- Every Roadbook is empty (no steps, empty custom list): the automatic one becomes the active one again.
+function Geo.ResetActiveIfEmpty()
+  if Geo.ActiveKind() == "auto" or #Geo.CustomRec().list > 0 then return end
+  if Geo.HasRoadbook("custom") or Geo.HasRoadbook("auto") then return end
+  Geo.SetActive("auto")
+end
+
+-- Quests skipped by the player in a Roadbook (id -> title).
+function Geo.Excluded(kind)
+  local rec = Geo.FrozenRec(kind)
+  return rec and rec.excluded or {}
+end
+
+-- Marks a step as done (and saves it), in the Roadbook that holds it.
 function Geo.MarkDone(st, value)
   if value == nil then value = true end
   st.done = value or nil
-  local fz = Geo.frozen
-  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
-  if fz and rec and rec.steps then
-    for i = 2, #fz.route do
-      if fz.route[i] == st and rec.steps[i - 1] then rec.steps[i - 1].done = value or nil end
+  for kind, fz in pairs(Geo.frozen) do
+    local rec = Geo.FrozenRec(kind)
+    if rec and rec.steps then
+      for i = 2, #fz.route do
+        if fz.route[i] == st and rec.steps[i - 1] then rec.steps[i - 1].done = value or nil end
+      end
     end
   end
 end
 
 -- Quick wins: a quest from the log that became ready to turn in during the Roadbook, whose NPC is
 -- next to an upcoming step (or to you), is added to the saved plan right after that step.
-function Geo.InjectQuickWins()
-  local fz = Geo.Frozen()
+function Geo.InjectQuickWins(kind)
+  local fz = Geo.Frozen(kind)
   if not (fz and QDB.ok) then return 0 end
   local route = fz.route
-  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
+  local rec = Geo.FrozenRec(kind)
   local pending = {}
   for i = 2, #route do
     local st = route[i]
@@ -259,7 +285,7 @@ function Geo.InjectQuickWins()
   local pos = PlayerPos()
   local added, focusNew = 0, nil
   for _, q in ipairs(e and e.quests or {}) do
-    if q.complete and not q.failed and not pending[q.id] and IsInLog(q.id)
+    if q.complete and not q.failed and not pending[q.id] and not Geo.Excluded(kind)[q.id] and IsInLog(q.id)
       and (not C_QuestLog.IsComplete or C_QuestLog.IsComplete(q.id)) then
       local t = QuestTargets(q.id)
       if #t.finish > 0 and not AllInstance(t.finish) then
@@ -294,11 +320,7 @@ function Geo.InjectQuickWins()
       end
     end
   end
-  if added > 0 then
-    CP.lastPlan = {}
-    for i = 2, #route do CP.lastPlan[#CP.lastPlan + 1] = route[i] end
-    if focusNew and cur then CP.FocusStep(focusNew) end
-  end
+  if added > 0 and focusNew and cur then CP.FocusStep(focusNew) end
   return added
 end
 
@@ -340,24 +362,30 @@ function CP.StepDone(st)
   return false
 end
 
--- Computes a new Roadbook and saves it; cb(route) when done.
-function Geo.Recompute(cb)
-  Geo.ClearFrozen()
+-- Computes a Roadbook of a kind and saves it; cb(route, err, info) when done.
+function Geo.Recompute(kind, cb)
+  Geo.ClearFrozen(kind)
   Snapshot()
   if CP.checkpointButton and CP.checkpointButton.sub then CP.checkpointButton.sub:SetText(L["Computing the Roadbook…"]) end
-  local custom = Geo.CustomMode()
-  Geo.RequestPlan(custom and "custom" or State.xpHorizon, function(route, err, info)
-    if Geo.CustomMode() ~= custom then return end -- mode changed meanwhile: result of the other Roadbook
-    if route and #route >= 2 then Geo.Freeze(route, info) end
+  Geo.RequestPlan(kind == "custom" and "custom" or State.xpGoal, function(route, err, info)
+    if Geo.computing ~= kind then return end -- deleted meanwhile
+    Geo.computing = nil
+    if route and #route >= 2 then Geo.Freeze(route, info, nil, kind) end
     if cb then cb(route, err, info) end
     if Refresh then C_Timer.After(0.1, Refresh) end
   end, true)
 end
 
--- Focuses the first step of the saved Roadbook that is not done yet.
--- At the end of the plan, a new Roadbook is computed.
+-- Name of a Roadbook kind, for the messages.
+function CP.KindName(kind)
+  return kind == "custom" and L["custom Roadbook"] or L["automatic Roadbook"]
+end
+
+-- Focuses the first step of the active Roadbook that is not done yet.
+-- At the end of the plan, the Roadbook is paused (kept, every step done): "Generate" makes a new one.
 function CP.FocusNext(silent, after)
-  local fz = Geo.Frozen()
+  local kind = Geo.ActiveKind()
+  local fz = Geo.Frozen(kind)
   if fz then
     -- Start from the step that was just done, then wrap around from the beginning of the plan.
     local start = 2
@@ -376,19 +404,120 @@ function CP.FocusNext(silent, after)
         return
       end
     end
-    if Geo.CustomMode() then
+    local g = kind == "auto" and fz.info.goal
+    if kind == "custom" then
       Print(L["Custom Roadbook finished: every quest of the list is done."])
-      CP.ClearFocus()
-      ClearPin()
-      Geo.ClearFrozen()
-      CP.RefreshButton()
-      if Refresh then C_Timer.After(0.2, Refresh) end
-      return
+    elseif g and g.kind == "level" and UnitLevel("player") < g.value then
+      Print(string.format(L["Stage finished: click \"Generate\" in the Roadbook tab to continue to level %d."], g.value))
+    else
+      Print(L["Roadbook finished: click \"Generate\" in the Roadbook tab for a new one."])
     end
-    Print(L["Roadbook finished: computing a new Roadbook."])
+    CP.Pause(kind, true)
+    return
   end
-  CP.Recompute()
+  CP.ShowActive()
 end
+
+-- Active Roadbook empty: the window opens on its tab, where it is generated (or filled).
+function CP.ShowActive()
+  local tab = Geo.TabOf(Geo.ActiveKind())
+  if CP.OpenWindow and not (State.mainFrame and State.mainFrame:IsShown() and State.currentTab == tab) then
+    CP.OpenWindow(tab)
+  end
+end
+
+-- Stops the tracking of the active Roadbook (focus, pin, compass) without touching its steps.
+function CP.StopFocus()
+  CP.ClearFocus()
+  ClearPin()
+  CP.RefreshButton()
+end
+
+-- Starts a Roadbook (Start button of its tab): it becomes the active one (the only way to change
+-- it); if the other one was followed, it is paused first, after confirmation.
+function CP.Start(kind)
+  if Geo.computing == kind then
+    Print(L["Computing the Roadbook, please wait…"])
+    return
+  end
+  if not Geo.Frozen(kind) then
+    Print(kind == "custom" and L["The custom Roadbook is empty: add quests with the \"Add\" button of the other tabs."]
+      or L["This Roadbook has no step: click \"Generate\" first."])
+    return
+  end
+  local cur = Geo.ActiveKind()
+  if cur ~= kind and Geo.Tracking() then
+    StaticPopup_Show("FQP_SWITCH", CP.KindName(cur), CP.KindName(kind), { kind = kind })
+    return
+  end
+  CP.DoStart(kind)
+end
+
+function CP.DoStart(kind)
+  if Geo.ActiveKind() ~= kind then
+    CP.StopFocus()
+    Geo.SetActive(kind)
+  end
+  if not Geo.Tracking() then Print(L["Roadbook started: "] .. CP.KindName(kind) .. ".") end
+  CP.FocusNext(false)
+  CP.RefreshButton()
+  if Refresh then Refresh() end
+end
+
+StaticPopupDialogs["FQP_SWITCH"] = {
+  text = L["Pause the %s and start the %s?\n\nThe paused Roadbook keeps its progress."],
+  button1 = YES or L["Yes"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, data) if data and data.kind then CP.DoStart(data.kind) end end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
+-- Pauses a Roadbook: only its tracking stops, its steps and their progress are kept; it stays the
+-- active one.
+function CP.Pause(kind, quiet)
+  if not kind or Geo.ActiveKind() ~= kind then return end
+  CP.StopFocus()
+  if not quiet then Print(L["Roadbook paused: its progress is kept. Click the Objective button to resume it."]) end
+  if Refresh then C_Timer.After(0.1, Refresh) end
+end
+
+-- Deletes a Roadbook after confirmation: tracking stopped, steps emptied, and the quest list of
+-- the custom Roadbook emptied too.
+function CP.Delete(kind)
+  StaticPopup_Show("FQP_DELETE", CP.KindName(kind), nil, { kind = kind })
+end
+
+function CP.DoDelete(kind)
+  if Geo.computing == kind then -- computation in progress: cancelled
+    Geo.co, Geo.runningKey, Geo.planCbs, Geo.computing = nil, nil, nil, nil
+    CP.computeToken = (CP.computeToken or 0) + 1
+  end
+  CP.Pause(kind, true)
+  Geo.ClearFrozen(kind)
+  if kind == "custom" then
+    Geo.CustomRec().list = {}
+    Geo.customUnplanned = nil
+    Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute
+  end
+  Geo.ResetActiveIfEmpty()
+  Print(L["Roadbook deleted: "] .. CP.KindName(kind) .. ".")
+  CP.RefreshButton()
+  if Refresh then Refresh() end
+end
+
+StaticPopupDialogs["FQP_DELETE"] = {
+  text = L["Delete the %s?\n\nIts steps and their progress are lost (and the quest list, for the custom Roadbook)."],
+  button1 = DELETE or L["Delete"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, data) if data and data.kind then CP.DoDelete(data.kind) end end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
 
 -- Same Roadbook step in two computations (quest, kind, objective or place).
 function CP.SameStep(a, b)
@@ -412,74 +541,122 @@ function CP.NearDest(name, destP)
   return d ~= nil and d < K.LANDING_RADIUS
 end
 
--- Roadbook mode ("auto" or "custom"): each mode has its own saved Roadbook; the objective
--- followed belongs to the previous mode, so it is stopped.
-function CP.SetMode(mode)
-  local rec = Geo.CustomRec()
-  if rec.mode == mode then return end
-  rec.mode = mode
-  Geo.frozen = nil
-  CP.lastPlan = nil
-  if CP.CurrentFocus() then
-    CP.ClearFocus()
-    ClearPin()
-  end
-  CP.RefreshButton()
-  Print(mode == "custom" and L["Custom Roadbook selected: click \"Start\" to follow it."] or L["Automatic Roadbook selected."])
+-- Goal of the automatic Roadbook (session duration or level to reach), used by the next "Generate";
+-- the current Roadbook is kept. Each kind keeps its last value.
+function CP.SetGoal(kind, value)
+  local st = Settings()
+  if kind == "time" then st.goalTime = value else st.goalLevel = value end
+  local g = State.xpGoal
+  if g.kind == kind and g.value == value then return end
+  State.xpGoal = { kind = kind, value = value }
+  st.goal = { kind = kind, value = value }
+  scan.dirty = true -- the levels scanned for the Roadbook follow the goal
   if Refresh then Refresh() end
 end
 
--- Full recompute (Ctrl-click on the button, or end of the Roadbook) then focus on the first step.
-function CP.Recompute(attempt)
-  if not (QDB.ok and GeoReady()) then
-    Print(L["Cannot compute: the Roadbook requires QuestieDB."])
+-- "Generate" button: an existing Roadbook is replaced, after confirmation (it is stopped first);
+-- the new one has to be started.
+function CP.Generate(kind)
+  if Geo.HasRoadbook(kind) and not Geo.computing then
+    StaticPopup_Show("FQP_REGENERATE", CP.KindName(kind), nil, { kind = kind })
     return
   end
-  if Geo.CustomMode() and #Geo.CustomList() == 0 then
-    Print(L["The custom Roadbook is empty: add quests with the + button of the other tabs."])
-    return
+  CP.Recompute(kind)
+end
+
+StaticPopupDialogs["FQP_REGENERATE"] = {
+  text = L["Generate a new %s?\n\nThe current Roadbook is replaced and its progress lost; the new one has to be started."],
+  button1 = L["Generate"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, data)
+    if not (data and data.kind) then return end
+    CP.Pause(data.kind, true)
+    CP.Recompute(data.kind)
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
+-- Empties the Roadbook of this kind and computes it again; it is not started.
+-- keep: recompute after a change of the custom list, the tracking goes on.
+function CP.Recompute(kind, keep, attempt, token)
+  if not attempt then
+    if not (QDB.ok and GeoReady()) then
+      Print(L["Cannot compute: the Roadbook requires QuestieDB."])
+      return
+    end
+    if kind == "custom" and #Geo.CustomList() == 0 then
+      if not keep then Print(L["The custom Roadbook is empty: add quests with the \"Add\" button of the other tabs."]) end
+      return
+    end
+    if Geo.computing then -- one computation at a time
+      if keep then
+        local t = Geo.customToken
+        C_Timer.After(1, function() if t == Geo.customToken then CP.Recompute(kind, keep) end end)
+      else
+        Print(L["Computing the Roadbook, please wait…"])
+      end
+      return
+    end
+    CP.computeToken = (CP.computeToken or 0) + 1
+    token = CP.computeToken
+    Geo.computing, Geo.computeStart = kind, GetTime and GetTime() or 0
+    if not keep then Geo.ClearFrozen(kind) end
+    if Refresh then Refresh() end
   end
+  if token ~= CP.computeToken then return end -- deleted meanwhile
   -- Available quests change after a pick-up or turn-in: wait for their scan to finish.
-  if not Geo.CustomMode() and (scan.running or scan.dirty or not scan.entries) then
+  if kind == "auto" and (scan.running or scan.dirty or not scan.entries) then
     if not scan.running then StartScan() end
     attempt = (attempt or 0) + 1
     if attempt > 40 then
+      Geo.computing = nil
       Print(L["Quest scan is taking too long: try again in a moment."])
+      if Refresh then Refresh() end
       return
     end
-    C_Timer.After(0.5, function() CP.Recompute(attempt) end)
+    C_Timer.After(0.5, function() CP.Recompute(kind, keep, attempt, token) end)
     return
   end
-  local was = CP.CurrentFocus()
-  Geo.Recompute(function(route, err)
+  local was = Geo.ActiveKind() == kind and CP.CurrentFocus() or nil
+  Geo.Recompute(kind, function(route, err)
     if not route or #route < 2 then
       Print(err or L["The Roadbook is empty: no step to follow."])
       CP.RefreshButton()
       return
     end
+    if not keep then
+      Print(L["Roadbook ready: click \"Start\" in the Roadbook tab to follow it."])
+      CP.RefreshButton()
+      return
+    end
+    if not was then CP.RefreshButton() return end
+    -- Custom Roadbook recomputed while followed: the current objective stays if it is still there.
     local first
     for i = 2, #route do
       if not CP.StepDone(route[i]) then first = route[i] break end
     end
-    -- Custom Roadbook recomputed while followed: the current objective stays if it is still there.
-    if was and Geo.CustomMode() then
-      for i = 2, #route do
-        local st = route[i]
-        if not CP.StepDone(st) and CP.SameStep(st, was) then first = st break end
-      end
+    for i = 2, #route do
+      local st = route[i]
+      if not CP.StepDone(st) and CP.SameStep(st, was) then first = st break end
     end
-    if first then
-      CP.FocusStep(first)
-      Print(L["New Roadbook. Active step: "] .. CP.StepText(first))
-    end
+    if first then CP.FocusStep(first) else CP.StopFocus() end
   end)
 end
 
--- Click on the button: focus the next step only if the current one is done in the
--- game; Shift-click: skip the current step even if it is not done.
-function CP.ValidateUnsafe(recompute)
-  if recompute or not Geo.Frozen() then
-    CP.Recompute()
+-- Click on the button: focus the next step only if the current one is done in the game.
+-- Active Roadbook empty: the window opens on its tab (a Roadbook is only made there);
+-- otherwise, not followed yet: it starts.
+function CP.ValidateUnsafe()
+  local kind = Geo.ActiveKind()
+  if not Geo.Frozen(kind) then
+    if Geo.computing == kind then Print(L["Computing the Roadbook, please wait…"]) else CP.ShowActive() end
+    return
+  end
+  if not Geo.Tracking() then
+    CP.DoStart(kind)
     return
   end
   local cur = CP.CurrentFocus()
@@ -492,17 +669,13 @@ function CP.ValidateUnsafe(recompute)
   CP.FocusNext(false, cur) -- no tracking yet, or step done: first step left to do
 end
 
--- Ctrl-click: stops following the objective (focus, addon pin and compass); click resumes it.
+-- Ctrl-click: pauses the active Roadbook (its progress is kept).
 function CP.StopTracking()
-  if not CP.CurrentFocus() then
+  if not Geo.Tracking() then
     Print(L["No objective tracked."])
     return
   end
-  CP.ClearFocus()
-  ClearPin()
-  CP.RefreshButton()
-  Print(L["Objective tracking stopped: click the Objective button to resume it."])
-  if Refresh then Refresh() end
+  CP.Pause(Geo.ActiveKind())
 end
 
 -- Shift-click: link of the quest of the followed step in the chat.
@@ -512,16 +685,16 @@ function CP.LinkCurrentQuest()
   if id then Geo.LinkQuestInChat(id) else Print(L["No quest for this objective."]) end
 end
 
--- Ctrl-Alt-click: removes the current step. A quest step removes the whole quest (confirmation,
--- then a new Roadbook); any other step (flight, hearthstone…) is skipped.
-function CP.RemoveCurrentStep()
+-- Ctrl-Alt-click: skips the current step. A quest step skips the whole quest (the route is
+-- adapted); any other step (flight, hearthstone…) is just skipped.
+function CP.SkipCurrentStep()
   local cur = CP.CurrentFocus()
   if not cur then
     Print(L["No objective tracked."])
     return
   end
   if cur.task and cur.task.id then
-    CP.AskExclude(cur)
+    CP.SkipQuest(cur, Geo.ActiveKind())
     return
   end
   Print(L["Step skipped: "] .. CP.StepText(cur))
@@ -529,38 +702,45 @@ function CP.RemoveCurrentStep()
   CP.FocusNext(false, cur)
 end
 
--- Quest removed from the Roadbook (badly defined, not found…): excluded, then a new Roadbook.
-function CP.ExcludeQuest(id, title)
-  if not id then return end
-  Settings().excluded[id] = title or true
-  Geo.planCache = nil
-  Print(L["Quest removed from the Roadbook: "] .. (title or tostring(id)) .. L[". It can be added back in the options."])
-  CP.Recompute()
-end
-
-function CP.AskExclude(s)
+-- Skips a quest (badly defined, not found, not wanted…): all its steps leave the Roadbook, which
+-- persists: the route of the steps left is adapted, no quest is added, the steps done are kept.
+-- The quest stays out until a new Roadbook. Custom Roadbook: the quest leaves the list.
+function CP.SkipQuest(s, kind)
   local id = s and s.task and s.task.id
   if not id then return end
-  if Geo.CustomMode() then -- custom Roadbook: the quest leaves the list (and the route is computed again)
+  if kind == "custom" then -- custom Roadbook: the quest leaves the list (and the route is computed again)
     Geo.CustomRemove(id)
     return
   end
-  StaticPopup_Show("FQP_EXCLUDE", s.task.title or tostring(id), nil, { id = id, title = s.task.title })
+  local fz = Geo.Frozen("auto")
+  if not fz then return end
+  if Geo.computing then
+    Print(L["Computing the Roadbook, please wait…"])
+    return
+  end
+  local title = s.task.title
+  local excluded = {}
+  for k, v in pairs(Geo.Excluded("auto")) do excluded[k] = v end
+  excluded[id] = title or true
+  local wasFocus = CP.CurrentFocus()
+  local ok, route, info = pcall(Geo.Reroute, fz, id, CP.StepDone)
+  if not ok then
+    Print(L["Roadbook update error: "] .. tostring(route))
+    return
+  end
+  Geo.Freeze(route, info, excluded, "auto")
+  Print(L["Quest skipped: "] .. (title or tostring(id)) .. L[". The route is adapted; it comes back with a new Roadbook."])
+  if Geo.ActiveKind() == "auto" and (wasFocus or CP.CurrentFocus()) then
+    CP.ClearFocus()
+    CP.FocusNext(false)
+  else
+    CP.RefreshButton()
+    if Refresh then Refresh() end
+  end
 end
 
-StaticPopupDialogs["FQP_EXCLUDE"] = {
-  text = L["Remove the quest \"%s\" from the Roadbook and compute a new one?\n\nUseful when a quest is badly defined or cannot be found. It can be added back in the options."],
-  button1 = L["Remove"],
-  button2 = CANCEL or L["Cancel"],
-  OnAccept = function(_, data) if data then CP.ExcludeQuest(data.id, data.title) end end,
-  timeout = 0,
-  whileDead = true,
-  hideOnEscape = true,
-  preferredIndex = 3,
-}
-
-function CP.Validate(recompute)
-  local ok, err = xpcall(function() CP.ValidateUnsafe(recompute) end, function(e)
+function CP.Validate()
+  local ok, err = xpcall(function() CP.ValidateUnsafe() end, function(e)
     return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
   end)
   if not ok then Print(L["|cffff6060Error while validating the checkpoint|r (copy it to report it):\n"] .. err) end
@@ -670,7 +850,8 @@ end
 -- Replaces the transport steps from the step `st` to the next real step by the shortest
 -- route from `pos`, then focuses the first step of that route.
 function CP.Reroute(st, pos)
-  local fz = Geo.Frozen()
+  local kind = Geo.ActiveKind()
+  local fz = Geo.Frozen(kind)
   if not fz then return end
   local route = fz.route
   local fi
@@ -695,13 +876,11 @@ function CP.Reroute(st, pos)
     end
   end
   for k, leg in ipairs(legs) do table.insert(route, fi + k - 1, leg) end
-  local rec = Geo.FrozenStore()[Geo.FrozenKey()]
+  local rec = Geo.FrozenRec(kind)
   if rec then
     rec.steps = {}
     for i = 2, #route do rec.steps[#rec.steps + 1] = Geo.SerializeStep(route[i]) end
   end
-  CP.lastPlan = {}
-  for i = 2, #route do CP.lastPlan[#CP.lastPlan + 1] = route[i] end
   local first = legs[1]
   if first then
     Print(L["Wrong destination: new route. "] .. L["Focus: "] .. CP.StepText(first))
@@ -717,11 +896,11 @@ end
 
 function CP.OnGameEvent(event, a1, a2)
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
-  if (event == "QUEST_LOG_UPDATE" or event == "ZONE_CHANGED_NEW_AREA") and not CP.quickPending and Geo.frozen then
+  if (event == "QUEST_LOG_UPDATE" or event == "ZONE_CHANGED_NEW_AREA") and not CP.quickPending and Geo.Tracking() and Geo.frozen[Geo.ActiveKind()] then
     CP.quickPending = true
     C_Timer.After(2.5, function() -- after the quest log capture (2 s)
       CP.quickPending = nil
-      local ok, n = pcall(Geo.InjectQuickWins)
+      local ok, n = pcall(Geo.InjectQuickWins, Geo.ActiveKind())
       if ok and n and n > 0 and Refresh then Refresh() end
     end)
   end
@@ -851,7 +1030,7 @@ function CP.RefreshButton()
     b.current = s
   else
     b.title:SetText(L["Objective"])
-    b.sub:SetText(L["No objective tracked · click to follow it"])
+    b.sub:SetText(L["No objective tracked · click to start"])
     b.current = nil
   end
   -- Width fitted to the widest line, at most K.OBJECTIVE_MAX_WIDTH; the height follows the number of
@@ -872,10 +1051,10 @@ end
 
 -- Commands of the Objective button, shown in its tooltip (two per line).
 K.OBJECTIVE_COMMANDS = {
-  { "Click: follow", "Ctrl-click: stop" },
-  { "Shift-click: chat link", "Alt-click: new Roadbook" },
-  { "Ctrl-Alt-click: remove the step", "Right-click: Roadbook" },
-  { "Shift-right-click: center", "Shift-drag: move" },
+  { "Click: start", "Ctrl-click: pause" },
+  { "Shift-click: chat link", "Ctrl-Alt-click: skip the step" },
+  { "Right-click: Roadbook", "Shift-right-click: center" },
+  { "Shift-drag: move" },
 }
 K.OBJECTIVE_TEXT_X = 59       -- text of the Objective button, right of the compass square
 K.OBJECTIVE_MAX_WIDTH = 380   -- widest Objective button (beyond, one information per line)
@@ -1035,7 +1214,7 @@ function CP.CreateCheckpointButton()
   sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
   sub:SetJustifyH("LEFT")
   sub:SetTextColor(0.75, 0.75, 0.75)
-  sub:SetText(L["No objective tracked · click to follow it"])
+  sub:SetText(L["No objective tracked · click to start"])
   title:SetWordWrap(true)
   sub:SetWordWrap(true)
   b.label, b.title, b.sub = L["Objective"], title, sub
@@ -1076,22 +1255,22 @@ function CP.CreateCheckpointButton()
       if IsShiftKeyDown and IsShiftKeyDown() then
         CP.CenterCheckpointButton() -- Shift-right-click: center the button horizontally
       elseif CP.OpenWindow then
-        CP.OpenWindow("xp") -- right-click: window opened on the Roadbook
+        CP.OpenWindow(Geo.TabOf(Geo.ActiveKind())) -- right-click: window opened on the active Roadbook
       end
     else
       local alt = IsAltKeyDown and IsAltKeyDown()
       local ctrl = IsControlKeyDown and IsControlKeyDown()
       local shift = IsShiftKeyDown and IsShiftKeyDown()
       if alt and ctrl then
-        CP.RemoveCurrentStep()   -- Ctrl-Alt-click: remove the step from the Roadbook
+        CP.SkipCurrentStep()     -- Ctrl-Alt-click: skip the step (a quest step skips the whole quest)
       elseif alt then
-        CP.Validate(true)        -- Alt-click: compute a new Roadbook
+        return                   -- Alt-click: nothing (a new Roadbook is made from the Roadbook tab)
       elseif ctrl then
         CP.StopTracking()        -- Ctrl-click: stop following the objective
       elseif shift then
         CP.LinkCurrentQuest()    -- Shift-click: link of the objective's quest in the chat
       else
-        CP.Validate(false)       -- click: follow the objective
+        CP.Validate()            -- click: start / follow the objective
       end
     end
   end)
@@ -1102,12 +1281,12 @@ function CP.CreateCheckpointButton()
     if self.current then
       GameTooltip:AddLine(L["Current step: "] .. CP.StepText(self.current), 1, 1, 1, true)
     else
-      GameTooltip:AddLine(L["No Roadbook step has the focus."], 1, 1, 1, true)
+      GameTooltip:AddLine(L["No objective tracked."], 1, 1, 1, true)
     end
     -- Commands: compact, two per line, dimmed (the step detail stays the main content).
     GameTooltip:AddLine(" ")
     for _, pair in ipairs(K.OBJECTIVE_COMMANDS) do
-      GameTooltip:AddDoubleLine(L[pair[1]], L[pair[2]], 0.55, 0.55, 0.55, 0.55, 0.55, 0.55)
+      GameTooltip:AddDoubleLine(L[pair[1]], pair[2] and L[pair[2]] or "", 0.55, 0.55, 0.55, 0.55, 0.55, 0.55)
     end
     GameTooltip:Show()
   end)

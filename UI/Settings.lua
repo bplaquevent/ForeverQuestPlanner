@@ -6,18 +6,9 @@ local CP, Color, Geo, K, L, Plural = ns.CP, ns.Color, ns.Geo, ns.K, ns.L, ns.Plu
 local Print, Refresh, Settings, scan = ns.Print, ns.Refresh, ns.Settings, ns.scan
 
 ---------------------------------------------------------------------------
--- Settings: Roadbook priority and estimate parameters
+-- Settings: Roadbook difficulty and estimate parameters
 ---------------------------------------------------------------------------
 K.PARAMS = {
-  { section = L["Priority bonuses (100 % = as if the quest gave the XP of one more average Roadbook quest)"] },
-  { key = "PRIO_CLASS", label = L["Class quest (or chain leading to one)"], pct = true, min = 0, max = 1, step = 0.05 },
-  { key = "PRIO_ITEM_SPEC", label = L["Blue reward suited to your spec"], pct = true, min = 0, max = 1, step = 0.05 },
-  { key = "PRIO_ITEM_BLUE", label = L["Blue reward, off-spec"], pct = true, min = 0, max = 1, step = 0.05 },
-  { key = "PRIO_UPGRADE_SPEC", label = L["Upgrade with the right stats"], pct = true, min = 0, max = 1, step = 0.05 },
-  { key = "PRIO_UPGRADE", label = L["Upgrade (item level only)"], pct = true, min = 0, max = 1, step = 0.05 },
-  { key = "PRIO_SPELL", label = L["Reward that teaches a skill"], pct = true, min = 0, max = 1, step = 0.05 },
-  { key = "PRIO_BAG", label = L["Reward: bag"], pct = true, min = 0, max = 1, step = 0.05 },
-  { key = "READY_BONUS", label = L["Quest ready to turn in"], pct = true, min = 0, max = 1, step = 0.05 },
   { section = L["Difficulty"] },
   { key = "MAX_LEVEL_GAP", label = L["Max quest level"], unit = L[" lvl"], min = -5, max = 5, step = 1, signed = true },
   { key = "MAX_ELITE_GAP", label = L["Max elite quest level"], unit = L[" lvl"], min = -5, max = 5, step = 1, signed = true },
@@ -32,15 +23,13 @@ for _, d in ipairs(K.PARAMS) do
 end
 
 -- Applies the saved values (or the defaults).
-K.PARAMS_SCALE = 2 -- 2: priorities in share of an average quest (before: share of the level's XP)
 function Geo.ApplyParams()
   local st = Settings()
-  if st.params and st.paramsScale ~= K.PARAMS_SCALE then
-    -- Values saved with the former scale make no sense anymore: back to the defaults.
+  st.paramsScale = nil -- former priority scale
+  if st.params then -- former priority settings (the Roadbook now only optimizes XP)
     for _, k in ipairs({ "PRIO_CLASS", "PRIO_UNLOCK_CLASS", "PRIO_ITEM_SPEC", "PRIO_ITEM_BLUE", "PRIO_UPGRADE_SPEC",
       "PRIO_UPGRADE", "PRIO_SPELL", "PRIO_BAG", "READY_BONUS", "LOOKAHEAD_WEIGHT" }) do st.params[k] = nil end
   end
-  st.paramsScale = K.PARAMS_SCALE
   local saved = st.params or {}
   for _, d in ipairs(K.PARAMS) do
     if d.key then
@@ -137,7 +126,7 @@ function Geo.SettingsSlider(box, d, x, y, panel)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:AddLine(d.label)
     GameTooltip:AddLine(L["Default value: "] .. Geo.ParamText(d, d.default), 0.8, 0.8, 0.8)
-    GameTooltip:AddLine(L["The Roadbook is recomputed with the new value."], 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["Applies to the next Roadbook (\"Generate\" button)."], 0.7, 0.7, 0.7, true)
     GameTooltip:Show()
   end)
   sl:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -152,7 +141,7 @@ function Geo.CreateSettingsPanel(f)
   panel.sliders, panel.updaters = {}, {}
 
   -- General
-  local gen = Geo.SettingsBox(panel, L["General"], 14, -32, 392, 62)
+  local gen = Geo.SettingsBox(panel, L["General"], 14, -32, 792, 62)
   Geo.SettingsCheck(gen, L["Minimap icon"], 10, -28,
     function() return not Settings().hideMinimap end,
     function(v)
@@ -161,51 +150,22 @@ function Geo.CreateSettingsPanel(f)
       if mb then mb:SetShown(v) end
     end, panel)
 
-  -- Quest log
-  local journal = Geo.SettingsBox(panel, L["Quest log"], 414, -32, 392, 62)
-  local keep = CreateFrame("Button", nil, journal, "UIPanelButtonTemplate")
-  keep:SetSize(240, 22)
-  keep:SetPoint("TOPLEFT", 10, -28)
-  keep:SetText(L["Clear \"Keep\" quests"])
-  keep:SetScript("OnClick", function()
-    Settings().keep = {}
-    Print(L["\"Keep\" quest list cleared."])
-    if Refresh then Refresh() end
-  end)
-
-  -- Roadbook: objective button, hearthstone, then priorities, look-ahead and time estimates.
+  -- Roadbook: hearthstone, flight masters, objective button, then difficulty and time estimates.
   -- Layout: boxes 8 px apart; content 10 px from the left edge, first row 28-30 px below the
   -- top edge, 12 px of padding under the last row (slider row = 46 px).
-  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -102, 792, 572)
+  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -102, 792, 350)
   Geo.SettingsCheck(rb, L["Use the hearthstone"], 18, -28,
     function() return not Settings().noHearth end,
     function(v)
       Settings().noHearth = not v or nil
       Geo.planCache = nil
     end, panel)
-  local restore = CreateFrame("Button", nil, rb, "UIPanelButtonTemplate")
-  restore:SetSize(260, 22)
-  restore:SetPoint("TOPRIGHT", -18, -28) -- aligned with "Center horizontally" below
-  local function RemovedCount()
-    local n = 0
-    for _ in pairs(Settings().excluded) do n = n + 1 end
-    return n
-  end
-  local function UpdateRestore()
-    local n = RemovedCount()
-    restore:SetText(L["Restore removed quests"] .. (n > 0 and (" (" .. n .. ")") or ""))
-    restore:SetEnabled(n > 0)
-  end
-  panel.updaters[#panel.updaters + 1] = UpdateRestore
-  restore:SetScript("OnClick", function()
-    local n = RemovedCount()
-    if n == 0 then return end
-    Settings().excluded = {}
-    Geo.planCache = nil
-    Print(Plural(n, L["quest"]) .. L[" added back: computing a new Roadbook."])
-    UpdateRestore()
-    CP.Recompute()
-  end)
+  Geo.SettingsCheck(rb, L["Activate nearby flight masters"], 300, -28,
+    function() return not Settings().noFMDetour end,
+    function(v)
+      Settings().noFMDetour = not v or nil
+      Geo.planCache, Geo.customCache = nil, nil
+    end, panel)
   -- Objective button: shown, compass, centered.
   local obj = Geo.SettingsBox(rb, L["Objective"], 8, -58, 776, 62)
   Geo.SettingsCheck(obj, L["Show"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)
@@ -222,18 +182,15 @@ function Geo.CreateSettingsPanel(f)
   center:SetText(L["Center horizontally"])
   center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   local boxes = {
-    Geo.SettingsBox(rb, L["Priorities (100 % = adds the XP of an average Roadbook quest)"], 8, -128, 776, 214),
-    Geo.SettingsBox(rb, L["Difficulty"], 8, -350, 384, 214),
-    Geo.SettingsBox(rb, L["Time estimates"], 400, -350, 384, 214),
+    Geo.SettingsBox(rb, L["Difficulty"], 8, -128, 384, 214),
+    Geo.SettingsBox(rb, L["Time estimates"], 400, -128, 384, 214),
   }
   local sec, n = 0, 0
   for _, d in ipairs(K.PARAMS) do
     if d.section then
       sec, n = sec + 1, 0
     elseif boxes[sec] then
-      local cols = (sec == 1) and 2 or 1
-      local col, row = n % cols, math.floor(n / cols)
-      Geo.SettingsSlider(boxes[sec], d, 10 + col * 392, -30 - row * 46, panel)
+      Geo.SettingsSlider(boxes[sec], d, 10, -30 - n * 46, panel)
       n = n + 1
     end
   end
@@ -245,7 +202,7 @@ function Geo.CreateSettingsPanel(f)
       sl:SetAlpha(Settings().noElite and 0.4 or 1)
     end
   end
-  Geo.SettingsCheck(boxes[2], L["Include elite quests"], 10, -122,
+  Geo.SettingsCheck(boxes[1], L["Include elite quests"], 10, -122,
     function() return not Settings().noElite end,
     function(v)
       Settings().noElite = not v or nil
@@ -268,7 +225,7 @@ function Geo.CreateSettingsPanel(f)
   note:SetPoint("LEFT", reset, "RIGHT", 12, 0)
   note:SetWidth(580)
   note:SetJustifyH("LEFT")
-  note:SetText(L["Settings are saved. Priorities and estimates apply to the next Roadbook computation; \"Defaults\" resets them."])
+  note:SetText(L["Settings are saved. They apply to the next Roadbook computation; \"Defaults\" resets the difficulty and the estimates."])
   function panel.Update()
     panel.updating = true
     for _, fn in ipairs(panel.updaters) do fn() end
@@ -342,7 +299,7 @@ function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
     w = CreateFrame("Frame", "ForeverQuestPlannerSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    w:SetSize(820, 746)
+    w:SetSize(820, 524)
     w:SetPoint("CENTER", 40, -20)
     w:SetFrameStrata("DIALOG")
     w:SetToplevel(true)
@@ -373,7 +330,7 @@ function Geo.ToggleSettings()
     Geo.AddVersionFooter(w)
     w:SetScript("OnShow", function() w.panel.Update() end)
     w:SetScript("OnHide", function()
-      -- The open Roadbook is recomputed with the new values.
+      -- The values apply to the next Roadbook; the open window shows them.
       if Refresh then Refresh() end
     end)
     tinsert(UISpecialFrames, "ForeverQuestPlannerSettingsFrame")

@@ -14,7 +14,7 @@ local journalStates, nearStates, panels, scan = ns.journalStates, ns.nearStates,
 -- Quest log tab (to do / to abandon)
 ---------------------------------------------------------------------------
 local function AbandonButton(q)
-  return { text = L["Abandon"], fn = function() StaticPopup_Show("FQE_ABANDON", q.title or "?", nil, q.id) end }
+  return { tip = { L["Abandon"], L["Abandons the quest (asks for confirmation)."] }, fn = function() StaticPopup_Show("FQE_ABANDON", q.title or "?", nil, q.id) end }
 end
 
 local function QuestLine(q)
@@ -58,11 +58,8 @@ local function RenderTodo(a)
     if watched > 0 then text = text .. " - " .. watched .. L[" tracked"] end
     if toDrop > 0 then text = text .. " - " .. toDrop .. L[" to abandon"] end
     if searching then text = text .. L["  (filtered)"] end
-    -- Quests recommended for abandoning: only once kept ("Keep") can they join the custom Roadbook.
     local list = {}
-    for _, q in ipairs(quests) do
-      if not q._abandon then list[#list + 1] = { id = q.id, title = q.title, level = q.level } end
-    end
+    for _, q in ipairs(quests) do list[#list + 1] = { id = q.id, title = q.title, level = q.level } end
     local addAll, removeAll = Geo.CustomBulkButtons(list)
     items[#items + 1] = { header = true, kind = kind, key = key, label = text, b1 = addAll, b2 = removeAll }
     for _, q in ipairs(quests) do
@@ -70,23 +67,14 @@ local function RenderTodo(a)
       if q._abandon then body = body .. Geo.DescLine(Color("ff8040", L["Reason: "] .. q._abandon)) end
       body = body .. detail(q) .. QuestFigures(q)
       if q._chain then body = body .. Geo.DescLine(Color(K.DESC.chain, q._chain)) end
-      local b1
-      if q._abandon then
-        b1 = { text = L["Keep"], fn = function()
-          Settings().keep[q.id] = true
-          Refresh()
-        end }
-      else
-        b1 = Geo.CustomButton(q.id, q.title, q.level)
-      end
       items[#items + 1] = {
         text = body,
         questID = q.id,
         tint = q._abandon and { 0.9, 0.5, 0.25 } or nil,
         stripe = q._abandon and { 1, 0.5, 0.15 } or nil,
-        b1 = b1,
+        b1 = Geo.CustomButton(q.id, q.title, q.level),
         b2 = Geo.MapButton(function() return Geo.ObjectivePoint(q) end, q.title, q.id),
-        b3 = AbandonButton(q),
+        trash = AbandonButton(q), -- trash icon at the left of the quest
       }
     end
   end
@@ -104,11 +92,8 @@ local function RenderTodo(a)
   end
 
   if #a.abandon > 0 and not searching then
-    items[#items + 1] = { text = Color("ff8040", Plural(#a.abandon, L["quest"]) .. L[" recommended for abandoning: orange lines marked [To abandon], in their category."]) ..
-      (a.kept > 0 and Color("888888", "\n" .. Plural(a.kept, L["quest"]) .. L[" kept despite the recommendation (/fqp reset to clear)."]) or ""),
+    items[#items + 1] = { text = Color("ff8040", Plural(#a.abandon, L["quest"]) .. L[" recommended for abandoning: orange lines marked [To abandon], in their category."]),
       tint = { 0.9, 0.5, 0.25 }, stripe = { 1, 0.5, 0.15 } }
-  elseif a.kept > 0 and not searching then
-    items[#items + 1] = { text = Color("888888", Plural(a.kept, L["quest"]) .. L[" kept despite the abandon recommendation (/fqp reset to clear)."]) }
   end
 
   if #a.turnIn > 0 then
@@ -399,38 +384,60 @@ local function RenderNear()
     return MatchWords(Normalize(table.concat({ it.label or "", it.giver or "", it.extra or "", PointText(it.p) }, " ")), State.nearQuery)
   end
 
-  local function row(it, withKind)
+  -- Quest to turn in or to pick up.
+  local function row(it)
     local D = K.DESC
     local take = it.kind == "take"
     local figures = Geo.DescLine(take and Geo.XPText(it.xp, true) or nil, Color(D.meta, string.format("%.0f m", it.d)),
       (take and it.lowLevel) and Color(D.meta, L["low level"]) or nil)
-    local who
-    if it.kind == "take" then
-      who = L["Given by: "] .. (it.giver or "?")
-    elseif it.kind == "turnin" then
-      who = L["Turn in to: "] .. (it.giver or "?")
-    else
-      who = L["Objective: "] .. (it.extra or "?")
-    end
-    local text = "  " .. StateIcons(it.id) .. (withKind and (Geo.KindTag(it.kind == "step" and "obj" or it.kind) .. " ") or "") ..
+    local who = (take and L["Given by: "] or L["Turn in to: "]) .. (it.giver or "?")
+    local text = "  " .. StateIcons(it.id) ..
       Geo.QuestTitle(it.label, it.id and { id = it.id, level = it.level } or nil) ..
       Geo.DescLine(Color(D.action, who .. K.DESC_SEP .. PointText(it.p))) .. figures
     if it.rep then text = text .. Geo.DescLine(Color(D.bad, it.rep)) end
-    local label = it.kind == "step" and it.extra or (it.kind == "turnin" and L["turn in the quest"] or L["pick up the quest"])
-    return { text = text, questID = it.kind ~= "take" and it.id or nil, linkQuest = it.id,
+    local label = take and L["pick up the quest"] or L["turn in the quest"]
+    return { text = text, questID = not take and it.id or nil, linkQuest = it.id,
       b1 = Geo.CustomButton(it.id, it.label, it.level),
       b2 = Geo.MapButton(function() return it.p, label end, it.label, it.id) }
   end
 
+  -- Quest in progress: one row per quest, one line per step within reach; the map pin goes to the nearest step.
+  local function questRow(g)
+    local D = K.DESC
+    local text = "  " .. StateIcons(g.id) .. Geo.QuestTitle(g.label, g.id and { id = g.id, level = g.level } or nil)
+    for _, it in ipairs(g.steps) do
+      text = text .. Geo.DescLine(Color(D.action, L["Objective: "] .. (it.extra or "?") .. K.DESC_SEP .. PointText(it.p)),
+        Color(D.meta, string.format("%.0f m", it.d)))
+    end
+    local first = g.steps[1]
+    return { text = text, questID = g.id, linkQuest = g.id,
+      b1 = Geo.CustomButton(g.id, g.label, g.level),
+      b2 = Geo.MapButton(function() return first.p, first.extra end, g.label, g.id) }
+  end
+
   local sections = {
     { kind = "turnin", label = L["To turn in"], unit = L["quest"] },
-    { kind = "step", label = L["Steps of quests in progress"], unit = L["step"] },
+    { kind = "step", label = L["Quests in progress"], unit = L["quest"] },
     { kind = "take", label = L["Available quests"], unit = L["quest"] },
   }
   for _, sec in ipairs(sections) do
     local list = {}
     for _, it in ipairs(found) do
       if it.kind == sec.kind and matches(it) then list[#list + 1] = it end
+    end
+    if sec.kind == "step" then
+      -- Group the steps by quest (list is sorted by distance: the first step of a quest is the nearest).
+      local groups, byId = {}, {}
+      for _, it in ipairs(list) do
+        local g = byId[it.id]
+        if not g then
+          g = { id = it.id, label = it.label, level = it.level, steps = {} }
+          byId[it.id] = g
+          groups[#groups + 1] = g
+        end
+        g.steps[#g.steps + 1] = it
+      end
+      list = groups
     end
     if #list > 0 then
       local quests, seen = {}, {}
@@ -443,7 +450,7 @@ local function RenderNear()
       local addAll, removeAll = Geo.CustomBulkButtons(quests)
       items[#items + 1] = { header = true, kind = sec.kind, key = sec.kind, label = sec.label .. " - " .. Plural(#list, sec.unit),
         b1 = addAll, b2 = removeAll }
-      for _, it in ipairs(list) do items[#items + 1] = row(it, false) end
+      for _, it in ipairs(list) do items[#items + 1] = it.steps and questRow(it) or row(it) end
     end
   end
 
