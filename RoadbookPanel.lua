@@ -280,7 +280,7 @@ function Geo.MapPanelSync()
   local following = active == kind and Geo.Tracking()
   panel.startB:SetShown(not (o and o.mode == "preview" and o.kind ~= active))
   panel.startB:SetText(following and L["Pause"] or L["Start"])
-  panel.startB:SetEnabled(Geo.computing ~= kind)
+  panel.startB:SetEnabled(Geo.computing ~= kind and (following or not Geo.IsFinished(kind)))
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = kind .. ":" .. tostring(target)
   if target and panel.scrollKey ~= key then

@@ -89,7 +89,7 @@ local function CreateRoadbookPanel(f, kind)
   mapB:SetText(L["Map"])
   mapB:SetScript("OnClick", function() Geo.MapPreview(kind) end)
   mapB:SetPoint("RIGHT", startB, "LEFT", -6, 0)
-  Tooltip(mapB, L["Map"], L["Shows this Roadbook on the world map: its steps numbered in order and its route; your map pins are hidden meanwhile. Closing the map gives it back as it was."])
+  Tooltip(mapB, L["Map"], L["Shows this Roadbook on the world map: its steps numbered in order and its route; your map pins are hidden meanwhile. Closing the map gives it back as it was. A click on a step of the list centers the map on it."])
   local function UpdateMapButton()
     local o = Geo.MapOwner()
     if o and o.mode == "preview" and o.kind == kind then mapB:LockHighlight() else mapB:UnlockHighlight() end
@@ -147,7 +147,8 @@ local function CreateRoadbookPanel(f, kind)
     -- Buttons: state of the Roadbook of the tab.
     local following = Geo.ActiveKind() == kind and Geo.Tracking()
     startB:SetText(following and L["Pause"] or L["Start"])
-    startB:SetEnabled(Geo.computing ~= kind and (following or Geo.HasRoadbook(kind)))
+    -- A finished Roadbook can only be extended (quests added), generated again or deleted.
+    startB:SetEnabled(Geo.computing ~= kind and (following or (Geo.HasRoadbook(kind) and not Geo.IsFinished(kind))))
     mapB:SetEnabled(Geo.computing ~= kind and Geo.HasRoadbook(kind))
     UpdateMapButton()
     delete:SetEnabled(Geo.computing ~= kind and (Geo.HasRoadbook(kind) or (custom and #Geo.CustomRec().list > 0)))

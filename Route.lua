@@ -652,12 +652,11 @@ function Geo.Reroute(fz, id, isDone)
   local net = BuildNetwork(speed)
   local travel = MakeTravel(net, plevel)
   local old = fz.route
-  local done, doneIdx, todo = {}, {}, {}
+  local done, todo = {}, {}
   for i = 2, #old do
     local st = old[i]
     if isDone(st) then
       done[#done + 1] = st
-      doneIdx[#doneIdx + 1] = i
     elseif not (st.task and st.task.id == id) and not Geo.AUX_STEPS[st.kind] then
       todo[#todo + 1] = st
     end
@@ -671,37 +670,57 @@ function Geo.Reroute(fz, id, isDone)
   end
   rest = Geo.FinishRoute(rest, net, travel, plevel)
   local restInfo = Geo.RouteInfo(rest, travel)
-  -- Steps done first (their time and level as planned), then the steps left from now on.
-  local oldLv = fz.info.levels or {}
-  local route, levels = { old[1] }, { oldLv[1] or plevel }
-  local t0 = 0
-  for k, st in ipairs(done) do
-    route[#route + 1] = st
-    levels[#levels + 1] = oldLv[doneIdx[k]] or levels[#levels]
-    t0 = math.max(t0, st.at or 0)
-  end
-  for i = 2, #rest do
-    rest[i].at = t0 + (rest[i].at or 0)
-    route[#route + 1] = rest[i]
-    levels[#levels + 1] = restInfo.levels[i]
-  end
   local info = {}
   for k, v in pairs(fz.info) do info[k] = v end
+  local route = Geo.KeepDone(fz, isDone, rest, restInfo, info)
+  info.net, info.speed = net, speed
+  info.net.taxi = TaxiCount()
+  local levels = info.levels
+  if info.goal and info.goal.kind == "level" then info.goalStage = (levels[#levels] or 0) < info.goal.value or nil end
+  return route, info
+end
+
+-- History of a Roadbook computed again: the steps done of the saved Roadbook `fz` (isDone(st)) come
+-- first, in their order, with their time and level as planned, marked done for good; then the new
+-- steps `rest` (route from a start step, info `restInfo`), their times following the last step done.
+-- Fills info (it can be restInfo itself) with the totals of the whole: xp, mobXP, count, total, levels.
+-- Returns the merged route.
+function Geo.KeepDone(fz, isDone, rest, restInfo, info)
+  local old = fz.route
+  local oldLv = fz.info.levels or {}
+  local restLv, restTotal = restInfo.levels or {}, restInfo.total or 0
+  local route, levels = { old[1] }, { oldLv[1] or restLv[1] or UnitLevel("player") }
+  local t0 = 0
+  for i = 2, #old do
+    local st = old[i]
+    if isDone(st) then
+      st.done = true
+      route[#route + 1] = st
+      levels[#levels + 1] = oldLv[i] or levels[#levels]
+      t0 = math.max(t0, st.at or 0)
+    end
+  end
+  if #route == 1 then -- nothing done: the new route as it is
+    route, levels, t0 = rest, restLv, 0
+  else
+    for i = 2, #rest do
+      rest[i].at = t0 + (rest[i].at or 0)
+      route[#route + 1] = rest[i]
+      levels[#levels + 1] = restLv[i] or levels[#levels]
+    end
+  end
   local xp, mobXP, ids = 0, 0, {}
   for i = 2, #route do
     local st = route[i]
-    if st.kind == "turnin" then xp = xp + (st.xp or 0) end
+    if st.kind == "turnin" or st.kind == "dungeon" then xp = xp + (st.xp or 0) end
     if st.kind == "obj" then mobXP = mobXP + (st.xp or 0) end
     if st.task and st.task.id then ids[st.task.id] = true end
   end
   local count = 0
   for _ in pairs(ids) do count = count + 1 end
   info.xp, info.mobXP, info.count = xp + mobXP, mobXP, count
-  info.total = t0 + restInfo.total
-  info.levels, info.net, info.speed = levels, net, speed
-  info.net.taxi = TaxiCount()
-  if info.goal and info.goal.kind == "level" then info.goalStage = (levels[#levels] or 0) < info.goal.value or nil end
-  return route, info
+  info.total, info.levels = t0 + restTotal, levels
+  return route
 end
 
 -- Roadbook computation in the background (spread over several frames) with caching.

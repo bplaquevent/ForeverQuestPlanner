@@ -234,6 +234,31 @@ function Geo.ClearFrozen(kind)
   if kind == "custom" then Geo.customCache = nil else Geo.planCache = nil end
 end
 
+-- Steps to come removed, the steps done kept (history): the custom Roadbook whose list was emptied.
+-- Returns false when no step is done (nothing to keep).
+function Geo.KeepOnlyDone(kind)
+  local fz = Geo.Frozen(kind)
+  if not fz then return false end
+  local start = { { kind = "start", p = fz.route[1].p, work = 0 } }
+  local info = {}
+  for k, v in pairs(fz.info) do info[k] = v end
+  local route = Geo.KeepDone(fz, CP.StepDone, start, { total = 0, levels = {} }, info)
+  if #route < 2 then return false end
+  info.dungeons, info.discovered, info.skipped, info.unplanned = nil, nil, nil, nil
+  Geo.Freeze(route, info, Geo.FrozenRec(kind) and Geo.FrozenRec(kind).excluded, kind)
+  return true
+end
+
+-- Every step of the Roadbook is done: it can only be extended (quests added), generated again or deleted.
+function Geo.IsFinished(kind)
+  local fz = Geo.Frozen(kind)
+  if not fz or #fz.route < 2 then return false end
+  for i = 2, #fz.route do
+    if not CP.StepDone(fz.route[i]) then return false end
+  end
+  return true
+end
+
 -- A Roadbook of this kind exists (saved, or being computed).
 function Geo.HasRoadbook(kind)
   if Geo.computing == kind then return true end
@@ -363,14 +388,20 @@ function CP.StepDone(st)
 end
 
 -- Computes a Roadbook of a kind and saves it; cb(route, err, info) when done.
-function Geo.Recompute(kind, cb)
-  Geo.ClearFrozen(kind)
+-- keepDone: the steps done of the saved Roadbook stay first (history), only the steps to come are
+-- computed again; otherwise the Roadbook is emptied first.
+function Geo.Recompute(kind, cb, keepDone)
+  if not keepDone then Geo.ClearFrozen(kind) end
   Snapshot()
   if CP.checkpointButton and CP.checkpointButton.sub then CP.checkpointButton.sub:SetText(L["Computing the Roadbook…"]) end
   Geo.RequestPlan(kind == "custom" and "custom" or State.xpGoal, function(route, err, info)
     if Geo.computing ~= kind then return end -- deleted meanwhile
     Geo.computing = nil
-    if route and #route >= 2 then Geo.Freeze(route, info, nil, kind) end
+    if route and #route >= 2 then
+      local old = keepDone and Geo.Frozen(kind)
+      if old then route = Geo.KeepDone(old, CP.StepDone, route, info, info) end
+      Geo.Freeze(route, info, nil, kind)
+    end
     if cb then cb(route, err, info) end
     if Refresh then C_Timer.After(0.1, Refresh) end
   end, true)
@@ -435,6 +466,12 @@ function CP.StopFocus()
   CP.RefreshButton()
 end
 
+-- A finished Roadbook cannot be started again: what can be done with it.
+function CP.FinishedMessage(kind)
+  Print(kind == "custom" and L["Custom Roadbook finished: add quests to extend it, or delete it."]
+    or L["Roadbook finished: click \"Generate\" for a new one, or delete it."])
+end
+
 -- Starts a Roadbook (Start button of its tab): it becomes the active one (the only way to change
 -- it); if the other one was followed, it is paused first, after confirmation.
 function CP.Start(kind)
@@ -445,6 +482,10 @@ function CP.Start(kind)
   if not Geo.Frozen(kind) then
     Print(kind == "custom" and L["The custom Roadbook is empty: add quests with the \"Add\" button of the other tabs."]
       or L["This Roadbook has no step: click \"Generate\" first."])
+    return
+  end
+  if Geo.IsFinished(kind) then
+    CP.FinishedMessage(kind)
     return
   end
   local cur = Geo.ActiveKind()
@@ -688,7 +729,7 @@ function CP.Recompute(kind, keep, attempt, token)
       if not CP.StepDone(st) and CP.SameStep(st, was) then first = st break end
     end
     if first then CP.FocusStep(first) else CP.StopFocus() end
-  end)
+  end, keep)
 end
 
 -- Click on the button: focus the next step only if the current one is done in the game.
@@ -701,7 +742,12 @@ function CP.ValidateUnsafe()
     return
   end
   if not Geo.Tracking() then
-    CP.DoStart(kind)
+    if Geo.IsFinished(kind) then
+      CP.FinishedMessage(kind)
+      CP.ShowActive()
+    else
+      CP.DoStart(kind)
+    end
     return
   end
   local cur = CP.CurrentFocus()
@@ -763,8 +809,8 @@ end
 function CP.ConfirmSkipQuest(s, kind)
   local title = s.task.title or tostring(s.task.id)
   local text = kind == "custom"
-    and string.format(L["Remove \"%s\" from the custom Roadbook?\n\nThe prerequisite quests added only for it leave too, and the route is computed again."], title)
-    or string.format(L["Skip the quest \"%s\"?\n\nAll its steps leave the automatic Roadbook and the route is adapted; it comes back with a new Roadbook."], title)
+    and string.format(L["Remove \"%s\" from the custom Roadbook?\n\nThe prerequisite quests added only for it leave too, and the steps to come are computed again (the steps done stay)."], title)
+    or string.format(L["Skip the quest \"%s\"?\n\nIts steps to come leave the automatic Roadbook and the route is adapted (the steps done stay); it comes back with a new Roadbook."], title)
   StaticPopup_Show("FQP_SKIP_QUEST", text, nil, { s = s, kind = kind })
 end
 

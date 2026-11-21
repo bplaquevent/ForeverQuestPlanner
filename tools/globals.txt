@@ -54,6 +54,8 @@ GetQuestLogQuestText
 GetQuestLogRewardInfo
 GetQuestLogRewardMoney
 GetQuestLogRewardXP
+GetQuestLogSelection
+GetQuestLogTitle
 GetQuestUiMapID
 GetRealZoneText
 GetRealmName
@@ -65,8 +67,8 @@ GetXPExhaustion
 GetZoneText
 InCombatLockdown
 IsAltKeyDown
-IsInInstance
 IsControlKeyDown
+IsInInstance
 IsMounted
 IsQuestWatched
 IsShiftKeyDown
@@ -123,7 +125,6 @@ debugprofilestop
 debugstack
 hooksecurefunc
 ipairs
-wipe
 loadstring
 math
 next
@@ -139,4 +140,5 @@ tonumber
 tostring
 type
 unpack
+wipe
 xpcall

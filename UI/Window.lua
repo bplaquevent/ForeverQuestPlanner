@@ -14,11 +14,14 @@ local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels,
 -- State of a Roadbook: active (followed by the Objective button), paused, not started, finished.
 function Geo.RoadbookStatus(kind, doneCount, total)
   local D = K.DESC
+  if total > 0 and doneCount >= total then
+    return Color(D.good, L["Finished"]) .. Color(D.meta, kind == "custom" and L[" (add quests to extend it)"]
+      or L[" (\"Generate\" makes a new one)"])
+  end
   if Geo.ActiveKind() == kind then
     if CP.CurrentFocus() then return Color(D.good, L["Active"]) end
     return Color(D.good, L["Active"]) .. Color(D.meta, L[" (click the Objective button to follow it)"])
   end
-  if doneCount >= total then return Color(D.good, L["Finished"]) end
   if doneCount > 0 then return Color(D.warn, L["Paused"]) .. Color(D.meta, L[" (\"Start\" resumes it)"]) end
   return Color(D.meta, L["Not started"]) .. Color(D.meta, L[" (\"Start\" to follow it)"])
 end
@@ -103,8 +106,9 @@ function Geo.DungeonMemberLines(task)
 end
 
 -- Steps of a Roadbook, in sections per zone, in route order, added to `items`.
--- remove(step): button of a quest step not done; query: search of the tab.
-function Geo.RouteStepItems(items, route, info, remove, query)
+-- remove(step): button of a quest step not done (a step done has no button); query: search of the
+-- tab; kind: the Roadbook, shown on the map by a click on a step (done or not).
+function Geo.RouteStepItems(items, route, info, remove, query, kind)
   local plevel = info.plevel
   info.netCache = info.netCache or { [""] = { net = info.net } }
   local nets = Geo.RouteNets(route, info.speed or 7, plevel, info.netCache)
@@ -231,7 +235,8 @@ function Geo.RouteStepItems(items, route, info, remove, query)
           button = { text = L["Skip"], fn = function() CP.SkipStep(step) end,
             tip = { L["Skip"], L["Marks this step as done (already there, other way of travel…); the Objective button moves to the next step."] } }
         end
-        segItems[#segItems + 1] = { text = text, b3 = button, questID = task.id }
+        segItems[#segItems + 1] = { text = text, b3 = button, questID = task.id,
+          onClick = function() Geo.ShowStep(step, kind) end }
       end
     end
     if #segItems > 0 then
@@ -259,8 +264,8 @@ function Geo.RenderCustomXP()
     return
   end
   local list = Geo.CustomList()
-  if #list == 0 then
-    -- No Roadbook: same presentation as the automatic one.
+  if #list == 0 and not Geo.Frozen("custom") then
+    -- No Roadbook: same presentation as the automatic one (an empty list with steps done keeps them).
     RenderList(panel, "custom", { { section = true, text = L["Objectives"] },
       { text = Color("ffd100", L["No Roadbook. Add quests with the \"Add\" button (or \"Add all\" on a category) in the Around me, Quest log and Available tabs, with the prerequisites they still need: the fastest route to do them all is computed at each change and the Objective button follows it."]) } })
     pcall(CP.RefreshButton)
@@ -283,7 +288,7 @@ function Geo.RenderCustomXP()
     -- Collapsed by default while the Roadbook is followed: the route matters more than the list.
     { header = true, kind = "class", key = "customlist", open = not (Geo.ActiveKind() == "custom" and CP.CurrentFocus()),
     label = L["Quests of the custom Roadbook - "] .. Plural(#list, L["quest"]),
-    b3 = { text = L["Remove all"], fn = function() StaticPopup_Show("FQP_CUSTOM_CLEAR") end } } }
+    b3 = #list > 0 and { text = L["Remove all"], fn = function() StaticPopup_Show("FQP_CUSTOM_CLEAR") end } or nil } }
   for _, it in ipairs(list) do
     local q = logById[it.id]
     local status
@@ -318,7 +323,7 @@ function Geo.RenderCustomXP()
     items[#items + 1] = { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, "custom")) }
     Geo.RouteStepItems(items, route, info, function(step)
       return { text = L["Remove"], fn = function() CP.ConfirmSkipQuest(step, "custom") end }
-    end, query)
+    end, query, "custom")
   else
     local c = Geo.customCache
     if c and c.err and not c.route then
@@ -363,7 +368,7 @@ local function RenderXP()
     { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, "auto")) } }
   Geo.RouteStepItems(items, route, info, function(step)
     return { text = L["Skip the step"], fn = function() CP.ConfirmSkipQuest(step, "auto") end }
-  end, State.xpQuery)
+  end, State.xpQuery, "auto")
   -- Quests kept for max level: reward or access only useful at endgame.
   if info.later and #info.later > 0 then
     local laterItems = {}

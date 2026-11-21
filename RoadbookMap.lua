@@ -10,7 +10,7 @@
 
 local ADDON_NAME, ns = ...
 local CP, CharKey, ClearPin, Geo, K, L, OM = ns.CP, ns.CharKey, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM
-local Print, Settings = ns.Print, ns.Settings
+local IsInLog, OpenQuestDetails, Print, Settings = ns.IsInLog, ns.OpenQuestDetails, ns.Print, ns.Settings
 
 K.MAP_SET = "fqp_roadbook"             -- OpenMap pin set of the steps
 K.MAP_ROUTE_SET = "fqp_roadbook_route" -- and of the route (under the pins)
@@ -351,7 +351,7 @@ function Geo.MapPreview(kind)
     return
   end
   if not owner then Geo.MapClaim("preview", kind) end
-  Geo.OpenWorldMap(nil)
+  Geo.OpenWorldMap(nil, true) -- the Forever Quest Planner window stays open
   Geo.MapHookWorldMap()
   C_Timer.After(0.05, function()
     local o = Geo.MapOwner()
@@ -361,6 +361,31 @@ function Geo.MapPreview(kind)
     end
     Geo.MapSync()
     Geo.MapFit()
+  end)
+  if Geo.mapButtons then for _, update in pairs(Geo.mapButtons) do update() end end
+end
+
+-- Click on a step of a Roadbook tab (done or not): the world map opens centered on it, with the
+-- Roadbook drawn (previewed when no Roadbook holds the map), and the quest log on its quest.
+-- The Forever Quest Planner window stays open.
+function Geo.ShowStep(st, kind)
+  if not (st and st.p) then return end
+  local owner = Geo.MapOwner()
+  local previewOther = owner and owner.mode == "preview" and owner.kind ~= kind
+  if (not owner or previewOther) and Geo.Frozen(kind) then Geo.MapClaim("preview", kind) end
+  local qid = st.task and st.task.id
+  if qid and IsInLog(qid) then OpenQuestDetails(qid) end
+  Geo.OpenWorldMap(Geo.PointUi(st.p), true)
+  Geo.MapHookWorldMap()
+  C_Timer.After(0.05, function()
+    if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
+      local o = Geo.MapOwner()
+      if o and o.mode == "preview" then Geo.MapRelease() end
+      return
+    end
+    Geo.MapSync()
+    local u, v = Geo.MapUV(st.p)
+    if u then pcall(OM.api.ShowWorld, u, v) end
   end)
   if Geo.mapButtons then for _, update in pairs(Geo.mapButtons) do update() end end
 end

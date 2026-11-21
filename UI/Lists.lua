@@ -459,7 +459,15 @@ local function RenderList(panel, tabKey, items, forceOpen)
           r.bg:SetColorTexture(1, 1, 1, (zebra % 2 == 0) and 0.05 or 0)
         end
         local qid = it.questID or it.linkQuest
-        if qid then
+        if it.onClick then
+          -- Roadbook step: click shows it on the map; Shift-click: quest link in the chat.
+          r:EnableMouse(true)
+          r:SetScript("OnMouseUp", function()
+            if qid and IsShiftKeyDown and IsShiftKeyDown() then Geo.LinkQuestInChat(qid) else it.onClick() end
+          end)
+          r:SetScript("OnEnter", function(self) self.hl:Show() end)
+          r:SetScript("OnLeave", function(self) self.hl:Hide() end)
+        elseif qid then
           -- Click: quest details (quest of the log); Shift-click: quest link in the chat.
           local inLog = it.questID and IsInLog(it.questID)
           r:EnableMouse(true)
@@ -975,8 +983,9 @@ function Geo.GiverPoint(id, pos)
 end
 
 -- Opens the world map on a map (the addon window is closed so that it does not hide it).
-function Geo.OpenWorldMap(ui)
-  if State.mainFrame and State.mainFrame:IsShown() then State.mainFrame:Hide() end
+-- keepWindow: the Forever Quest Planner window stays open (Roadbook tabs).
+function Geo.OpenWorldMap(ui, keepWindow)
+  if not keepWindow and State.mainFrame and State.mainFrame:IsShown() then State.mainFrame:Hide() end
   if not WorldMapFrame then return end
   if not WorldMapFrame:IsShown() then
     if ToggleWorldMap then pcall(ToggleWorldMap) elseif ShowUIPanel then pcall(ShowUIPanel, WorldMapFrame) end

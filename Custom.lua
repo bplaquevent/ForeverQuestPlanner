@@ -219,18 +219,19 @@ end
 function Geo.CustomClear()
   Geo.CustomRec().list = {}
   Geo.customUnplanned = nil
-  Print(L["Custom Roadbook emptied."])
+  Print(L["Quests removed from the custom Roadbook; its steps done are kept."])
   Geo.CustomChanged()
 end
 
--- List changed: the custom Roadbook is computed again (grouped when several quests are added in a
--- row), its tracking kept; empty list: the Roadbook is emptied and paused. It has no "Generate".
+-- List changed: the steps to come of the custom Roadbook are computed again (grouped when several
+-- quests are added in a row), its steps done and its tracking kept; empty list: the steps to come
+-- are removed and it is paused, the steps done stay (only "Delete" empties them). It has no "Generate".
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1
   local token = Geo.customToken
   if #Geo.CustomList() == 0 then
     if ns.CP then ns.CP.Pause("custom", true) end
-    Geo.ClearFrozen("custom")
+    if not (Geo.KeepOnlyDone and Geo.KeepOnlyDone("custom")) then Geo.ClearFrozen("custom") end
     if Geo.ResetActiveIfEmpty then Geo.ResetActiveIfEmpty() end
   else
     C_Timer.After(0.6, function()
@@ -238,6 +239,7 @@ function Geo.CustomChanged()
     end)
   end
   if ns.Refresh then ns.Refresh() end
+  if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
 end
 
 StaticPopupDialogs["FQP_CUSTOM_CLEAR"] = {
