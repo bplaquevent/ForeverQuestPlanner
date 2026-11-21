@@ -7,7 +7,7 @@ local DBXP, Dist, FormatTime, Geo, GeoReady, GetObjectives = ns.DBXP, ns.Dist, n
 local ICON, IsCompleted, IsInLog, K, L, Nearest = ns.ICON, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
 local PinPoint, PlayerPos, PointText, Print, QDB, QGet = ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet
 local QuestTargets, Refresh, Route, Settings, Snapshot, StartScan = ns.QuestTargets, ns.Refresh, ns.Route, ns.Settings, ns.Snapshot, ns.StartScan
-local State, TaxiCount, TaxiStore, TravelSpeed, TurnInText, WatchOnly = ns.State, ns.TaxiCount, ns.TaxiStore, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
+local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.KnownFlights, ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
 local scan = ns.scan
 
 ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ end
 function Geo.CopyPoint(p)
   if not p then return nil end
   return { c = p.c, x = p.x, y = p.y, area = p.area, ui = p.ui, mx = p.mx, my = p.my, zoneName = p.zoneName,
-    teleport = p.teleport, instance = p.instance }
+    teleport = p.teleport, instance = p.instance, lmin = p.lmin, lmax = p.lmax }
 end
 
 -- Quest steps done inside a dungeon (dungeon step of the custom Roadbook).
@@ -149,7 +149,7 @@ function Geo.SerializeStep(st)
   local t = st.task or {}
   return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots, quick = st.quick,
     escort = st.escort, glue = st.glue,
-    fmHub = st.fmHub and { id = st.fmHub.id, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil,
+    fmHub = st.fmHub and { id = st.fmHub.id, node = st.fmHub.node, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil,
     members = Geo.SerializeMembers(t.members),
     spotN = st.spot and st.spot.n, done = st.done, p = Geo.CopyPoint(st.p),
     objName = st.r and st.r.tg and st.r.tg.name, objKind = st.r and st.r.tg and st.r.tg.kind, count = st.r and st.r.count,
@@ -214,7 +214,7 @@ function Geo.Frozen(kind)
   local rec = Geo.FrozenRec(kind)
   if not (rec and rec.steps and #rec.steps > 0) then return nil end
   -- After a /reload, the QuestieDB map mappings are not loaded yet.
-  if not (QDB.ok and GeoReady()) then return nil end
+  if not GeoReady() then return nil end
   local route, tasks = { { kind = "start", p = rec.start or {}, work = 0 } }, {}
   for _, r in ipairs(rec.steps) do route[#route + 1] = Geo.DeserializeStep(r, tasks) end
   local info = {}
@@ -270,7 +270,7 @@ end
 -- next to an upcoming step (or to you), is added to the saved plan right after that step.
 function Geo.InjectQuickWins(kind)
   local fz = Geo.Frozen(kind)
-  if not (fz and QDB.ok) then return 0 end
+  if not fz then return 0 end
   local route = fz.route
   local rec = Geo.FrozenRec(kind)
   local pending = {}
@@ -354,10 +354,8 @@ function CP.StepDone(st)
     return false
   end
   if st.kind == "fm" then
-    for _, n in pairs(TaxiStore()) do
-      local d = Dist(n, st.p)
-      if d and d < K.FM_KNOWN_RADIUS then return true end
-    end
+    local node = (st.fmHub and st.fmHub.node) or Geo.NodeAt(st.p)
+    if node and Geo.KnownNodes()[node] then return true end
   end
   return false
 end
@@ -533,10 +531,11 @@ function CP.SameStep(a, b)
   return ta.title == tb.title
 end
 
--- Flight node named `name` (known flight paths) at the planned destination: a flight master
+-- Flight node named `name` (the game's name) at the planned destination: a flight master
 -- activated on the way has a planned name that may differ from the game's.
 function CP.NearDest(name, destP)
-  local node = name and TaxiStore()[name]
+  local id = name and Geo.TaxiNames().byName[name]
+  local node = id and Geo.NodePoint(id)
   local d = node and destP and Dist(node, destP)
   return d ~= nil and d < K.LANDING_RADIUS
 end
@@ -583,8 +582,8 @@ StaticPopupDialogs["FQP_REGENERATE"] = {
 -- keep: recompute after a change of the custom list, the tracking goes on.
 function CP.Recompute(kind, keep, attempt, token)
   if not attempt then
-    if not (QDB.ok and GeoReady()) then
-      Print(L["Cannot compute: the Roadbook requires QuestieDB."])
+    if not GeoReady() then
+      Print(L["Unable to convert QuestieDB positions to this client's map."])
       return
     end
     if kind == "custom" and #Geo.CustomList() == 0 then
@@ -834,7 +833,7 @@ function CP.CheckLanding(st)
   local pos = PlayerPos()
   if not (t and t.mode == "vol" and t.dest and pos) then return end
   local node, nd
-  for _, n in pairs(TaxiStore()) do
+  for _, n in pairs(KnownFlights()) do
     local d = Dist(n, pos)
     if d and (not nd or d < nd) then node, nd = n, d end
   end

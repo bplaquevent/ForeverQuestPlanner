@@ -86,12 +86,10 @@ local function BuildText()
     for _, o in ipairs(q.objectives or {}) do
       add(string.format("    %s %s", o.finished and "[x]" or "[ ]", o.text or ""))
     end
-    if QDB.ok then
-      local chain = ChainText(ChainInfo(q.id, plevel, range))
-      if chain then add("    " .. chain) end
-      local turnIn = TurnInText(q.id)
-      if turnIn then add(L["    Turn in to: "] .. turnIn) end
-    end
+    local chain = ChainText(ChainInfo(q.id, plevel, range))
+    if chain then add("    " .. chain) end
+    local turnIn = TurnInText(q.id)
+    if turnIn then add(L["    Turn in to: "] .. turnIn) end
   end
   return table.concat(lines, "\n")
 end
@@ -767,10 +765,8 @@ function Geo.QuestTypes(id)
   if not next(has) then
     -- No objective known by QuestieDB (frequent for Forever quests): words of the English text.
     local text = ""
-    if QDB.Quest and QDB.Quest.GetRaw then
-      local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
-      if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
-    end
+    local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
+    if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
     for kind, words in pairs(K.QUEST_TYPE_WORDS) do
       for _, w in ipairs(words) do
         if text:find(w) then has[kind] = true break end
@@ -954,7 +950,7 @@ end
 
 -- Map of the quest's zone (QuestieDB zoneOrSort), when no position is known.
 function Geo.QuestZoneUi(id)
-  local sort = QDB.ok and QGet(QDB.Quest, id, "zoneOrSort") or 0
+  local sort = QGet(QDB.Quest, id, "zoneOrSort") or 0
   if not (type(sort) == "number" and sort > 0 and GeoReady()) then return nil end
   return Geo.PointUi({ area = sort })
 end
@@ -1000,7 +996,7 @@ end
 -- "Map" button: pin on the quest's place (getPoint() -> point, label), then the world map on it.
 function Geo.ShowOnMap(getPoint, title, questId)
   local p, label
-  if QDB.ok and GeoReady() then p, label = getPoint() end
+  if GeoReady() then p, label = getPoint() end
   if p then
     PinPoint(p, title, label or L["objective"], questId)
     Geo.OpenWorldMap(Geo.PointUi(p))
@@ -1018,7 +1014,7 @@ end
 -- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.
 K.CUSTOM_TIP = "Custom Roadbook: your own quest list, done along the fastest route (Custom Roadbook tab)."
 function Geo.CustomButton(id, title, level)
-  if not (QDB.ok and id) then return nil end
+  if not id then return nil end
   local inList = Geo.InCustom(id)
   return { text = inList and L["Remove"] or L["Add"],
     tip = { inList and L["Remove from the custom Roadbook"] or L["Add to the custom Roadbook"], L[K.CUSTOM_TIP] },
@@ -1029,7 +1025,6 @@ end
 
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
 function Geo.CustomBulkButtons(list)
-  if not QDB.ok then return nil, nil end
   return { text = L["Add all"], fn = function() Geo.CustomAddList(list) end,
       tip = { L["Add every quest of this category to the custom Roadbook"], L[K.CUSTOM_TIP] } },
     { text = L["Remove all"], fn = function() Geo.CustomRemoveList(list) end,

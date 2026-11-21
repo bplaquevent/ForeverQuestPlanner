@@ -225,10 +225,6 @@ end
 
 local function RenderAvailable()
   local panel = panels.avail
-  if not QDB.ok then
-    ShowMessage(panel, "avail", L["QuestieDB is not loaded: this tab needs its database.\nInstall or enable the QuestieDB addon, then restart the game."])
-    return
-  end
   if scan.error then
     ShowMessage(panel, "avail", Color("ff6060", scan.error))
     return
@@ -352,10 +348,6 @@ end
 
 local function RenderNear()
   local panel = panels.near
-  if not QDB.ok then
-    ShowMessage(panel, "near", L["QuestieDB is not loaded: this tab needs the locations from its database."])
-    return
-  end
   if not GeoReady() then
     ShowMessage(panel, "near", L["Unable to convert QuestieDB positions to this client's map."])
     return

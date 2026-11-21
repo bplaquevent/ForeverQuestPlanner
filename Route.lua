@@ -34,7 +34,7 @@ function Geo.MapPoint(w)
   return { c = w.c, x = w.x, y = w.y, ui = ui, mx = mx * 100, my = my * 100, zoneName = zoneName }
 end
 
--- Boardings of a route: { hub, mode ("vol", "zeppelin", "bateau"), dest }.
+-- Boardings of a route: { hub, mode ("vol", "zeppelin", "bateau", "airship"), dest }.
 function Geo.Boardings(choice, net)
   local out = {}
   local hubs, cur = net.hubs, choice.i
@@ -50,7 +50,7 @@ function Geo.Boardings(choice, net)
       run.dest = hubs[nx]
     else
       run = nil
-      if mode == "zeppelin" or mode == "bateau" then
+      if Geo.IsShip(mode) then
         out[#out + 1] = { hub = hubs[cur], mode = mode, dest = hubs[nx] }
       end
     end

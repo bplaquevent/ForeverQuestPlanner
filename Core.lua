@@ -3,8 +3,8 @@
 --    The game writes this table to disk on every /reload or logout:
 --      WTF/Account/<ACCOUNT>/SavedVariables/ForeverQuestPlanner.lua
 -- 2. Analysis window: Roadbook, around me, quest log, available quests, text export.
--- 3. Uses QuestieDB (optional dependency) for quest chains, classes,
---    professions, zones, NPCs and XP. Without QuestieDB, analysis is limited to the game API.
+-- 3. Requires QuestieDB (quest chains, classes, professions, zones, NPCs, XP) and OpenMap
+--    (flight network, boats and zeppelins, zone and dungeon levels): both are read directly.
 
 local ADDON_NAME, ns = ...
 ns = ns or {}
@@ -20,6 +20,7 @@ local function Settings()
   ForeverQuestPlannerSettings = ForeverQuestPlannerSettings or {}
   ForeverQuestPlannerSettings.keep = nil -- old "Keep" list, removed
   ForeverQuestPlannerSettings.excluded = nil -- old global list of removed quests (now kept per Roadbook)
+  ForeverQuestPlannerSettings.taxi = nil -- old flight paths recorded by FQP (now read from OpenMap)
   return ForeverQuestPlannerSettings
 end
 
@@ -68,13 +69,13 @@ local function TrivialRange()
 end
 
 ---------------------------------------------------------------------------
--- QuestieDB (optional)
+-- Dependencies: QuestieDB and OpenMap (required, checked by InitDeps at login)
 ---------------------------------------------------------------------------
-local QDB = { ok = false }
+local QDB = {}
 local State = {} -- mutable state shared by the addon files (window, tabs, Roadbook horizon)
 local K = {} -- tuning constants (avoids the 200 local variables limit)
 -- Transport mode names (internal ids -> displayed text).
-K.MODE_NAME = { vol = L["flight"], zeppelin = L["zeppelin"], bateau = L["boat"] }
+K.MODE_NAME = { vol = L["flight"], zeppelin = L["zeppelin"], bateau = L["boat"], airship = L["airship"] }
 K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above (or below) yours (+1 for quests already in the log)
 K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your level
 -- Technical search bound: quests whose required level is up to this many levels above yours are
@@ -104,44 +105,67 @@ local function QGet(entity, id, key)
   return nil
 end
 
+-- QuestieDB: LibQuestieDB, consumer contract 4. Returns nil or an error message.
 local function InitQuestieDB()
   local lib = rawget(_G, "LibQuestieDB")
-  if not lib then return end
-  if lib.RequireContract then
-    local ok, msg = lib.RequireContract(4)
-    if not ok then
-      Print(L["QuestieDB found but incompatible: "] .. tostring(msg))
-      return
-    end
+  if not (lib and lib.RequireContract) then return L["QuestieDB is not loaded."] end
+  local ok, msg = lib.RequireContract(4)
+  if not ok then return L["QuestieDB found but incompatible: "] .. tostring(msg) end
+  QDB.Quest, QDB.Npc, QDB.Object, QDB.Item = lib.Quest, lib.Npc, lib.Object, lib.Item
+  local okX, xpMod = pcall(lib.Support.Get, "QuestXP")
+  local okZ, zoneMod = pcall(lib.Support.Get, "ZoneDB")
+  if not (okX and type(xpMod) == "table" and type(xpMod.db) == "table") then
+    return L["QuestieDB found but incompatible: "] .. "QuestXP"
   end
-  QDB.Quest = lib.Quest or rawget(_G, "QuestDB")
-  QDB.Npc = lib.Npc or rawget(_G, "NpcDB")
-  QDB.Object = lib.Object or rawget(_G, "ObjectDB")
-  QDB.Item = lib.Item or rawget(_G, "ItemDB")
-  if not (QDB.Quest and QDB.Quest.Get) then return end
-
-  if lib.Support and lib.Support.Get then
-    local okX, xpMod = pcall(lib.Support.Get, "QuestXP")
-    if okX and type(xpMod) == "table" then QDB.xp = xpMod.db end
-    local okZ, zoneMod = pcall(lib.Support.Get, "ZoneDB")
-    if okZ and type(zoneMod) == "table" and zoneMod.private then
-      QDB.dungeons = zoneMod.private.dungeons
-      QDB.zonePrivate = zoneMod.private
-    end
+  if not (okZ and type(zoneMod) == "table" and type(zoneMod.private) == "table" and type(zoneMod.private.dungeons) == "table") then
+    return L["QuestieDB found but incompatible: "] .. "ZoneDB"
   end
+  QDB.xp = xpMod.db
+  QDB.dungeons = zoneMod.private.dungeons
+  QDB.zonePrivate = zoneMod.private
   QDB.lib = lib
 
   -- Zone (or alternate zone) -> dungeon id
   QDB.dungeonOf = {}
-  for areaId, entry in pairs(QDB.dungeons or {}) do
+  for areaId, entry in pairs(QDB.dungeons) do
     QDB.dungeonOf[areaId] = areaId
     if type(entry[2]) == "table" then
       for _, alt in ipairs(entry[2]) do QDB.dungeonOf[alt] = areaId end
     end
   end
 
-  QDB.raceMasks = lib.Enum and lib.Enum.raceMaskById
-  QDB.ok = true
+  QDB.raceMasks = lib.Enum.raceMaskById
+end
+
+-- OpenMap: its Forever data (flight network, boats, dungeon entrances, zone levels) and its
+-- world map module (learned flight paths, level colours). These tables are OpenMap's own, not
+-- its documented API: their shape is checked here so a change is reported instead of failing later.
+-- Returns nil or an error message.
+local OM = {}
+local function InitOpenMap()
+  local om = rawget(_G, "OpenMap")
+  if type(om) ~= "table" then return L["OpenMap is not loaded."] end
+  local fl, pl, lv = om.MapFlights, om.MapPlaces, om.MapLevels
+  local okM, wm = pcall(function() return om:GetModule("worldmap") end)
+  local function bad(what) return L["OpenMap version not supported (data changed: "] .. what .. ")." end
+  if not (type(fl) == "table" and type(fl.nodes) == "table" and type(fl.paths) == "table") then return bad("MapFlights") end
+  local _, n = next(fl.nodes)
+  if not (type(n) == "table" and type(n[2]) == "number" and type(n[3]) == "number" and type(n[5]) == "number") then return bad("MapFlights.nodes") end
+  local e = fl.paths[1]
+  if not (type(e) == "table" and type(e[1]) == "number" and type(e[2]) == "number" and type(e[3]) == "number") then return bad("MapFlights.paths") end
+  if not (type(pl) == "table" and type(pl.transports) == "table" and type(pl.instances) == "table") then return bad("MapPlaces") end
+  local t = pl.transports[1]
+  if not (type(t) == "table" and type(t[1]) == "string" and type(t[2]) == "string" and type(t[4]) == "number") then return bad("MapPlaces.transports") end
+  local i = pl.instances[1]
+  if not (type(i) == "table" and type(i[4]) == "table" and type(i[4][1]) == "table") then return bad("MapPlaces.instances") end
+  if type(lv) ~= "table" then return bad("MapLevels") end
+  if not (okM and type(wm) == "table" and type(wm.LevelColor) == "function") then return bad("worldmap") end
+  OM.flights, OM.places, OM.levels, OM.worldmap = fl, pl, lv, wm
+end
+
+-- Both dependencies; nil when ready, otherwise the error message.
+local function InitDeps()
+  return InitQuestieDB() or InitOpenMap()
 end
 
 local function AreaName(areaId)
@@ -150,7 +174,7 @@ local function AreaName(areaId)
     local n = C_Map.GetAreaInfo(areaId)
     if n and n ~= "" then return n end
   end
-  local d = QDB.dungeons and QDB.dungeons[areaId]
+  local d = QDB.dungeons[areaId]
   if d then return d[1] end
   return L["Zone "] .. areaId
 end
@@ -159,14 +183,14 @@ local function PlayerBits()
   local _, _, classID = UnitClass("player")
   local _, _, raceID = UnitRace("player")
   local classBit = classID and 2 ^ (classID - 1) or nil
-  local raceBit = raceID and ((QDB.raceMasks and QDB.raceMasks[raceID]) or 2 ^ (raceID - 1)) or nil
+  local raceBit = raceID and (QDB.raceMasks[raceID] or 2 ^ (raceID - 1)) or nil
   return classBit, raceBit
 end
 
 -- Static quest data, cached.
 local metaCache = {}
 local function QuestMeta(id)
-  if not QDB.ok or not id then return nil end
+  if not id then return nil end
   local m = metaCache[id]
   if m == nil then
     local Q = QDB.Quest
@@ -217,7 +241,7 @@ end
 
 -- Estimated XP at the current level (formula used by Questie, without temporary bonuses).
 local function DBXP(id, plevel)
-  local row = QDB.xp and QDB.xp[id]
+  local row = QDB.xp[id]
   if not row then return nil end
   local qLevel, xp = row[1], row[2]
   if not qLevel or qLevel <= 0 or not xp or xp <= 0 then return 0 end
@@ -332,7 +356,6 @@ local function GiverText(givers)
 end
 
 local function TurnInText(id)
-  if not QDB.ok then return nil end
   return (GiverText(QGet(QDB.Quest, id, "finishedBy")))
 end
 
@@ -440,8 +463,7 @@ local function GetXP(questID)
     local ok, xp = pcall(GetQuestLogRewardXP, questID)
     if ok and xp and xp > 0 then return xp end
   end
-  if QDB.ok then return DBXP(questID, UnitLevel("player")) end
-  return nil
+  return DBXP(questID, UnitLevel("player"))
 end
 
 -- Zone where the objectives take place, and dungeon/raid hint.
@@ -628,11 +650,9 @@ local dungeonNameSet
 local function DungeonNames()
   if dungeonNameSet then return dungeonNameSet end
   dungeonNameSet = {}
-  if QDB.ok then
-    for areaId in pairs(QDB.dungeonOf or {}) do
-      local n = AreaName(areaId)
-      if n then dungeonNameSet[n] = true end
-    end
+  for areaId in pairs(QDB.dungeonOf) do
+    local n = AreaName(areaId)
+    if n then dungeonNameSet[n] = true end
   end
   return dungeonNameSet
 end
@@ -705,9 +725,7 @@ local function Analyze()
       why[#why + 1] = trivial and (L["gray (level "] .. level .. ")") or L["no XP"]
       why[#why + 1] = L["no useful item"]
       why[#why + 1] = (q.money and q.money > 0) and (L["little money ("] .. MoneyText(q.money) .. ")") or L["no money"]
-      if not QDB.ok then
-        why[#why + 1] = L["unknown follow-up (QuestieDB missing)"]
-      elseif chain and chain.count > 0 then
+      if chain and chain.count > 0 then
         why[#why + 1] = L["gray follow-up ("] .. chain.count .. L[" quest(s))"]
       else
         why[#why + 1] = L["no follow-up"]
@@ -769,8 +787,8 @@ end
 -- Shared with the next files.
 ns.Analyze, ns.AreaName, ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color = Analyze, AreaName, ChainInfo, ChainText, CharKey, Color
 ns.DBXP, ns.EVENT_SORTS, ns.EquippedItemLevel, ns.GetItemInfoCompat, ns.GetObjectives, ns.GiverText = DBXP, EVENT_SORTS, EquippedItemLevel, GetItemInfoCompat, GetObjectives, GiverText
-ns.HasBit, ns.InitQuestieDB, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMeta = HasBit, InitQuestieDB, IsClassMeta, IsCompleted, IsInLog, IsProfMeta
+ns.HasBit, ns.InitDeps, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMeta = HasBit, InitDeps, IsClassMeta, IsCompleted, IsInLog, IsProfMeta
 ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PROFESSION_SKILLS, ns.PlayerBits = K, L, MoneyText, NextQuests, PROFESSION_SKILLS, PlayerBits
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.SLOTS, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = SLOTS, ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
-ns.TurnInText = TurnInText
+ns.OM, ns.TurnInText = OM, TurnInText

@@ -340,7 +340,7 @@ local function CreateMainFrame()
 
   f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   f.title:SetPoint("TOP", 0, -5)
-  f.title:SetText("Forever Quest Planner" .. (QDB.ok and "  (QuestieDB)" or ""))
+  f.title:SetText("Forever Quest Planner")
   Geo.AddVersionFooter(f)
 
   local tabs = {
@@ -596,7 +596,6 @@ local function CreateMinimapButton()
     GameTooltip:AddLine(L["|cffffff00Click|r: open / close the window"], 1, 1, 1)
     GameTooltip:AddLine(L["|cffffff00Right-click|r: settings"], 1, 1, 1)
     GameTooltip:AddLine(L["|cffffff00Drag|r: move the icon"], 1, 1, 1)
-    GameTooltip:AddLine(QDB.ok and L["QuestieDB: active"] or L["QuestieDB: missing"], 0.6, 0.8, 1)
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
