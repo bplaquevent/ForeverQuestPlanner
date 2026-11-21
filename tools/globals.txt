@@ -90,6 +90,7 @@ TaxiNodeGetType
 TaxiNodeName
 TaxiNodePosition
 ToggleQuestLog
+ToggleWorldMap
 TomTom
 UIParent
 UISpecialFrames
@@ -104,6 +105,7 @@ UnitQuestTrivialLevelRange
 UnitRace
 UnitXP
 UnitXPMax
+WorldMapFrame
 _G
 coroutine
 date

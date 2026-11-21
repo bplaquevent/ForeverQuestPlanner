@@ -3,11 +3,11 @@
 
 local ADDON_NAME, ns = ...
 local Color, CurrentMapSet, EntryHaystack, Geo, GeoReady, GetItemInfoCompat = ns.Color, ns.CurrentMapSet, ns.EntryHaystack, ns.Geo, ns.GeoReady, ns.GetItemInfoCompat
-local IsPinned, IsWatched, K, L, MatchWords, MoneyText = ns.IsPinned, ns.IsWatched, ns.K, ns.L, ns.MatchWords, ns.MoneyText
-local NearItems, Nearest, Normalize, PassStates, PinButton, PlayerPos = ns.NearItems, ns.Nearest, ns.Normalize, ns.PassStates, ns.PinButton, ns.PlayerPos
+local IsWatched, K, L, MatchWords, MoneyText = ns.IsWatched, ns.K, ns.L, ns.MatchWords, ns.MoneyText
+local NearItems, Normalize, PassStates, PlayerPos = ns.NearItems, ns.Normalize, ns.PassStates, ns.PlayerPos
 local Plural, PointText, QDB, QGet, QuestHaystack, Refresh = ns.Plural, ns.PointText, ns.QDB, ns.QGet, ns.QuestHaystack, ns.Refresh
-local RemainingObjectives, RenderList, SetMapPin, SetWatched, SetWatchedList, Settings = ns.RemainingObjectives, ns.RenderList, ns.SetMapPin, ns.SetWatched, ns.SetWatchedList, ns.Settings
-local ShowMessage, StartPoints, StartScan, State, StateIcons, UnpinButton = ns.ShowMessage, ns.StartPoints, ns.StartScan, ns.State, ns.StateIcons, ns.UnpinButton
+local RemainingObjectives, RenderList, Settings = ns.RemainingObjectives, ns.RenderList, ns.Settings
+local ShowMessage, StartPoints, StartScan, State, StateIcons = ns.ShowMessage, ns.StartPoints, ns.StartScan, ns.State, ns.StateIcons
 local journalStates, nearStates, panels, scan = ns.journalStates, ns.nearStates, ns.panels, ns.scan
 
 ---------------------------------------------------------------------------
@@ -58,23 +58,18 @@ local function RenderTodo(a)
     if watched > 0 then text = text .. " - " .. watched .. L[" tracked"] end
     if toDrop > 0 then text = text .. " - " .. toDrop .. L[" to abandon"] end
     if searching then text = text .. L["  (filtered)"] end
-    local list = quests
-    items[#items + 1] = { header = true, kind = kind, key = key, label = text,
-      b1 = { text = L["Track all"], fn = function()
-        SetWatchedList(list, true)
-        C_Timer.After(0.2, Refresh)
-      end },
-      b2 = { text = L["Track none"], fn = function()
-        SetWatchedList(list, false)
-        C_Timer.After(0.2, Refresh)
-      end },
-    }
+    -- Quests recommended for abandoning: only once kept ("Keep") can they join the custom Roadbook.
+    local list = {}
+    for _, q in ipairs(quests) do
+      if not q._abandon then list[#list + 1] = { id = q.id, title = q.title, level = q.level } end
+    end
+    local addAll, removeAll = Geo.CustomBulkButtons(list)
+    items[#items + 1] = { header = true, kind = kind, key = key, label = text, b1 = addAll, b2 = removeAll }
     for _, q in ipairs(quests) do
       local body = "  " .. StateIcons(q.id) .. (q._abandon and Color("ff8040", L["[To abandon] "]) or "") .. QuestLine(q)
       if q._abandon then body = body .. Geo.DescLine(Color("ff8040", L["Reason: "] .. q._abandon)) end
       body = body .. detail(q) .. QuestFigures(q)
       if q._chain then body = body .. Geo.DescLine(Color(K.DESC.chain, q._chain)) end
-      local watchedQ = IsWatched(q.id)
       local b1
       if q._abandon then
         b1 = { text = L["Keep"], fn = function()
@@ -82,10 +77,7 @@ local function RenderTodo(a)
           Refresh()
         end }
       else
-        b1 = { text = watchedQ and L["Untrack"] or L["Track"], fn = function()
-          SetWatchedList({ q }, not watchedQ)
-          C_Timer.After(0.2, Refresh)
-        end }
+        b1 = Geo.CustomButton(q.id, q.title, q.level)
       end
       items[#items + 1] = {
         text = body,
@@ -93,7 +85,7 @@ local function RenderTodo(a)
         tint = q._abandon and { 0.9, 0.5, 0.25 } or nil,
         stripe = q._abandon and { 1, 0.5, 0.15 } or nil,
         b1 = b1,
-        b2 = IsPinned(q.id) and UnpinButton() or (QDB.ok and { text = L["Pin"], fn = function() SetMapPin(q) end } or nil),
+        b2 = Geo.MapButton(function() return Geo.ObjectivePoint(q) end, q.title, q.id),
         b3 = AbandonButton(q),
       }
     end
@@ -279,7 +271,8 @@ local function RenderAvailable()
   local showLow = Settings().showLowLevel
   for _, e in ipairs(scan.entries) do
     local keep, key, kind
-    if (e.lowLevel and not showLow) or e.future then
+    local customOnly = State.availFilter == "custom"
+    if not customOnly and ((e.lowLevel and not showLow) or e.future) then
       -- low-level quest hidden ("Low-level quests" option), or not at the required level yet
     else
     if State.availFilter == "zone" then
@@ -292,6 +285,11 @@ local function RenderAvailable()
     elseif State.availFilter == "pvp" then
       keep = e.pvp
       key = e.dungeon or e.area or e.starterZone or L["Other"]
+    elseif customOnly then
+      keep = Geo.InCustom(e.id)
+      if e.isClass then key = L["Class"]
+      elseif e.isProf then key = L["Professions"]
+      else key = e.dungeon or e.area or e.starterZone or L["Other"] end
     elseif State.availFilter == "class" then
       keep = e.isClass or e.isProf
       key = e.isClass and L["Class"] or L["Professions"]
@@ -336,10 +334,13 @@ local function RenderAvailable()
   for _, g in ipairs(groups) do total = total + #g.list end
   local head = Plural(total, L["quest"]) .. L[" available"] .. (Settings().showLowLevel and L[", low level included"] or L[" (low level excluded)"]) .. L[", according to QuestieDB. Quests specific to Forever may be missing."]
   local items = { { text = Color("aaaaaa", head) } }
-  local pos = PlayerPos()
   for _, g in ipairs(groups) do
     table.sort(g.list, function(a, b) return (a.level or 0) < (b.level or 0) end)
-    items[#items + 1] = { header = true, kind = g.kind, key = g.name, label = g.name .. " - " .. Plural(#g.list, L["quest"]) }
+    local list = {}
+    for _, e in ipairs(g.list) do list[#list + 1] = { id = e.id, title = e.name, level = e.level } end
+    local addAll, removeAll = Geo.CustomBulkButtons(list)
+    items[#items + 1] = { header = true, kind = g.kind, key = g.name, label = g.name .. " - " .. Plural(#g.list, L["quest"]),
+      b1 = addAll, b2 = removeAll }
     for _, e in ipairs(g.list) do
       local D = K.DESC
       local text = "  " .. StateIcons(e.id) ..
@@ -354,9 +355,10 @@ local function RenderAvailable()
       end
       local rewards = Geo.RewardLine(e.id)
       if rewards then text = text .. Geo.DescLine(rewards) end
-      local p = GeoReady() and Nearest(StartPoints(e.id), pos) or nil
-      items[#items + 1] = { text = text, b2 = PinButton(p, e.name, L["pick up the quest"], e.id), links = rewards ~= nil,
-        linkQuest = e.id }
+      local id = e.id
+      items[#items + 1] = { text = text, links = rewards ~= nil, linkQuest = id,
+        b1 = Geo.CustomButton(id, e.name, e.level),
+        b2 = Geo.MapButton(function() return Geo.GiverPoint(id, PlayerPos()) end, e.name, id) }
     end
   end
   if total == 0 then items[#items + 1] = { text = searching and L["No quest matches the search."] or L["No quest available for this filter."] } end
@@ -414,17 +416,10 @@ local function RenderNear()
       Geo.QuestTitle(it.label, it.id and { id = it.id, level = it.level } or nil) ..
       Geo.DescLine(Color(D.action, who .. K.DESC_SEP .. PointText(it.p))) .. figures
     if it.rep then text = text .. Geo.DescLine(Color(D.bad, it.rep)) end
-    local b1
-    if it.kind ~= "take" and it.id then
-      local watched = IsWatched(it.id)
-      local qid = it.id
-      b1 = { text = watched and L["Untrack"] or L["Track"], fn = function()
-        SetWatched(qid, not watched)
-        C_Timer.After(0.2, Refresh)
-      end }
-    end
-    return { text = text, b1 = b1, questID = it.kind ~= "take" and it.id or nil, linkQuest = it.id,
-      b2 = PinButton(it.p, it.label, it.kind == "step" and it.extra or (it.kind == "turnin" and L["turn in the quest"] or L["pick up the quest"]), it.id) }
+    local label = it.kind == "step" and it.extra or (it.kind == "turnin" and L["turn in the quest"] or L["pick up the quest"])
+    return { text = text, questID = it.kind ~= "take" and it.id or nil, linkQuest = it.id,
+      b1 = Geo.CustomButton(it.id, it.label, it.level),
+      b2 = Geo.MapButton(function() return it.p, label end, it.label, it.id) }
   end
 
   local sections = {
@@ -438,7 +433,16 @@ local function RenderNear()
       if it.kind == sec.kind and matches(it) then list[#list + 1] = it end
     end
     if #list > 0 then
-      items[#items + 1] = { header = true, kind = sec.kind, key = sec.kind, label = sec.label .. " - " .. Plural(#list, sec.unit) }
+      local quests, seen = {}, {}
+      for _, it in ipairs(list) do
+        if it.id and not seen[it.id] then
+          seen[it.id] = true
+          quests[#quests + 1] = { id = it.id, title = it.label, level = it.level }
+        end
+      end
+      local addAll, removeAll = Geo.CustomBulkButtons(quests)
+      items[#items + 1] = { header = true, kind = sec.kind, key = sec.kind, label = sec.label .. " - " .. Plural(#list, sec.unit),
+        b1 = addAll, b2 = removeAll }
       for _, it in ipairs(list) do items[#items + 1] = row(it, false) end
     end
   end

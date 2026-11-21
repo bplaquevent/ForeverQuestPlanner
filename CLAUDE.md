@@ -14,10 +14,11 @@ No way to run the game here: check with `tools/check.sh` (compiles every file, d
 | `Geo.lua` | world coordinates, travel times, flight/zeppelin/boat network (`Route`, `RouteText`), quest targets (`QuestTargets`) |
 | `Planner.lua` | Roadbook model: Nearby items, XP / levels, monster spots, tasks, priorities (`Geo.Priority`), rewards interest |
 | `Route.lua` | Roadbook route: flight master / transport stops, hearthstone, improvement, `PlanXP`, `Geo.RequestPlan` |
+| `Custom.lua` | custom Roadbook: quest list (`Geo.CustomAdd` / `CustomRemove`, mode, `Geo.FrozenKey`), fastest-route planner `Geo.PlanCustom` (dungeon visits, order constraints, flight masters to activate, per-leg networks `Geo.RouteNets`) |
 | `UI/Lists.lua` | window state, list engine (`RenderList`, `ListRow`), quest tracking and map pins, quest descriptions (`Geo.QuestTitle`, `Geo.DescLine`, badges, `K.DESC`), search |
 | `UI/Tabs.lua` | Quest log (`RenderTodo`), Available (`RenderAvailable`, rewards line), Nearby (`RenderNear`) tabs |
 | `Roadbook.lua` | `CP` table: checkpoints/focus, saved Roadbook (`Geo.Freeze`…), quick wins, auto-advance on game events, floating Objective button |
-| `UI/Window.lua` | Roadbook tab (`RenderXP`), filter bars, `SelectTab`, `Refresh` |
+| `UI/Window.lua` | Roadbook tab (`RenderXP`, `Geo.RouteStepItems`, custom view `Geo.RenderCustomXP`), filter bars, `SelectTab`, `Refresh` |
 | `UI/Settings.lua` | `K.PARAMS` and the settings window |
 | `UI/MainFrame.lua` | `CreateMainFrame`, export to file, minimap button |
 | `Events.lua` | event frame (`PLAYER_LOGIN` init, quest/taxi/zone events), `/fqp` commands |

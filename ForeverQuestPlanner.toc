@@ -3,7 +3,7 @@
 ## Notes: Plans your quests: optimized Roadbook, quest log analysis, available quests, log export.
 ## Notes-frFR: Planifie tes quêtes : Roadbook optimisé, analyse du journal, quêtes disponibles, export du journal.
 ## Author: Claude
-## Version: 2.54.3
+## Version: 2.54.4
 ## OptionalDeps: QuestieDB, Questie
 ## SavedVariables: ForeverQuestPlannerDB, ForeverQuestPlannerSettings
 ## IconTexture: Interface\Icons\INV_Misc_Book_09
@@ -15,6 +15,7 @@ Available.lua
 Geo.lua
 Planner.lua
 Route.lua
+Custom.lua
 UI\Lists.lua
 UI\Tabs.lua
 Roadbook.lua
