@@ -22,17 +22,36 @@ function Geo.CustomRec()
   local st = Settings()
   st.custom = st.custom or {}
   local k = CharKey()
-  st.custom[k] = st.custom[k] or { mode = "auto", list = {} }
+  st.custom[k] = st.custom[k] or { list = {} }
   return st.custom[k]
 end
 
-function Geo.CustomMode()
-  return Geo.CustomRec().mode == "custom"
+-- Tab of a Roadbook kind (each one has its own tab).
+function Geo.TabOf(kind)
+  return kind == "custom" and "custom" or "xp"
 end
 
--- Saved Roadbook of the selected mode.
-function Geo.FrozenKey()
-  return Geo.CustomMode() and (CharKey() .. "|custom") or CharKey()
+-- Roadbook followed by the Objective button ("auto" or "custom"), saved per character: there is
+-- always one, the automatic one by default; it is chosen with the radio buttons of the Roadbook tabs.
+function Geo.ActiveKind()
+  local st = Settings()
+  return st.activeRoadbook and st.activeRoadbook[CharKey()] or "auto"
+end
+
+-- The active Roadbook is followed (a step is focused); paused otherwise.
+function Geo.Tracking()
+  return ns.CP.CurrentFocus() ~= nil
+end
+
+function Geo.SetActive(kind)
+  local st = Settings()
+  st.activeRoadbook = st.activeRoadbook or {}
+  st.activeRoadbook[CharKey()] = kind
+end
+
+-- Saved Roadbook of a kind ("auto" or "custom").
+function Geo.FrozenKey(kind)
+  return kind == "custom" and (CharKey() .. "|custom") or CharKey()
 end
 
 function Geo.CustomIndex(id)
@@ -204,19 +223,19 @@ function Geo.CustomClear()
   Geo.CustomChanged()
 end
 
--- List changed: the custom Roadbook being followed is computed again (grouped when several
--- quests are added in a row); not followed yet: "Start" will compute it.
+-- List changed: the custom Roadbook is computed again (grouped when several quests are added in a
+-- row), its tracking kept; empty list: the Roadbook is emptied and paused. It has no "Generate".
 function Geo.CustomChanged()
-  local key = CharKey() .. "|custom"
-  local store = Geo.FrozenStore()
-  if Geo.CustomMode() and store[key] then
-    Geo.customToken = (Geo.customToken or 0) + 1
-    local token = Geo.customToken
+  Geo.customToken = (Geo.customToken or 0) + 1
+  local token = Geo.customToken
+  if #Geo.CustomList() == 0 then
+    if ns.CP then ns.CP.Pause("custom", true) end
+    Geo.ClearFrozen("custom")
+    if Geo.ResetActiveIfEmpty then Geo.ResetActiveIfEmpty() end
+  else
     C_Timer.After(0.6, function()
-      if token == Geo.customToken and Geo.CustomMode() and ns.CP then ns.CP.Recompute() end
+      if token == Geo.customToken and ns.CP then ns.CP.Recompute("custom", true) end
     end)
-  elseif not Geo.CustomMode() then
-    store[key] = nil -- out of date
   end
   if ns.Refresh then ns.Refresh() end
 end
@@ -573,7 +592,7 @@ function Geo.PlanCustom()
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
   local list = Geo.CustomList()
-  if #list == 0 then return nil, L["The custom Roadbook is empty: add quests with the + button of the other tabs."] end
+  if #list == 0 then return nil, L["The custom Roadbook is empty: add quests with the \"Add\" button of the other tabs."] end
   Geo.xpScale, Geo.customCtx = nil, nil
   Geo.laterList = {}
   local speed = TravelSpeed()
@@ -625,8 +644,10 @@ function Geo.PlanCustom()
 
   local route = Geo.CustomBuild({ { kind = "start", p = pos, work = 0 } }, steps, pred, travel)
   route = Geo.CustomImprove(route, travel, pred, succ)
-  local discovered
-  route, discovered = Geo.DiscoverFlightMasters(route, speed, plevel, cache)
+  local discovered = 0
+  if not Settings().noFMDetour then -- "Activate nearby flight masters" checked
+    route, discovered = Geo.DiscoverFlightMasters(route, speed, plevel, cache)
+  end
 
   -- Hearthstone: bind + hearths, with the travel times of the flight paths activated on the way.
   local nets = Geo.RouteNets(route, speed, plevel, cache)
@@ -641,7 +662,10 @@ function Geo.PlanCustom()
 
   -- Flight masters met on the way (activated for free, usable afterwards), then boarding steps.
   nets = Geo.RouteNets(route, speed, plevel, cache)
-  local okFM, withFM = pcall(Geo.AddFlightMasterStops, route, function(k) return nets[k].net end, plevel)
+  local okFM, withFM = false, nil
+  if not Settings().noFMDetour then
+    okFM, withFM = pcall(Geo.AddFlightMasterStops, route, function(k) return nets[k].net end, plevel)
+  end
   if okFM and withFM then
     route = withFM
     for _, st in ipairs(route) do

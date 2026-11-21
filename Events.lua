@@ -38,9 +38,22 @@ f:SetScript("OnEvent", function(_, event, ...)
     Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
     -- Options saved from the settings window or the tabs.
     local st = Settings()
-    if st.horizon then State.xpHorizon = st.horizon end
+    if st.horizon then -- former setting: duration only
+      st.goal, st.horizon = { kind = "time", value = st.horizon }, nil
+    end
+    if type(st.goal) == "table" and st.goal.kind and st.goal.value then
+      State.xpGoal = { kind = st.goal.kind, value = st.goal.value }
+    end
     if st.nearRadius then State.nearRadius = st.nearRadius end
     if st.availFilter then State.availFilter = st.availFilter end
+    -- Former versions (one Roadbook, always followed): the Roadbook of the selected mode stays active.
+    st.roadbookMigrated = st.roadbookMigrated or {}
+    if not st.roadbookMigrated[CharKey()] then
+      st.roadbookMigrated[CharKey()] = true
+      local kind = Geo.CustomRec().mode == "custom" and "custom" or "auto" -- former view mode
+      if Geo.HasRoadbook(kind) then Geo.SetActive(kind) end
+    end
+    Geo.ResetActiveIfEmpty()
     pcall(Geo.ApplyParams)
     local ok, err = pcall(InitQuestieDB)
     if not ok then Print(L["QuestieDB initialization error: "] .. tostring(err)) end
@@ -79,7 +92,7 @@ f:SetScript("OnEvent", function(_, event, ...)
       C_Timer.After(10, function()
         f.rescanPending = nil
         scan.dirty = true
-        if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "xp" then Refresh() end
+        if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "xp" and State.currentTab ~= "custom" then Refresh() end
       end)
     end
   elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_ENTERING_WORLD" then
@@ -99,6 +112,7 @@ f:SetScript("OnEvent", function(_, event, ...)
     pcall(CP.OnGameEvent, event, ...)
   else
     ScheduleSnapshot()
+    State.abandonIds = nil -- recommendations for abandoning computed again on the next display
     pcall(CP.OnGameEvent, event, ...)
     if event == "QUEST_LOG_UPDATE" and State.mainFrame and State.mainFrame:IsShown() and State.currentTab == "groups" and not f.pendingRefresh then
       f.pendingRefresh = true
@@ -134,16 +148,12 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     s.hideMinimap = not s.hideMinimap
     if State.minimapButton then State.minimapButton:SetShown(not s.hideMinimap) end
     Print(L["Minimap icon "] .. (s.hideMinimap and L["hidden."] or L["shown."]))
-  elseif msg == "reset" then
-    Settings().keep = {}
-    Print(L["\"Keep\" quest list cleared."])
-    Refresh()
   elseif msg == "abandon" then
     ToggleMainFrame("groups")
   elseif msg == "near" or msg == "around" or msg == "autour" then
     ToggleMainFrame("near")
   elseif msg == "xp" or msg == "roadbook" then
-    ToggleMainFrame("xp")
+    ToggleMainFrame(Geo.TabOf(Geo.ActiveKind()))
   elseif msg == "log" or msg == "journal" or msg == "afaire" or msg == "todo" then
     ToggleMainFrame("groups")
   elseif msg == "available" or msg == "dispo" then

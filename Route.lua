@@ -2,7 +2,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, BuildNetwork, BuildScanContext, BuildTasks, CharKey, Dist = ns.AreaName, ns.BuildNetwork, ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.Dist
+local AreaName, BuildNetwork, BuildScanContext, BuildTasks, CharKey, DBXP, Dist = ns.AreaName, ns.BuildNetwork, ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.DBXP, ns.Dist
 local Geo, GetItemInfoCompat, InsertStops, K, L, MakeTravel = ns.Geo, ns.GetItemInfoCompat, ns.InsertStops, ns.K, ns.L, ns.MakeTravel
 local PlayerPos, Print, Route, Settings, TaxiCount, TravelSpeed = ns.PlayerPos, ns.Print, ns.Route, ns.Settings, ns.TaxiCount, ns.TravelSpeed
 local WorldPos, scan = ns.WorldPos, ns.scan
@@ -427,19 +427,60 @@ function Geo.PreloadRewardItems()
   end
 end
 
-local function PlanXP(horizon)
+-- Goal of the automatic Roadbook: { kind = "time", value = seconds } (most XP in that time) or
+-- { kind = "level", value = level } (fastest route to that level).
+-- A far level is reached in stages: one computation plans at most this much, then "Generate"
+-- at the end of the Roadbook computes the next stage (with the real XP and flight paths).
+K.LEVEL_PLAN_MAX_TIME = 40 * 3600 -- level goal: longest Roadbook computed
+K.MAX_PLAN_QUESTS_LEVEL = 300      -- level goal: most quests in the Roadbook
+K.LEVEL_INSERT_WINDOW = 60         -- level goal: a quest is inserted among the last steps only (speed)
+K.LEVEL_IMPROVE_MAX = 250          -- level goal: route shortened only up to this many steps (speed)
+
+-- Quest XP when it is done at the expected level `level` (lower once the quest turns green or gray).
+function Geo.TaskXPAt(task, level, plevel)
+  if not task.id or level == plevel then return task.xp or 0 end
+  local xp = DBXP(task.id, level)
+  if not xp then return task.xp or 0 end
+  return math.min(xp, task.xp or xp)
+end
+
+-- Level reached at the end of a route.
+function Geo.EndLevel(route)
+  local lv = Geo.Levels(route)
+  return lv[#lv]
+end
+
+local function PlanXP(goal)
   Geo.PreloadRewardItems()
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
+  local plevel = UnitLevel("player")
+  if plevel >= Geo.MaxLevel() then
+    return nil, L["Max level reached: no more XP to earn. Use the custom Roadbook to choose your quests."]
+  end
+  local byLevel = goal.kind == "level"
+  local target = byLevel and math.max(goal.value, plevel + 1) or nil
+  local horizon = byLevel and K.LEVEL_PLAN_MAX_TIME or goal.value
+  local limit = byLevel and horizon or horizon * 1.1 -- time a candidate may reach
+  local maxQuests = byLevel and K.MAX_PLAN_QUESTS_LEVEL or K.MAX_PLAN_QUESTS
+  local function goalReached(route, total)
+    if byLevel then return Geo.EndLevel(route) >= target end
+    return total >= horizon
+  end
   Geo.xpScale = nil
   Geo.laterList, Geo.laterCache = {}, {}
   local speed = TravelSpeed()
   Geo.planSpeed = speed
-  local plevel = UnitLevel("player")
   local net = BuildNetwork(speed)
   local travel = MakeTravel(net, plevel)
   local tasks, skipped = BuildTasks(pos, plevel)
   local ctx = BuildScanContext()
+  -- Insertion of a quest's steps; far level goal: only among the last steps of the route (it is
+  -- built in time order), otherwise a long route makes every insertion too slow.
+  local function insert(r, stops, si)
+    if byLevel then si = math.max(si or 1, #r - K.LEVEL_INSERT_WINDOW) end
+    return InsertStops(r, stops, travel, si)
+  end
 
   local route = { { kind = "start", p = pos, work = 0 } }
   local total, count = 0, 0
@@ -457,7 +498,7 @@ local function PlanXP(horizon)
       local sc = v / math.max(dd, 30)
       if not best or sc > best then best = sc end
     end
-    local base = task.value + (task.prio or 0)
+    local base = task.value
     if #locked > 0 then
       local nlv = Geo.Levels(nr)
       if nlv[#nlv] > lvEnd then
@@ -466,8 +507,8 @@ local function PlanXP(horizon)
           if u.reqLevel <= nlv[#nlv] and not usedIds[u.id] and not u.dep then
             local si = Geo.StartIndex(u, nlv, nidx)
             if si then
-              local du = InsertStops(nr, u.stops, travel, si)
-              if total + d + du <= horizon * 1.1 then consider(base + u.value + (u.prio or 0), d + du) end
+              local du = insert(nr, u.stops, si)
+              if total + d + du <= limit then consider(base + u.value, d + du) end
             end
           end
         end
@@ -485,9 +526,9 @@ local function PlanXP(horizon)
         if u.stops and not usedIds[u.id] and not seen[u.id] then
           local si = Geo.StartIndex(u, lvR, idxR)
           if si then
-            local du, ur = InsertStops(r, u.stops, travel, si)
-            if total + dd + du <= horizon * 1.1 then
-              local val = u.value + (u.prio or 0)
+            local du, ur = insert(r, u.stops, si)
+            if total + dd + du <= limit then
+              local val = u.value
               local rate = val / math.max(du, 30)
               if not pick or rate > pick.rate then pick = { u = u, du = du, r = ur, val = val, rate = rate } end
             end
@@ -503,7 +544,7 @@ local function PlanXP(horizon)
   end
 
   local function fill()
-    while count < K.MAX_PLAN_QUESTS and total < horizon do
+    while count < maxQuests and not goalReached(route, total) do
       local lv, idx = Geo.Levels(route), Geo.Index(route)
       local lvEnd = lv[#lv]
       local locked = {}
@@ -517,12 +558,15 @@ local function PlanXP(horizon)
         if task.stops and not task.used and not usedIds[task.id] and (not task.dep or task.dep.used) then
           local si = Geo.StartIndex(task, lv, idx)
           if si then
-            local d, nr = InsertStops(route, task.stops, travel, si)
-            if total + d <= horizon * 1.1 then
-              local score = (task.value + (task.prio or 0)) / math.max(d, 30)
+            local d, nr = insert(route, task.stops, si)
+            if total + d <= limit then
+              -- XP at the level expected when the quest is done (less if it turned green or gray).
+              local qxp = Geo.TaskXPAt(task, lv[si], plevel)
+              local value = task.value - (task.xp or 0) + qxp
+              local score = value / math.max(d, 30)
               local pair = lookahead(task, nr, d, lvEnd, locked)
               if pair and pair * K.LOOKAHEAD_WEIGHT > score then score = pair * K.LOOKAHEAD_WEIGHT end
-              if not best or score > best.score then best = { task = task, score = score, d = d, route = nr } end
+              if not best or score > best.score then best = { task = task, score = score, d = d, route = nr, xp = qxp } end
             end
           end
           Geo.Yield()
@@ -531,6 +575,12 @@ local function PlanXP(horizon)
       if not best then break end
       best.task.used = true
       if best.task.id then usedIds[best.task.id] = true end
+      if best.xp ~= (best.task.xp or 0) then -- done at a higher level: its turn-in gives less XP
+        local last = best.task.stops[#best.task.stops]
+        if last and last.kind == "turnin" then last.xp = best.xp end
+        best.task.value = best.task.value - (best.task.xp or 0) + best.xp
+        best.task.xp = best.xp
+      end
       route, total, count = best.route, total + best.d, count + 1
       -- The chosen quest's follow-ups become candidates.
       for _, f in ipairs(Geo.Followers(best.task, ctx, plevel)) do tasks[#tasks + 1] = f end
@@ -539,9 +589,11 @@ local function PlanXP(horizon)
 
   fill()
   -- Shorten the route, then use the saved time for other quests.
-  route = Geo.Improve(route, travel)
-  total = Geo.RouteTime(route, travel)
-  fill()
+  if not byLevel or #route <= K.LEVEL_IMPROVE_MAX then
+    route = Geo.Improve(route, travel)
+    total = Geo.RouteTime(route, travel)
+    fill()
+  end
 
   -- Hearthstone: bind + hearths, then the saved time is used to add quests.
   local okH, withH = pcall(Geo.OptimizeHearth, route, travel)
@@ -553,16 +605,31 @@ local function PlanXP(horizon)
     route = Geo.FixHearth(route, travel, Geo.HearthReady() or 0)
   end
 
-  -- Unknown flight masters met on the way: activation step.
-  local okFM, withFM = pcall(Geo.AddFlightMasterStops, route, net, plevel)
-  if okFM and withFM then route = withFM end
+  route = Geo.FinishRoute(route, net, travel, plevel)
+  local info = Geo.RouteInfo(route, travel)
+  info.speed, info.skipped, info.count, info.net, info.plevel, info.later = speed, skipped, count, net, plevel, Geo.laterList
+  info.goal = { kind = goal.kind, value = byLevel and target or goal.value }
+  -- Target not reached in one computation (its size, or the quests known now): this Roadbook is a
+  -- stage; "Generate" at its end plans the next one from the real level, XP and flight paths.
+  if byLevel and Geo.EndLevel(route) < target then info.goalStage = true end
+  return route, nil, info
+end
 
-  -- Flights, zeppelins, boats: step at the boarding point.
+-- Last steps of a route: activation of the unknown flight masters met on the way (if the option is
+-- on), then the flight / zeppelin / boat boarding steps.
+function Geo.FinishRoute(route, net, travel, plevel)
+  if not Settings().noFMDetour then
+    local okFM, withFM = pcall(Geo.AddFlightMasterStops, route, net, plevel)
+    if okFM and withFM then route = withFM end
+  end
   local okT, withT = pcall(Geo.AddTransportStops, route, net, plevel)
   if not okT then Print(L["Transport steps error: "] .. tostring(withT)) end
   if okT and withT then route = withT end
+  return route
+end
 
-  -- Exact recomputation of time and XP along the final route.
+-- Exact time and XP along a route (st.at = time at the end of each step).
+function Geo.RouteInfo(route, travel)
   local t, questXP, mobXP = 0, 0, 0
   for i = 2, #route do
     local st = route[i]
@@ -571,30 +638,98 @@ local function PlanXP(horizon)
     if st.kind == "turnin" then questXP = questXP + (st.xp or 0) end
     if st.kind == "obj" then mobXP = mobXP + (st.xp or 0) end
   end
-  return route, nil, { speed = speed, skipped = skipped, total = t, xp = questXP + mobXP, mobXP = mobXP,
-    count = count, net = net, plevel = plevel, levels = Geo.Levels(route), later = Geo.laterList }
+  return { total = t, xp = questXP + mobXP, mobXP = mobXP, levels = Geo.Levels(route) }
+end
+
+-- Skipped quest: its steps leave the saved Roadbook `fz` and the route of the steps left is
+-- adapted: the travel, flight master and hearthstone steps are computed again for them, in the
+-- same order (no quest is added). isDone(st): step done, kept as it is at the start of the route.
+-- Returns the new route and its info.
+Geo.AUX_STEPS = { travel = true, fm = true, hearth = true, bind = true }
+function Geo.Reroute(fz, id, isDone)
+  local plevel = UnitLevel("player")
+  local speed = TravelSpeed()
+  local net = BuildNetwork(speed)
+  local travel = MakeTravel(net, plevel)
+  local old = fz.route
+  local done, doneIdx, todo = {}, {}, {}
+  for i = 2, #old do
+    local st = old[i]
+    if isDone(st) then
+      done[#done + 1] = st
+      doneIdx[#doneIdx + 1] = i
+    elseif not (st.task and st.task.id == id) and not Geo.AUX_STEPS[st.kind] then
+      todo[#todo + 1] = st
+    end
+  end
+  local pos = PlayerPos() or (done[#done] or old[1]).p
+  local rest = { { kind = "start", p = pos, work = 0 } }
+  for _, st in ipairs(todo) do rest[#rest + 1] = st end
+  if #rest >= 3 then
+    local okH, withH = pcall(Geo.OptimizeHearth, rest, travel)
+    if okH and withH and withH ~= rest then rest = Geo.FixHearth(withH, travel, Geo.HearthReady() or 0) end
+  end
+  rest = Geo.FinishRoute(rest, net, travel, plevel)
+  local restInfo = Geo.RouteInfo(rest, travel)
+  -- Steps done first (their time and level as planned), then the steps left from now on.
+  local oldLv = fz.info.levels or {}
+  local route, levels = { old[1] }, { oldLv[1] or plevel }
+  local t0 = 0
+  for k, st in ipairs(done) do
+    route[#route + 1] = st
+    levels[#levels + 1] = oldLv[doneIdx[k]] or levels[#levels]
+    t0 = math.max(t0, st.at or 0)
+  end
+  for i = 2, #rest do
+    rest[i].at = t0 + (rest[i].at or 0)
+    route[#route + 1] = rest[i]
+    levels[#levels + 1] = restInfo.levels[i]
+  end
+  local info = {}
+  for k, v in pairs(fz.info) do info[k] = v end
+  local xp, mobXP, ids = 0, 0, {}
+  for i = 2, #route do
+    local st = route[i]
+    if st.kind == "turnin" then xp = xp + (st.xp or 0) end
+    if st.kind == "obj" then mobXP = mobXP + (st.xp or 0) end
+    if st.task and st.task.id then ids[st.task.id] = true end
+  end
+  local count = 0
+  for _ in pairs(ids) do count = count + 1 end
+  info.xp, info.mobXP, info.count = xp + mobXP, mobXP, count
+  info.total = t0 + restInfo.total
+  info.levels, info.net, info.speed = levels, net, speed
+  info.net.taxi = TaxiCount()
+  if info.goal and info.goal.kind == "level" then info.goalStage = (levels[#levels] or 0) < info.goal.value or nil end
+  return route, info
 end
 
 -- Roadbook computation in the background (spread over several frames) with caching.
--- horizon: duration (automatic Roadbook) or "custom" (custom Roadbook, its quest list in the key).
-function Geo.PlanKey(horizon)
+-- goal: goal of the automatic Roadbook ({ kind, value }) or "custom" (custom Roadbook, its quest list in the key).
+function Geo.GoalKey(goal)
+  if goal == "custom" then return goal end
+  return goal.kind .. goal.value
+end
+
+function Geo.PlanKey(goal)
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   local b = Geo.BindStore()[CharKey()]
   local list = {}
-  if horizon == "custom" then
+  if goal == "custom" then
     for _, it in ipairs(Geo.CustomList()) do list[#list + 1] = it.id end
   end
-  return table.concat({ horizon, table.concat(list, ","), tostring(Settings().noHearth), UnitLevel("player"),
+  return table.concat({ Geo.GoalKey(goal), table.concat(list, ","), tostring(Settings().noHearth),
+    tostring(Settings().noFMDetour), UnitLevel("player"),
     UnitXP and UnitXP("player") or 0, e and e.updated or "", tostring(scan.entries), TaxiCount(),
     tostring(b and b.name), tostring(Settings().mountSpeed), Geo.paramsVersion or 0 }, "|")
 end
 
 -- Returns true if the cached plan is up to date; otherwise starts (or continues) the computation and
 -- calls cb(route, err, info) when done. force = recompute even if the cache is valid.
-function Geo.RequestPlan(horizon, cb, force)
-  local key = Geo.PlanKey(horizon)
+function Geo.RequestPlan(goal, cb, force)
+  local key = Geo.PlanKey(goal)
   local pos = PlayerPos()
-  local cacheField = horizon == "custom" and "customCache" or "planCache"
+  local cacheField = goal == "custom" and "customCache" or "planCache"
   local c = Geo[cacheField]
   if not force and c and c.key == key and pos and c.pos and (Dist(pos, c.pos) or math.huge) < K.REPLAN_DISTANCE then
     return true
@@ -608,8 +743,8 @@ function Geo.RequestPlan(horizon, cb, force)
   if Geo.co and Geo.runningKey == key then return false end
   Geo.runningKey = key
   local co = coroutine.create(function()
-    if horizon == "custom" then return Geo.PlanCustom() end
-    return PlanXP(horizon)
+    if goal == "custom" then return Geo.PlanCustom() end
+    return PlanXP(goal)
   end)
   Geo.co = co
   local function finish(result)

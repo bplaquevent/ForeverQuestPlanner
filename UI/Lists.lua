@@ -101,7 +101,7 @@ end
 ---------------------------------------------------------------------------
 local panels, tabButtons = {}, {}
 State.currentTab = "near"
-State.availFilter = "zone"
+State.availFilter = "all"
 local CONTENT_WIDTH = 770 -- same gap on the right (to the scroll bar) as on the left
 
 -- Scroll bar of a UIPanelScrollFrameTemplate frame (key, name, or Slider child).
@@ -240,6 +240,10 @@ function Geo.IndentWrap(text, width)
   return table.concat(out, "\n")
 end
 
+-- Trash icon: game atlas when this client has it, otherwise the red cross of the loot roll.
+K.TRASH_ATLAS = "common-icon-delete"
+K.TRASH_TEXTURE = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+
 local function ListRow(panel, i)
   panel.rows = panel.rows or {}
   local r = panel.rows[i]
@@ -276,6 +280,15 @@ local function ListRow(panel, i)
   r.b2 = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.b3 = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   for _, b in ipairs({ r.b1, r.b2, r.b3 }) do b:SetHeight(20) end
+  -- Trash icon at the left of the line (item field `trash`).
+  r.trash = CreateFrame("Button", nil, r)
+  r.trash:SetSize(16, 16)
+  r.trash:SetPoint("TOPLEFT", 8, -5)
+  local tex = r.trash:CreateTexture(nil, "ARTWORK")
+  tex:SetAllPoints()
+  if not (Geo.HasAtlas(K.TRASH_ATLAS) and pcall(tex.SetAtlas, tex, K.TRASH_ATLAS)) then tex:SetTexture(K.TRASH_TEXTURE) end
+  r.trash:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  r.trash:Hide()
   -- Section title line: thin golden rule under the text.
   r.rule = r:CreateTexture(nil, "BORDER")
   r.rule:SetPoint("BOTTOMLEFT", 6, 2)
@@ -340,7 +353,8 @@ local function ButtonGrid(items)
   return { width = width, used = used, offsets = offsets, total = -x }
 end
 
--- items: { header = true, kind, key, label, b1, b2, b3 } | { text, b1, b2, b3, tint, stripe }  (b = { text, fn })
+-- items: { header = true, kind, key, label, b1, b2, b3 } | { text, b1, b2, b3, trash, tint, stripe }  (b = { text, fn, tip })
+-- trash: clickable trash icon at the left of the line (b without text).
 -- Categories are collapsed by default and every time the window opens.
 -- Categories expanded while the window is open; everything collapses again each time it opens.
 local expandedCategories = {}
@@ -386,10 +400,22 @@ local function RenderList(panel, tabKey, items, forceOpen)
           b:SetWidth(grid.width[c])
         end
       end
+      local trash = it.trash
+      r.trash:SetShown(trash and true or false)
+      r.trash:SetScript("OnClick", trash and trash.fn or nil)
+      r.trash:SetScript("OnEnter", trash and trash.tip and function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(trash.tip[1])
+        if trash.tip[2] then GameTooltip:AddLine(trash.tip[2], 0.8, 0.8, 0.8, true) end
+        GameTooltip:Show()
+      end or nil)
+      r.trash:SetScript("OnLeave", trash and function() GameTooltip:Hide() end or nil)
+      r.text:ClearAllPoints()
+      r.text:SetPoint("TOPLEFT", trash and 22 or 10, -6)
       local hasButtons = it.b1 or it.b2 or it.b3
       r.text:SetFontObject(it.section and "GameFontNormalLarge" or "GameFontHighlight")
       r.rule:SetShown(it.section and true or false)
-      r.text:SetWidth(CONTENT_WIDTH - (hasButtons and (grid.total + 12) or 16))
+      r.text:SetWidth(CONTENT_WIDTH - (hasButtons and (grid.total + 12) or 16) - (trash and 12 or 0))
       if it.stripe then
         r.stripe:SetColorTexture(it.stripe[1], it.stripe[2], it.stripe[3], 1)
         r.stripe:Show()
@@ -467,13 +493,15 @@ local function RenderList(panel, tabKey, items, forceOpen)
     r:ClearAllPoints()
     r:SetPoint("TOPLEFT", 0, y)
     r:Show()
-    for _, b in ipairs({ r.b1, r.b2, r.b3 }) do b:Hide() end
+    for _, b in ipairs({ r.b1, r.b2, r.b3, r.trash }) do b:Hide() end
     r.stripe:Hide()
     r.rule:Hide()
     r.text:SetFontObject("GameFontHighlight")
     r.bg:SetColorTexture(1, 0.5, 0.15, 0.2)
     r:EnableMouse(false)
     r:SetScript("OnMouseUp", nil)
+    r.text:ClearAllPoints()
+    r.text:SetPoint("TOPLEFT", 10, -6)
     r.text:SetWidth(CONTENT_WIDTH - 16)
     r.text:SetText(Color("ff8040", L["Too many expanded lines: collapse some categories, pick a narrower filter or search."]))
     r:SetHeight(26)
@@ -614,11 +642,15 @@ local function ClearPin()
 end
 
 -- Game map pin icon, or a text fallback if the atlas does not exist in this client.
+function Geo.HasAtlas(name)
+  local ok, info = pcall(function() return C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(name) end)
+  return ok and info and true or false
+end
+
 local pinIcon
 local function PinIcon()
   if pinIcon == nil then
-    local ok, info = pcall(function() return C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("Waypoint-MapPin-Tracked") end)
-    pinIcon = (ok and info) and "|A:Waypoint-MapPin-Tracked:18:18|a " or Color("ff66ff", L["[Pin] "])
+    pinIcon = Geo.HasAtlas("Waypoint-MapPin-Tracked") and "|A:Waypoint-MapPin-Tracked:18:18|a " or Color("ff66ff", L["[Pin] "])
   end
   return pinIcon
 end
@@ -638,7 +670,19 @@ local ICON = {
   inprogress = "|TInterface\\GossipFrame\\IncompleteQuestIcon:16:16|t", -- gray ?: in progress
   available = "|TInterface\\GossipFrame\\AvailableQuestIcon:16:16|t",  -- yellow !: to pick up
   watched = "|TInterface\\Buttons\\UI-CheckBox-Check:16:16|t",         -- check mark: tracked
+  custom = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:16:16|t", -- yellow star: custom Roadbook
+  abandon = "|TInterface\\RaidFrame\\ReadyCheck-NotReady:16:16|t",       -- red cross: to abandon
 }
+
+-- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
+-- a quest event (Events.lua clears State.abandonIds).
+function Geo.ToAbandon(questId)
+  if not State.abandonIds then
+    pcall(ns.Analyze)
+    State.abandonIds = State.abandonIds or {} -- no new try on each line after an error
+  end
+  return State.abandonIds[questId] or false
+end
 
 local function StateIcons(questId)
   if not questId then return "" end
@@ -651,6 +695,8 @@ local function StateIcons(questId)
     icons[#icons + 1] = ICON.available
   end
   if IsPinned(questId) then icons[#icons + 1] = PinIcon() end
+  if Geo.InCustom(questId) then icons[#icons + 1] = ICON.custom end
+  if IsInLog(questId) and Geo.ToAbandon(questId) then icons[#icons + 1] = ICON.abandon end -- last: before "[To abandon]"
   return table.concat(icons, "") .. " "
 end
 
@@ -793,7 +839,7 @@ end
 --   follow-ups in color, the rest in gray), warnings (orange), blockers (red), rewards.
 --   Informations on one line are separated by " · ".
 K.DESC = { action = "bbbbbb", meta = "888888", xp = "80c0ff", warn = "ffb060", bad = "ff6060",
-  good = "40ff40", chain = "c080ff", prio = "ffd100" }
+  good = "40ff40", chain = "c080ff" }
 K.DESC_LINE = "\n       "
 K.DESC_SEP = " · "
 
@@ -970,7 +1016,7 @@ function Geo.MapButton(getPoint, title, questId)
 end
 
 -- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.
-K.CUSTOM_TIP = "Custom Roadbook: your own quest list, done along the fastest route (Roadbook tab, \"Custom\" mode)."
+K.CUSTOM_TIP = "Custom Roadbook: your own quest list, done along the fastest route (Custom Roadbook tab)."
 function Geo.CustomButton(id, title, level)
   if not (QDB.ok and id) then return nil end
   local inList = Geo.InCustom(id)
@@ -1022,7 +1068,7 @@ local function MatchWords(hay, words)
   return true
 end
 
-State.todoQuery, State.availQuery, State.nearQuery, State.xpQuery = {}, {}, {}, {}
+State.todoQuery, State.availQuery, State.nearQuery, State.xpQuery, State.customQuery = {}, {}, {}, {}, {}
 
 local function QuestHaystack(q)
   local parts = { q.title, q.zone, q.mapZone, q.instanceName, q.tag, q._turnIn, q.objectivesText, q._chain }

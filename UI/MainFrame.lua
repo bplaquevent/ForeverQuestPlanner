@@ -2,10 +2,311 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
+local AddFilterRow, FilterBox = ns.AddFilterRow, ns.FilterBox
 local AddStateFilters, CONTENT_WIDTH, CP, CreateFilterPanel, CreateScrollPanel, Geo = ns.AddStateFilters, ns.CONTENT_WIDTH, ns.CP, ns.CreateFilterPanel, ns.CreateScrollPanel, ns.Geo
-local L, LOW_LEVEL_TOGGLE, ParseQuery, Print, QDB, Refresh = ns.L, ns.LOW_LEVEL_TOGGLE, ns.ParseQuery, ns.Print, ns.QDB, ns.Refresh
+local K, L, LOW_LEVEL_TOGGLE, ParseQuery, Print, QDB, Refresh = ns.K, ns.L, ns.LOW_LEVEL_TOGGLE, ns.ParseQuery, ns.Print, ns.QDB, ns.Refresh
+
+K.GOAL_LEVEL_SPAN = 10 -- "Reach level" goal: at most this many levels above the current one
 local SelectTab, Settings, Snapshot, State, StopNearTicker, expandedCategories = ns.SelectTab, ns.Settings, ns.Snapshot, ns.State, ns.StopNearTicker, ns.expandedCategories
 local journalStates, nearStates, panels, tabButtons = ns.journalStates, ns.nearStates, ns.panels, ns.tabButtons
+
+-- Roadbook tab ("auto" or "custom"), options at the top:
+--   auto:                       [  search  ]                     [Start|Pause] [Delete]
+--         +-------------------------------------------------------------------------+
+--         | Goal: (o) Session of [2 h v]   (o) Reach level [25 v]          [Generate] |
+--         +-------------------------------------------------------------------------+
+--   custom:                     [  search  ]                     [Start|Pause] [Delete]
+-- (no goal box for the custom Roadbook: it is computed at each change of its list)
+-- The buttons act on the Roadbook of the tab; "Start" also makes it the active one (shown by a light
+-- in the tab title, Geo.AddTabLed).
+local function CreateRoadbookPanel(f, kind)
+  local custom = kind == "custom"
+  local xp = CreateFilterPanel(f, {}, function() return nil end, function() end, function(text)
+    if custom then State.customQuery = ParseQuery(text) else State.xpQuery = ParseQuery(text) end
+    Refresh()
+  end)
+  local function Tooltip(widget, title, text)
+    widget:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+      GameTooltip:AddLine(title)
+      GameTooltip:AddLine(type(text) == "function" and text() or text, 0.8, 0.8, 0.8, true)
+      GameTooltip:Show()
+    end)
+    widget:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  end
+  -- Goal box (auto), the filter box of the other tabs: one row under the search box, the whole width
+  -- of the window; the radio buttons, captions and "Generate" are created in it.
+  local host, rowY = xp, 0
+  if not custom then
+    host = FilterBox(xp)
+    rowY = AddFilterRow(xp)
+  end
+  -- Radio button and caption: x from the left of the box, y of the middle of their row.
+  local function Radio(x, y, label, onClick)
+    local okR, b = pcall(CreateFrame, "CheckButton", nil, host, "UIRadioButtonTemplate")
+    if not okR or not b then b = CreateFrame("CheckButton", nil, host, "UICheckButtonTemplate") end
+    b:SetSize(18, 18)
+    b:SetPoint("LEFT", host, "TOPLEFT", x, y)
+    b.label = host:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.label:SetPoint("LEFT", b, "RIGHT", 2, 0)
+    b.label:SetText(label)
+    b:SetScript("OnClick", onClick)
+    return b, x + 18 + 2 + (b.label:GetStringWidth() or 60)
+  end
+  local function Caption(x, y, text)
+    local cap = host:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cap:SetPoint("LEFT", host, "TOPLEFT", x, y)
+    cap:SetText(text)
+    return cap, x + (cap:GetStringWidth() or 40) + 8
+  end
+  local function Button(label, w, onClick)
+    local b = CreateFrame("Button", nil, host, "UIPanelButtonTemplate")
+    b:SetSize(w, 22)
+    b:SetText(label)
+    b:SetScript("OnClick", onClick)
+    return b
+  end
+
+  -- Right of the search line: the actions on the Roadbook of the tab.
+  local delete = CreateFrame("Button", nil, xp, "UIPanelButtonTemplate")
+  delete:SetSize(80, 22)
+  delete:SetText(L["Delete"])
+  delete:SetScript("OnClick", function() CP.Delete(kind) end)
+  delete:SetPoint("TOPRIGHT", -12, -70)
+  Tooltip(delete, L["Delete"], custom and L["Deletes the custom Roadbook: its steps, their progress and its quest list."]
+    or L["Deletes the automatic Roadbook: its steps and their progress."])
+  local startB = CreateFrame("Button", nil, xp, "UIPanelButtonTemplate")
+  startB:SetSize(80, 22)
+  startB:SetText(L["Start"])
+  startB:SetScript("OnClick", function()
+    if Geo.ActiveKind() == kind and Geo.Tracking() then CP.Pause(kind) else CP.Start(kind) end
+  end)
+  startB:SetPoint("RIGHT", delete, "LEFT", -6, 0)
+  Tooltip(startB, L["Start / Pause"], L["Start: this Roadbook becomes the active one and the Objective button follows it. Pause: the tracking stops, the progress is kept."])
+  local generate
+  if not custom then -- the custom Roadbook is computed at each change of its list
+    generate = Button(L["Generate"], 80, function() CP.Generate(kind) end)
+    generate:SetPoint("RIGHT", host, "TOPRIGHT", -8, rowY) -- right end of the goal box
+    Tooltip(generate, L["Generate"], L["Computes a new Roadbook with the chosen goal; the current one is replaced, after confirmation. Click \"Start\" to follow the new one."])
+  end
+
+  -- Waiting animation while the Roadbook of the tab is computed (Geo.RenderBusy shows it).
+  local busy = CreateFrame("Frame", nil, xp)
+  busy:SetSize(400, 120)
+  busy:SetPoint("TOP", xp.scroll, "TOP", 10, -70)
+  busy:Hide()
+  local busyText = busy:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  busyText:SetPoint("TOP", 0, 0)
+  busyText:SetText(L["Computing the Roadbook"])
+  -- A wave running along a row of round gold lights.
+  local DOTS, GAP = 5, 18
+  local dots = {}
+  for i = 1, DOTS do
+    local d = busy:CreateTexture(nil, "ARTWORK")
+    d:SetTexture("Interface\\Common\\Indicator-Yellow")
+    d:SetPoint("CENTER", busyText, "BOTTOM", (i - (DOTS + 1) / 2) * GAP, -20)
+    dots[i] = d
+  end
+  local busySub = busy:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  busySub:SetPoint("TOP", busyText, "BOTTOM", 0, -40)
+  local tick = 0
+  busy:SetScript("OnUpdate", function(_, elapsed)
+    local t = GetTime and GetTime() or 0
+    for i, d in ipairs(dots) do
+      local wave = math.max(0, math.sin(t * 5 - i * 0.7)) -- 0..1, moving from left to right
+      d:SetAlpha(0.25 + 0.75 * wave)
+      local size = 10 + 6 * wave
+      d:SetSize(size, size)
+    end
+    tick = tick + elapsed
+    if tick < 0.5 then return end
+    tick = 0
+    local sec = math.floor(t - (Geo.computeStart or t))
+    busySub:SetText(string.format(L["%d s · you can keep playing meanwhile"], sec))
+  end)
+  busy:SetScript("OnShow", function() tick = 1 end) -- elapsed time set at once
+  xp.busy = busy
+
+  local updateLeft = custom and function() end or Geo.CreateGoalLine(host, rowY, Radio, Caption, Tooltip)
+
+  function xp.UpdateMode()
+    updateLeft()
+    -- Buttons: state of the Roadbook of the tab.
+    local following = Geo.ActiveKind() == kind and Geo.Tracking()
+    startB:SetText(following and L["Pause"] or L["Start"])
+    startB:SetEnabled(Geo.computing ~= kind and (following or Geo.HasRoadbook(kind)))
+    delete:SetEnabled(Geo.computing ~= kind and (Geo.HasRoadbook(kind) or (custom and #Geo.CustomRec().list > 0)))
+    if generate then generate:SetEnabled(Geo.computing == nil) end
+  end
+  return xp
+end
+
+-- Goal of the automatic Roadbook on one row of its box (y: middle of the row), one radio button per
+-- dropdown; returns its update function.
+function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
+  local _, gx = Caption(10, y, L["Goal:"])
+  local function GoalTime()
+    local g = State.xpGoal
+    return Settings().goalTime or (g.kind == "time" and g.value) or 7200
+  end
+  local function LevelRange()
+    local lo = UnitLevel("player") + 1
+    return lo, math.max(lo, math.min(Geo.MaxLevel(), UnitLevel("player") + K.GOAL_LEVEL_SPAN))
+  end
+  local function GoalLevel()
+    local g = State.xpGoal
+    local lo, hi = LevelRange()
+    local v = Settings().goalLevel or (g.kind == "level" and g.value) or lo
+    return math.min(math.max(v, lo), hi)
+  end
+  local timeRadio, tx = Radio(gx, y, L["Session of"], function() CP.SetGoal("time", GoalTime()) end)
+  Tooltip(timeRadio, L["For a play session"], L["The route earning the most XP within this time."])
+  -- Each dropdown right after its label (the template has a 16 px margin on the left, its frame is
+  -- 50 px wider than the set width and its button stops 16 px before its right edge).
+  local timeDD = CreateFrame("Frame", "ForeverQuestPlannerGoalTime", box, "UIDropDownMenuTemplate")
+  timeDD:SetPoint("LEFT", box, "TOPLEFT", tx - 8, y - 2)
+  UIDropDownMenu_SetWidth(timeDD, 44)
+  local levelRadio, lx = Radio(tx - 8 + 44 + 50 - 16 + 20, y, L["Reach level"], function() CP.SetGoal("level", GoalLevel()) end)
+  Tooltip(levelRadio, L["To reach the level"], L["The fastest route to this level (at most 10 levels above yours)."])
+  local TIMES = { { 3600, "1 h" }, { 7200, "2 h" }, { 10800, "3 h" }, { 14400, "4 h" } }
+  UIDropDownMenu_Initialize(timeDD, function(_, level)
+    for _, t in ipairs(TIMES) do
+      local info = UIDropDownMenu_CreateInfo()
+      info.text = t[2]
+      info.checked = GoalTime() == t[1]
+      info.func = function()
+        CloseDropDownMenus()
+        CP.SetGoal("time", t[1])
+      end
+      UIDropDownMenu_AddButton(info, level)
+    end
+  end)
+  Tooltip(timeDD, L["For a play session"], L["The route earning the most XP within this time."])
+  local levelDD = CreateFrame("Frame", "ForeverQuestPlannerGoalLevel", box, "UIDropDownMenuTemplate")
+  levelDD:SetPoint("LEFT", box, "TOPLEFT", lx - 8, y - 2)
+  UIDropDownMenu_SetWidth(levelDD, 44)
+  -- Levels from the current level + 1 to K.GOAL_LEVEL_SPAN levels above (at most max level).
+  UIDropDownMenu_Initialize(levelDD, function(_, level)
+    local lo, hi = LevelRange()
+    for v = lo, hi do
+      local info = UIDropDownMenu_CreateInfo()
+      info.text = tostring(v)
+      info.checked = GoalLevel() == v
+      info.func = function()
+        CloseDropDownMenus()
+        CP.SetGoal("level", v)
+      end
+      UIDropDownMenu_AddButton(info, level)
+    end
+  end)
+  Tooltip(levelDD, L["To reach the level"], L["The fastest route to this level (at most 10 levels above yours)."])
+
+  -- Update function.
+  return function()
+    -- Level goal no longer above the current level: the next level.
+    local g = State.xpGoal
+    if g.kind == "level" and g.value ~= GoalLevel() then
+      State.xpGoal = { kind = "level", value = GoalLevel() }
+      Settings().goal = { kind = "level", value = State.xpGoal.value }
+    end
+    timeRadio:SetChecked(State.xpGoal.kind == "time")
+    levelRadio:SetChecked(State.xpGoal.kind == "level")
+    local tv = GoalTime()
+    local tLabel = "-"
+    for _, t in ipairs(TIMES) do if t[1] == tv then tLabel = t[2] end end
+    UIDropDownMenu_SetText(timeDD, tLabel)
+    UIDropDownMenu_SetText(levelDD, tostring(GoalLevel()))
+  end
+end
+
+-- Green light in the title of the tab of the active Roadbook (the one the Objective button follows;
+-- it changes with "Start"): it pulses while the Roadbook is followed, steady while paused.
+K.TAB_LED_ROOM = "      " -- spaces before the title of the Roadbook tabs, under the light
+K.TAB_EDGE = 4 -- width of the visible left border of a tab
+Geo.tabLeds = {}
+function Geo.AddTabLed(tab, kind)
+  local led = CreateFrame("Frame", nil, tab)
+  led:SetSize(12, 12)
+  led:SetFrameLevel(tab:GetFrameLevel() + 2)
+  local fs = tab.GetFontString and tab:GetFontString()
+  if fs then led:SetPoint("LEFT", fs, "LEFT", 1, 0) else led:SetPoint("LEFT", tab, "LEFT", 10, 0) end
+  local path = "Interface\\Common\\Indicator-Green"
+  local dot = led:CreateTexture(nil, "ARTWORK")
+  dot:SetAllPoints()
+  if dot:SetTexture(path) == false then
+    path = "Interface\\Common\\Indicator-Yellow"
+    dot:SetTexture(path)
+  end
+  -- Halo around the light (additive), its brightness follows the pulse.
+  local glow = led:CreateTexture(nil, "OVERLAY")
+  glow:SetPoint("CENTER")
+  glow:SetSize(22, 22)
+  glow:SetTexture(path)
+  glow:SetBlendMode("ADD")
+  led:SetScript("OnUpdate", function()
+    if Geo.Tracking() then
+      local wave = (math.sin((GetTime and GetTime() or 0) * 3) + 1) / 2 -- 0..1
+      dot:SetAlpha(0.6 + 0.4 * wave)
+      glow:SetAlpha(0.15 + 0.6 * wave)
+    else
+      dot:SetAlpha(1)
+      glow:SetAlpha(0.2)
+    end
+  end)
+  led:Hide()
+  tab:HookScript("OnEnter", function(self)
+    if Geo.ActiveKind() ~= kind then return end
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:AddLine(L["Active Roadbook"])
+    GameTooltip:AddLine(L["The active Roadbook is the one the Objective button follows; \"Start\" on the other Roadbook makes it the active one."], 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  tab:HookScript("OnLeave", function() GameTooltip:Hide() end)
+  led.tab = tab
+  Geo.tabLeds[kind] = led
+  led:SetShown(Geo.ActiveKind() == kind)
+end
+
+-- Light centered between the left border of its tab and the start of the title (after the spaces).
+function Geo.PlaceTabLed(led)
+  local tab = led.tab
+  local fs = tab.GetFontString and tab:GetFontString()
+  local tl, fx = tab:GetLeft(), fs and fs:GetCenter()
+  if not (tl and fx) then return end
+  if not led.roomW then
+    -- Width of the spaces: the same text with and without them, in the font of the title.
+    local probe = tab:CreateFontString(nil, "OVERLAY")
+    local font, size, flags = fs:GetFont()
+    if font then probe:SetFont(font, size, flags) else probe:SetFontObject(GameFontNormalSmall) end
+    probe:SetText(K.TAB_LED_ROOM .. "x")
+    local with = probe:GetStringWidth() or 0
+    probe:SetText("x")
+    led.roomW = math.max(0, with - (probe:GetStringWidth() or 0))
+    probe:Hide()
+  end
+  local textLeft = fx - (fs:GetStringWidth() or 0) / 2 -- the text is centered in the tab
+  local titleX = textLeft - tl + led.roomW              -- start of the title, from the left of the tab
+  -- Anchored on the title: same height as the text (it moves on the selected tab).
+  led:ClearAllPoints()
+  led:SetPoint("CENTER", fs, "CENTER", (K.TAB_EDGE + titleX) / 2 - (fx - tl), 0)
+end
+
+-- Light on the tab of the active Roadbook (called by Refresh); only that tab keeps the spaces of
+-- the light before its title.
+function Geo.UpdateTabLeds()
+  local active = Geo.ActiveKind()
+  for kind, led in pairs(Geo.tabLeds) do
+    led:SetShown(kind == active)
+    local tab = led.tab
+    local text = (kind == active and K.TAB_LED_ROOM or "") .. tab.ledTitle
+    if tab:GetText() ~= text then
+      tab:SetText(text)
+      if tab.isTopTab and PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, tab, 12) end
+      C_Timer.After(0, function() Geo.PlaceTabLed(led) end) -- once the tab has its new width
+    end
+    if kind == active then Geo.PlaceTabLed(led) end
+  end
+end
 
 local function CreateMainFrame()
   State.currentTab = Settings().lastTab or State.currentTab
@@ -43,7 +344,8 @@ local function CreateMainFrame()
   Geo.AddVersionFooter(f)
 
   local tabs = {
-    { key = "xp", label = L["Roadbook"] },
+    { key = "xp", label = L["Auto Roadbook"] },
+    { key = "custom", label = L["Custom Roadbook"] },
     { key = "near", label = L["Around me"] },
     { key = "groups", label = L["Quest log"] },
     { key = "avail", label = L["Available"] },
@@ -62,10 +364,13 @@ local function CreateMainFrame()
   local prev
   for i, t in ipairs(tabs) do
     local b
+    -- Roadbook tabs: spaces before the title of the active one, room for its light (Geo.UpdateTabLeds).
+    local kind = (t.key == "xp" and "auto") or (t.key == "custom" and "custom") or nil
     if tabTemplate then
       b = CreateFrame("Button", "ForeverQuestPlannerFrameTab" .. i, f, tabTemplate)
       b:SetID(i)
       b:SetText(t.label)
+      b.isTopTab = true
       if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, b, 12) end
       if tabTemplate == "PanelTopTabButtonTemplate" then
         if prev then b:SetPoint("LEFT", prev, "RIGHT", 2, 0) else b:SetPoint("TOPLEFT", 14, -26) end
@@ -80,6 +385,10 @@ local function CreateMainFrame()
       b:SetText(t.label)
     end
     b:SetScript("OnClick", function() SelectTab(t.key) end)
+    if kind then
+      b.ledTitle = t.label
+      Geo.AddTabLed(b, kind)
+    end
     b.tabIndex = i
     tabButtons[t.key] = b
     f.Tabs[i] = b
@@ -159,11 +468,11 @@ local function CreateMainFrame()
   panels.groups.questCount = questCount
 
   panels.avail = CreateFilterPanel(f, {
+    { key = "all", label = L["All"] },
     { key = "zone", label = L["Current zone"] },
     { key = "dungeon", label = L["Dungeons"] },
     { key = "pvp", label = L["PvP"] },
     { key = "class", label = L["Class & professions"] },
-    { key = "all", label = L["All"] },
     { key = "custom", label = L["Custom Roadbook"] },
   }, function() return State.availFilter end, function(v)
     State.availFilter = v
@@ -186,66 +495,8 @@ local function CreateMainFrame()
     Refresh()
   end, LOW_LEVEL_TOGGLE, L["Radius:"])
   AddStateFilters(panels.near, { turnin = true, inprogress = true, watched = true, pinned = true, available = true, custom = true }, nearStates)
-
-  panels.xp = CreateFilterPanel(f, {
-    { key = 3600, label = "1 h" },
-    { key = 7200, label = "2 h" },
-    { key = 14400, label = "4 h" },
-  }, function() return State.xpHorizon end, function(v)
-    if v ~= State.xpHorizon then
-      State.xpHorizon = v
-      Settings().horizon = v
-      CP.Recompute() -- new duration: new Roadbook, same as the "Recalculate" button
-    end
-  end, function(text)
-    State.xpQuery = ParseQuery(text)
-    Refresh()
-  end, nil, L["Duration:"])
-  -- "Start": computes the Roadbook of the selected mode and follows its first step.
-  local start = CreateFrame("Button", nil, panels.xp, "UIPanelButtonTemplate")
-  start:SetSize(120, 22)
-  start:SetPoint("TOPRIGHT", -12, -70) -- same place as "Export" in the Quest log tab
-  start:SetText(L["Start"])
-  start:SetScript("OnClick", function() CP.Recompute() end)
-  start:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:AddLine(L["Start"])
-    GameTooltip:AddLine(L["Computes the Roadbook of the selected mode and follows its first step with the Objective button."], 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
-  end)
-  start:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  -- Mode: automatic (best XP for the duration) or custom (your quest list, fastest route).
-  local modes, prev = {}, start
-  for _, m in ipairs({ { key = "custom", label = L["Custom"] }, { key = "auto", label = L["Automatic"] } }) do
-    local okR, b = pcall(CreateFrame, "CheckButton", nil, panels.xp, "UIRadioButtonTemplate")
-    if not okR or not b then b = CreateFrame("CheckButton", nil, panels.xp, "UICheckButtonTemplate") end
-    b:SetSize(18, 18)
-    b.label = panels.xp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    b.label:SetText(m.label)
-    b.label:SetPoint("RIGHT", prev, "LEFT", prev == start and -12 or -14, 0)
-    b:SetPoint("RIGHT", b.label, "LEFT", -2, 0)
-    b:SetScript("OnClick", function() CP.SetMode(m.key) end)
-    b:SetScript("OnEnter", function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-      GameTooltip:AddLine(m.label)
-      GameTooltip:AddLine(m.key == "custom" and L["Your own quest list (+ button in the other tabs), done along the fastest route."]
-        or L["Quests chosen for the best XP within the duration."], 0.8, 0.8, 0.8, true)
-      GameTooltip:Show()
-    end)
-    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    modes[m.key] = b
-    prev = b
-  end
-  -- The duration only applies to the automatic Roadbook.
-  function panels.xp.UpdateMode()
-    local custom = Geo.CustomMode()
-    for k, b in pairs(modes) do b:SetChecked((k == "custom") == custom) end
-    for _, b in pairs(panels.xp.buttons) do
-      b:SetShown(not custom)
-      b.label:SetShown(not custom)
-    end
-    if panels.xp.caption then panels.xp.caption:SetShown(not custom) end
-  end
+  panels.xp = CreateRoadbookPanel(f, "auto")
+  panels.custom = CreateRoadbookPanel(f, "custom")
 
   f:SetScript("OnShow", function()
     -- Same sound as opening the game's quest log.

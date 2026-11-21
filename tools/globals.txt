@@ -15,14 +15,17 @@ C_Timer
 ChatEdit_InsertLink
 ChatFontNormal
 ChatFrame_OpenChat
+CloseDropDownMenus
 CreateColor
 CreateFrame
 CreateVector2D
 DEFAULT_CHAT_FRAME
+DELETE
 ELITE
 Enum
 ForeverQuestPlannerDB
 ForeverQuestPlannerSettings
+GameFontNormalSmall
 GameTooltip
 GetAddOnMetadata
 GetBindLocation
@@ -92,6 +95,11 @@ TaxiNodePosition
 ToggleQuestLog
 ToggleWorldMap
 TomTom
+UIDropDownMenu_AddButton
+UIDropDownMenu_CreateInfo
+UIDropDownMenu_Initialize
+UIDropDownMenu_SetText
+UIDropDownMenu_SetWidth
 UIParent
 UISpecialFrames
 UiMapPoint
@@ -106,6 +114,7 @@ UnitRace
 UnitXP
 UnitXPMax
 WorldMapFrame
+YES
 _G
 coroutine
 date
