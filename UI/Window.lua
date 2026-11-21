@@ -217,8 +217,8 @@ function Geo.RouteStepItems(items, route, info, remove, query)
         text = text .. Geo.DescLine(Color(D.good, L["---- level "] .. lvs[st.i] .. L[" reached (~"] .. FormatTime(s.at or 0) .. ") ----"))
       end
       if #query == 0 or MatchWords(Normalize(text), query) then
-        -- Only button: skip the quest (custom Roadbook: remove it). Tracking and the pin follow the
-        -- floating Objective button (exclusive focus).
+        -- Only button: skip the quest (custom Roadbook: remove it), or skip the followed hearthstone /
+        -- transport step. Tracking and the pin follow the floating Objective button (exclusive focus).
         local qid, step = task.id, s
         local button
         if CP.StepDone(step) then
@@ -226,6 +226,10 @@ function Geo.RouteStepItems(items, route, info, remove, query)
           text = text:gsub("^  (%d+%. )", "  %1|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t" .. Color("40ff40", L["[Done] "]), 1)
         elseif qid then
           button = remove(step)
+        elseif (step.kind == "hearth" or step.kind == "travel") and step == CP.CurrentFocus() then
+          -- only the followed transport step: skipping a later one makes no sense
+          button = { text = L["Skip"], fn = function() CP.SkipStep(step) end,
+            tip = { L["Skip"], L["Marks this step as done (already there, other way of travel…); the Objective button moves to the next step."] } }
         end
         segItems[#segItems + 1] = { text = text, b3 = button, questID = task.id }
       end
@@ -279,7 +283,7 @@ function Geo.RenderCustomXP()
     -- Collapsed by default while the Roadbook is followed: the route matters more than the list.
     { header = true, kind = "class", key = "customlist", open = not (Geo.ActiveKind() == "custom" and CP.CurrentFocus()),
     label = L["Quests of the custom Roadbook - "] .. Plural(#list, L["quest"]),
-    b3 = { text = L["Empty the list"], fn = function() StaticPopup_Show("FQP_CUSTOM_CLEAR") end } } }
+    b3 = { text = L["Remove all"], fn = function() StaticPopup_Show("FQP_CUSTOM_CLEAR") end } } }
   for _, it in ipairs(list) do
     local q = logById[it.id]
     local status
@@ -292,7 +296,7 @@ function Geo.RenderCustomXP()
     if it.pre then notes[#notes + 1] = Color(D.chain, string.format(L["prerequisite of \"%s\""], titleOf[it.pre] or ("#" .. it.pre))) end
     local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
     local dg = sort > 0 and QDB.dungeonOf[sort]
-    if dg then notes[#notes + 1] = Color(D.meta, L["dungeon: "] .. (AreaName(dg) or "?")) end
+    if dg then notes[#notes + 1] = Geo.WithLevel(Color(D.meta, L["dungeon: "] .. (AreaName(dg) or "?")), AreaName(dg)) end
     local text = "  " .. StateIcons(it.id) .. Geo.QuestTitle(it.title, { id = it.id, level = it.level }) ..
       Geo.DescLine(status, unpack(notes))
     local rest = q and not q.complete and RemainingObjectives(q) or ""
@@ -313,7 +317,7 @@ function Geo.RenderCustomXP()
     for i = 2, #route do if CP.StepDone(route[i]) then doneCount = doneCount + 1 end end
     items[#items + 1] = { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, "custom")) }
     Geo.RouteStepItems(items, route, info, function(step)
-      return { text = L["Remove"], fn = function() Geo.CustomRemove(step.task.id) end }
+      return { text = L["Remove"], fn = function() CP.ConfirmSkipQuest(step, "custom") end }
     end, query)
   else
     local c = Geo.customCache
@@ -358,7 +362,7 @@ local function RenderXP()
   local items = { { section = true, text = L["Objectives"] },
     { text = Color("aaaaaa", Geo.RouteHeader(route, info, doneCount, "auto")) } }
   Geo.RouteStepItems(items, route, info, function(step)
-    return { text = L["Skip the step"], fn = function() CP.SkipQuest(step, "auto") end }
+    return { text = L["Skip the step"], fn = function() CP.ConfirmSkipQuest(step, "auto") end }
   end, State.xpQuery)
   -- Quests kept for max level: reward or access only useful at endgame.
   if info.later and #info.later > 0 then

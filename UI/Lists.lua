@@ -598,45 +598,41 @@ local function ObjectivePoint(q)
 end
 Geo.ObjectivePoint = ObjectivePoint
 
--- Pin placed by the addon, remembered per character.
+-- Pin placed by the addon (OpenMap's waypoint), remembered per character.
 local function PinStore()
   local s = Settings()
   s.pins = s.pins or {}
   return s.pins
 end
 
--- Active addon pin, or nil if it was cleared or replaced by another pin.
-local ownPinChange = false -- true while the addon is placing a pin itself
+-- The waypoint OpenMap follows now sits on this map point.
+function Geo.WaypointAt(ui, x, y)
+  local m, wx, wy = ns.OM.worldmap.WaypointPoint()
+  return m == ui and wx and math.abs(wx - x) < 1e-3 and math.abs(wy - y) < 1e-3 or false
+end
 
+-- Active addon pin, or nil if the waypoint was cleared or replaced by another one.
 local function ActivePin()
   local pin = PinStore()[CharKey()]
   if not pin then return nil end
-  if pin.via == "game" and C_Map.HasUserWaypoint and not C_Map.HasUserWaypoint() then
+  if not (pin.ui and Geo.WaypointAt(pin.ui, pin.x, pin.y)) then
     PinStore()[CharKey()] = nil
     return nil
   end
   return pin
 end
 
--- Called on USER_WAYPOINT_UPDATED: a pin placed or cleared by the player replaces ours.
+-- Called on USER_WAYPOINT_UPDATED: a waypoint placed or cleared by the player replaces ours; while
+-- a Roadbook is followed, it puts its own back (RoadbookMap.lua).
 local function OnWaypointChanged()
-  if ownPinChange then
-    ownPinChange = false
-    return
-  end
-  local pin = PinStore()[CharKey()]
-  if pin and pin.via == "game" then PinStore()[CharKey()] = nil end
+  if Geo.MapOnWaypoint then Geo.MapOnWaypoint() end -- first: it reads our record
+  ActivePin()
 end
 
+-- Clears the addon pin (OpenMap's waypoint, when it is still ours).
 local function ClearPin()
-  local pin = PinStore()[CharKey()]
+  if ActivePin() then pcall(ns.OM.worldmap.ClearPin) end
   PinStore()[CharKey()] = nil
-  if pin and pin.via == "game" and C_Map.ClearUserWaypoint then
-    ownPinChange = true
-    if not pcall(C_Map.ClearUserWaypoint) then ownPinChange = false end
-  elseif pin and pin.via == "tomtom" and TomTom and TomTom.ClearAllWaypoints then
-    pcall(TomTom.ClearAllWaypoints, TomTom)
-  end
 end
 
 -- Game map pin icon, or a text fallback if the atlas does not exist in this client.
@@ -815,7 +811,7 @@ function Geo.QuestBadges(o)
   local parts = {}
   if id and Geo.IsEliteQuest(id, tag) then parts[#parts + 1] = Color("ff8040", L["Elite"]) end
   if tag and tag ~= "" and not tag:find("[EÉ]lite") and tag ~= ELITE then parts[#parts + 1] = tag
-  elseif o.dungeon then parts[#parts + 1] = L["Dungeon"] end
+  elseif o.dungeon then parts[#parts + 1] = Geo.WithLevel(Color("80c0ff", L["Dungeon"]), o.dungeon) end
   local isClass = o.isClass
   if isClass == nil and id then
     local m = QuestMeta(id)
@@ -826,7 +822,11 @@ function Geo.QuestBadges(o)
   local types = Geo.QuestTypes(id)
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = K.QUEST_TYPE_LABEL[types[i]] end
   local badge = Geo.LevelBadge(o.level)
-  return "  " .. badge .. (#parts > 0 and (" " .. Color("80c0ff", table.concat(parts, " · "))) or "")
+  -- each part coloured on its own (colour codes do not nest; some parts carry their own colours)
+  for i, p in ipairs(parts) do
+    if not p:find("^|c") then parts[i] = Color("80c0ff", p) end
+  end
+  return "  " .. badge .. (#parts > 0 and (" " .. table.concat(parts, Color("80c0ff", " · "))) or "")
 end
 
 -- Quest descriptions: the same layout and colors in every tab and on the Objective button.
@@ -901,43 +901,34 @@ local function PassStates(questId, selected, toDrop)
   return false
 end
 
--- Places the game map pin (or TomTom) on a QuestieDB point.
+-- Follows a QuestieDB point: OpenMap's waypoint (the game's pin and arrow, TomTom's too).
 local function PinPoint(p, title, label, questId)
   if not p then
     Print(L["Unknown position for \""] .. (title or "?") .. L["\"."])
     return
   end
-  local ui = p.ui or Geo.areaToUi[p.area]
-  if (not ui or ui == 0) and Geo.parent[p.area] then ui = Geo.areaToUi[Geo.parent[p.area]] end
-  if not ui or ui == 0 then
+  local ui = Geo.PointUi(p)
+  if not ui then
     Print(L["No map found for this position."])
     return
   end
   local x, y = (p.mx or 50) / 100, (p.my or 50) / 100
-  local done, via = false, nil
-  if C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates then
-    local can = not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(ui)
-    if can then
-      ownPinChange = true
-      done = pcall(C_Map.SetUserWaypoint, UiMapPoint.CreateFromCoordinates(ui, x, y))
-      if done then via = "game" else ownPinChange = false end
-      if done and C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
-        pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
-      end
-    end
-  end
-  if not done and TomTom and TomTom.AddWaypoint then
-    done = pcall(TomTom.AddWaypoint, TomTom, ui, x, y, { title = title })
-    if done then via = "tomtom" end
-  end
+  -- Recorded first: OpenMap redraws its waypoint during TrackPoint (see the PinAt lock, RoadbookMap.lua).
+  PinStore()[CharKey()] = { questId = questId, title = title, label = label, ui = ui, x = x, y = y,
+    place = PointText(p), area = p.area, mx = p.mx, my = p.my }
+  local done = pcall(ns.OM.worldmap.TrackPoint, ui, x, y, title and label and (title .. " - " .. label) or title)
   if done then
-    PinStore()[CharKey()] = { questId = questId, title = title, label = label, ui = ui, x = x, y = y,
-      place = PointText(p), via = via, area = p.area, mx = p.mx, my = p.my }
     Print(L["Pin: "] .. (title or "?") .. (label and (" - " .. label) or "") .. " - " .. PointText(p))
     if Refresh then C_Timer.After(0.1, Refresh) end
   else
+    PinStore()[CharKey()] = nil
     Print(L["This client cannot place a pin here ("] .. PointText(p) .. ").")
   end
+end
+
+-- The addon pin as recorded (map point), whether or not OpenMap still follows it.
+function Geo.PinRecord()
+  return PinStore()[CharKey()]
 end
 
 -- Map (uiMap) of a point, or nil.
@@ -997,7 +988,14 @@ end
 function Geo.ShowOnMap(getPoint, title, questId)
   local p, label
   if GeoReady() then p, label = getPoint() end
-  if p then
+  -- A followed Roadbook keeps the map: the map only opens on the place; a preview ends.
+  local owner = Geo.MapOwner and Geo.MapOwner()
+  if owner and owner.mode == "preview" then Geo.MapRelease() owner = nil end
+  if p and owner then
+    Print(L["A Roadbook is followed: the map shows only its steps (pause it to place a pin)."])
+    Geo.OpenWorldMap(Geo.PointUi(p))
+    Geo.MapGlide(p)
+  elseif p then
     PinPoint(p, title, label or L["objective"], questId)
     Geo.OpenWorldMap(Geo.PointUi(p))
   else
@@ -1116,5 +1114,5 @@ ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSear
 ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.Normalize, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, Normalize, OnWaypointChanged
 ns.ParseQuery, ns.PassStates, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinIcon, PinPoint, Plural
 ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetWatched = QuestHaystack, RenderExport, RenderList, SetWatched
-ns.ShowMessage, ns.StateIcons, ns.WatchOnly, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, WatchOnly, expandedCategories, journalStates
-ns.nearStates, ns.panels, ns.tabButtons = nearStates, panels, tabButtons
+ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, expandedCategories, journalStates
+ns.nearStates, ns.OpenQuestDetails, ns.panels, ns.tabButtons = nearStates, OpenQuestDetails, panels, tabButtons

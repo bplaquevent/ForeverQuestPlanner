@@ -99,6 +99,7 @@ function CP.FocusStep(s)
     progress = CP.Progress(s.task.id) }
   local qid = s.task.id
   if qid and IsInLog(qid) then WatchOnly(qid) end
+  Geo.MapClaim("track", Geo.ActiveKind()) -- the followed Roadbook holds the map (RoadbookMap.lua)
   PinPoint(s.p, s.task.title, CP.StepPinLabel(s), qid)
   CP.RefreshButton()
   CP.WatchTransport(s)
@@ -205,6 +206,7 @@ function Geo.Freeze(route, info, excluded, kind)
   Geo.FrozenStore()[Geo.FrozenKey(kind)] = { saved = date and date("%H:%M") or "",
     start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, excluded = excluded }
   Geo.frozen[kind] = { route = route, info = info }
+  Geo.MapSync() -- a new or adapted plan: redrawn on the map if it is there
 end
 
 -- Saved plan of a kind (reloaded after a /reload), or nil.
@@ -424,10 +426,12 @@ function CP.ShowActive()
   end
 end
 
--- Stops the tracking of the active Roadbook (focus, pin, compass) without touching its steps.
+-- Stops the tracking of the active Roadbook (focus, pin, compass) without touching its steps; the
+-- map gets back what it showed before (RoadbookMap.lua).
 function CP.StopFocus()
   CP.ClearFocus()
   ClearPin()
+  if Geo.MapOwner() and Geo.MapOwner().mode == "track" then Geo.MapRelease() end
   CP.RefreshButton()
 end
 
@@ -457,9 +461,49 @@ function CP.DoStart(kind)
     Geo.SetActive(kind)
   end
   if not Geo.Tracking() then Print(L["Roadbook started: "] .. CP.KindName(kind) .. ".") end
-  CP.FocusNext(false)
+  local ok, res = pcall(CP.Resync, kind)
+  if not ok then Print(L["Roadbook update error: "] .. tostring(res)) end
+  if not (ok and res) then CP.FocusNext(false) end
   CP.RefreshButton()
   if Refresh then Refresh() end
+end
+
+-- Start of a Roadbook: its next transport steps are matched to where the player is now. The ones
+-- up to a destination already reached are done; a flight / boat step far from both its departure
+-- and the previous step is replaced by the route from here. Returns true if the focus was placed.
+function CP.Resync(kind)
+  local fz = Geo.Frozen(kind)
+  local pos = PlayerPos()
+  if not (fz and pos) then return false end
+  local route = fz.route
+  local first
+  for i = 2, #route do if not CP.StepDone(route[i]) then first = i break end end
+  if not first then return false end
+  local reached
+  local i = first
+  while route[i] and (route[i].kind == "hearth" or route[i].kind == "travel") do
+    if CP.TransportReached(route[i], pos) then reached = i end
+    i = i + 1
+  end
+  local nextI = first
+  if reached then
+    for j = first, reached do
+      if not CP.StepDone(route[j]) then
+        Print(L["Already there, step skipped: "] .. CP.StepText(route[j]))
+        Geo.MarkDone(route[j])
+      end
+    end
+    nextI = reached + 1
+    while route[nextI] and CP.StepDone(route[nextI]) do nextI = nextI + 1 end
+  end
+  local st = route[nextI]
+  if not (st and st.kind == "travel") then return false end
+  local function far(p)
+    local d = Dist(pos, p)
+    return not d or d > K.LANDING_RADIUS
+  end
+  if far(st.p) and far(route[nextI - 1].p) then return CP.Reroute(st, pos, L["Position changed: new route. "]) end
+  return false
 end
 
 StaticPopupDialogs["FQP_SWITCH"] = {
@@ -494,6 +538,8 @@ function CP.DoDelete(kind)
     CP.computeToken = (CP.computeToken or 0) + 1
   end
   CP.Pause(kind, true)
+  local owner = Geo.MapOwner()
+  if owner and owner.kind == kind then Geo.MapRelease() end -- its preview ends
   Geo.ClearFrozen(kind)
   if kind == "custom" then
     Geo.CustomRec().list = {}
@@ -685,7 +731,7 @@ function CP.LinkCurrentQuest()
 end
 
 -- Ctrl-Alt-click: skips the current step. A quest step skips the whole quest (the route is
--- adapted); any other step (flight, hearthstone…) is just skipped.
+-- adapted), after confirmation; any other step (flight, hearthstone…) is just skipped.
 function CP.SkipCurrentStep()
   local cur = CP.CurrentFocus()
   if not cur then
@@ -693,13 +739,45 @@ function CP.SkipCurrentStep()
     return
   end
   if cur.task and cur.task.id then
-    CP.SkipQuest(cur, Geo.ActiveKind())
+    CP.ConfirmSkipQuest(cur, Geo.ActiveKind())
     return
   end
-  Print(L["Step skipped: "] .. CP.StepText(cur))
-  Geo.MarkDone(cur)
-  CP.FocusNext(false, cur)
+  CP.SkipStep(cur)
 end
+
+-- Skips a step with no quest (hearthstone, transport…): it is marked done; if it is the followed
+-- one, the focus moves to the next step.
+function CP.SkipStep(s)
+  local followed = CP.CurrentFocus() == s
+  Print(L["Step skipped: "] .. CP.StepText(s))
+  Geo.MarkDone(s)
+  if followed then
+    CP.FocusNext(false, s)
+  else
+    CP.RefreshButton()
+    if Refresh then Refresh() end
+  end
+end
+
+-- Asks before skipping a quest (CP.SkipQuest): every step of the quest leaves the Roadbook.
+function CP.ConfirmSkipQuest(s, kind)
+  local title = s.task.title or tostring(s.task.id)
+  local text = kind == "custom"
+    and string.format(L["Remove \"%s\" from the custom Roadbook?\n\nThe prerequisite quests added only for it leave too, and the route is computed again."], title)
+    or string.format(L["Skip the quest \"%s\"?\n\nAll its steps leave the automatic Roadbook and the route is adapted; it comes back with a new Roadbook."], title)
+  StaticPopup_Show("FQP_SKIP_QUEST", text, nil, { s = s, kind = kind })
+end
+
+StaticPopupDialogs["FQP_SKIP_QUEST"] = {
+  text = "%s",
+  button1 = YES or L["Yes"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, data) if data and data.s then CP.SkipQuest(data.s, data.kind) end end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
 
 -- Skips a quest (badly defined, not found, not wanted…): all its steps leave the Roadbook, which
 -- persists: the route of the steps left is adapted, no quest is added, the steps done are kept.
@@ -784,10 +862,27 @@ function CP.CheckArrival(s)
   end
 end
 
--- Watches the position every 2 s while a zeppelin / boat step has the focus.
+-- Hearthstone step: arrived at the bind point by any mean (hearthstone, Astral Recall, teleport,
+-- on foot).
+function CP.CheckHearthArrival(s)
+  if not CP.TransportReached(s, PlayerPos()) then return end
+  if CP.transportTicker then CP.transportTicker:Cancel() CP.transportTicker = nil end
+  CP.AutoUpdate(L["Arrived at the hearthstone destination"])
+end
+
+-- Transport step whose destination is reached at `pos`: bind point of a hearthstone step, arrival
+-- of a flight / zeppelin / boat.
+function CP.TransportReached(s, pos)
+  local dest = s.kind == "hearth" and s.p or (s.kind == "travel" and s.task.destP)
+  local d = pos and dest and Dist(pos, dest)
+  return d ~= nil and d < (s.task.mode == "vol" and K.LANDING_RADIUS or K.ARRIVAL_RADIUS)
+end
+
+-- Watches the position every 2 s while a zeppelin / boat / hearthstone step has the focus.
 function CP.WatchTransport(s)
   if CP.transportTicker then CP.transportTicker:Cancel() CP.transportTicker = nil end
-  if not (s.kind == "travel" and s.task.mode ~= "vol" and C_Timer.NewTicker) then return end
+  local watched = s.kind == "hearth" or (s.kind == "travel" and s.task.mode ~= "vol")
+  if not (watched and C_Timer.NewTicker) then return end
   CP.transportTicker = C_Timer.NewTicker(2, function()
     if not (CP.focused == s and CP.IsStepFocused(s)) then
       if CP.transportTicker then CP.transportTicker:Cancel() CP.transportTicker = nil end
@@ -847,15 +942,16 @@ function CP.CheckLanding(st)
 end
 
 -- Replaces the transport steps from the step `st` to the next real step by the shortest
--- route from `pos`, then focuses the first step of that route.
-function CP.Reroute(st, pos)
+-- route from `pos`, then focuses the first step of that route (returns true; false if `st` is not
+-- in the active Roadbook).
+function CP.Reroute(st, pos, msg)
   local kind = Geo.ActiveKind()
   local fz = Geo.Frozen(kind)
-  if not fz then return end
+  if not fz then return false end
   local route = fz.route
   local fi
   for i = 2, #route do if route[i] == st then fi = i break end end
-  if not fi then return end
+  if not fi then return false end
   local ti = fi
   while route[ti] and route[ti].kind == "travel" do ti = ti + 1 end
   local target = route[ti]
@@ -881,16 +977,18 @@ function CP.Reroute(st, pos)
     for i = 2, #route do rec.steps[#rec.steps + 1] = Geo.SerializeStep(route[i]) end
   end
   local first = legs[1]
+  msg = msg or L["Wrong destination: new route. "]
   if first then
-    Print(L["Wrong destination: new route. "] .. L["Focus: "] .. CP.StepText(first))
+    Print(msg .. L["Focus: "] .. CP.StepText(first))
     CP.FocusStep(first)
   elseif target then
-    Print(L["Wrong destination: new route. "] .. L["Focus: "] .. CP.StepText(target))
+    Print(msg .. L["Focus: "] .. CP.StepText(target))
     CP.FocusStep(target)
   else
     CP.FocusNext(false)
   end
   if Refresh then C_Timer.After(0.2, Refresh) end
+  return true
 end
 
 function CP.OnGameEvent(event, a1, a2)
@@ -922,7 +1020,11 @@ function CP.OnGameEvent(event, a1, a2)
   if s.kind == "bind" then
     if event == "HEARTHSTONE_BOUND" then CP.AutoUpdate(L["Hearthstone bound"]) end
   elseif s.kind == "hearth" then
-    if event == "FQP_HEARTH_ARRIVED" then CP.AutoUpdate(L["Back by hearthstone"]) end
+    if event == "FQP_HEARTH_ARRIVED" then
+      CP.AutoUpdate(L["Back by hearthstone"])
+    elseif event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK" then
+      CP.CheckHearthArrival(s)
+    end
   elseif s.kind == "travel" then
     if event == "FQP_TAXI_TAKEOFF" then
       CP.TakeOff(s)
@@ -1008,6 +1110,7 @@ function CP.StepSummary(s)
 end
 
 function CP.RefreshButton()
+  Geo.MapSync() -- the Roadbook on the map follows its progress
   local b = CP.checkpointButton
   if not (b and b.title) then return end
   local s = CP.CurrentFocus()

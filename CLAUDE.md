@@ -9,15 +9,18 @@ No way to run the game here: check with `tools/check.sh` (compiles every file, d
 | File | Content |
 |---|---|
 | `Locales/Locales.lua`, `Locales/frFR.lua` | `ns.L` table; French translations |
+| `Data/Passes.lua` | walking passes between zones known before any is learned: Warcraft Wiki rows `ns.PASSES`, QuestieDB patrol NPCs `ns.PASS_PATROLS` (listed by `tools/patrol_npcs.py`) |
 | `Core.lua` | utilities (`Print`, `Settings`, `Color`…), constants table `K`, `State`, QuestieDB access (`QDB`, `QGet`, `QuestMeta`, `ChainInfo`), quest log capture (`Snapshot`), reward analysis, `Analyze()` |
 | `Available.lua` | available quests: `CheckAvailable`, frame-sliced scan `StartScan` / `scan` |
-| `Geo.lua` | world coordinates, travel times, flight/zeppelin/boat network (`Route`, `RouteText`), quest targets (`QuestTargets`) |
+| `Geo.lua` | world coordinates, travel times, zone passes (`Geo.ZoneIdAt`, `Geo.Passes`, `Geo.WalkWay` / `WalkTime`, learning `Geo.PassTick`), flight/zeppelin/boat network (`Route`, `RouteText`), quest targets (`QuestTargets`) |
 | `Planner.lua` | Roadbook model: Nearby items, XP / levels, monster spots, tasks, priorities (`Geo.Priority`), rewards interest |
 | `Route.lua` | Roadbook route: flight master / transport stops, hearthstone, improvement, `PlanXP`, `Geo.RequestPlan` |
 | `Custom.lua` | custom Roadbook: quest list (`Geo.CustomAdd` / `CustomRemove`, active Roadbook `Geo.ActiveKind` / `Geo.Tracking`, `Geo.FrozenKey`), fastest-route planner `Geo.PlanCustom` (dungeon visits, order constraints, flight masters to activate, per-leg networks `Geo.RouteNets`) |
 | `UI/Lists.lua` | window state, list engine (`RenderList`, `ListRow`), quest tracking and map pins, quest descriptions (`Geo.QuestTitle`, `Geo.DescLine`, badges, `K.DESC`), search |
 | `UI/Tabs.lua` | Quest log (`RenderTodo`), Available (`RenderAvailable`, rewards line), Nearby (`RenderNear`) tabs |
 | `Roadbook.lua` | `CP` table: checkpoints/focus, saved Roadbook (`Geo.Freeze`…), quick wins, auto-advance on game events, floating Objective button |
+| `RoadbookMap.lua` | Roadbook on OpenMap's map: map ownership (`Geo.MapClaim` / `MapRelease`, `Geo.MapOwner`), locks on OpenMap's pin functions, drawing (`Geo.MapSync` / `MapDraw`), preview (`Geo.MapPreview`) |
+| `RoadbookPanel.lua` | Roadbook steps panel beside the world map (`Geo.MapPanelSync`, placement `Geo.MapPanelPlace`, option `Geo.MapPanelGet` / `MapPanelSet`) |
 | `UI/Window.lua` | Roadbook tabs (automatic `RenderXP`, custom `Geo.RenderCustomXP`, `Geo.RouteStepItems`), filter bars, `SelectTab`, `Refresh` |
 | `UI/Settings.lua` | `K.PARAMS` and the settings window |
 | `UI/MainFrame.lua` | `CreateMainFrame`, Roadbook tab controls `CreateRoadbookPanel` / `Geo.CreateGoalLine`, active Roadbook light in the tab titles `Geo.AddTabLed`, export to file, minimap button |

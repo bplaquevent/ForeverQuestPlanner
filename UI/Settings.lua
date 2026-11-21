@@ -166,6 +166,7 @@ function Geo.CreateSettingsPanel(f)
       Settings().noFMDetour = not v or nil
       Geo.planCache, Geo.customCache = nil, nil
     end, panel)
+  Geo.SettingsCheck(rb, L["Whole Roadbook on the map"], 560, -28, Geo.MapWholeGet, Geo.MapWholeSet, panel)
   -- Objective button: shown, compass, centered.
   local obj = Geo.SettingsBox(rb, L["Objective"], 8, -58, 776, 62)
   Geo.SettingsCheck(obj, L["Show"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)

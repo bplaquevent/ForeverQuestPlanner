@@ -226,9 +226,7 @@ end
 
 local function TravelTime(a, b, speed)
   if not a or not b then return 0 end
-  local d = Dist(a, b)
-  if not d then return K.CROSS_CONTINENT end
-  return d * K.PATH_FACTOR / speed
+  return Geo.WalkTime(a, b, speed) or K.CROSS_CONTINENT
 end
 
 local function PointText(p)
@@ -428,27 +426,227 @@ function Geo.Docks()
   return Geo.docks
 end
 
--- Zone (name, minimum level) at a world point; cached by 200 m squares. Levels: OpenMap.MapLevels
--- (the client's tables have none); zones it does not list (cities...) have no level.
-local zoneCache = {}
-local function ZoneAt(p)
-  local key = p.c .. ":" .. math.floor(p.x / 200) .. ":" .. math.floor(p.y / 200)
-  local z = zoneCache[key]
+---------------------------------------------------------------------------
+-- Zones and the walking passes between them: a walk from a zone to another goes through a pass
+-- (mountain pass, tunnel, bridge), a straight line within a zone. Passes: those learned in game
+-- (the player walked from a zone to another, account-wide), else QuestieDB's patrols crossing a
+-- border and the Warcraft Wiki's (Data/Passes.lua). Zones without any pass: straight line.
+---------------------------------------------------------------------------
+K.ZONE_CELL = 100        -- yards: zone lookups cached by squares of this size
+K.PASS_PATH_FACTOR = 1.2 -- a walk through passes: its main detours are already in its way
+K.PASS_MIN = 200         -- yards: shorter walks stay straight
+K.PASS_MERGE = 150       -- yards: a learned pass this close to another of the same zones is the same
+K.PASS_TICK = 2          -- seconds between two position readings (learning)
+K.PASS_SLACK = 1.5       -- a move longer than speed x time x this is no walk (transport, teleport)
+K.PATROL_GAP = 80        -- yards: a patrol's path ends this close on both sides of a border make a pass
+
+-- uiMapID and name of the zone (or city) at a world point, nil out of any zone (sea...).
+-- A dungeon or micro map counts as the zone holding it.
+function Geo.ZoneIdRaw(p)
+  local ok, ui, mp = pcall(C_Map.GetMapPosFromWorldPos, p.c, CreateVector2D(p.x, p.y))
+  if not (ok and ui and mp) then return nil end
+  local mx, my = mp:GetXY()
+  local okI, info = pcall(C_Map.GetMapInfoAtPosition, ui, mx, my)
+  if not (okI and info) then info = C_Map.GetMapInfo(ui) end
+  local zone = Enum and Enum.UIMapType and Enum.UIMapType.Zone or 3
+  for _ = 1, 4 do
+    if not (info and info.mapType and info.mapType > zone and info.parentMapID) then break end
+    info = C_Map.GetMapInfo(info.parentMapID)
+  end
+  if not (info and info.mapType == zone) then return nil end
+  return info.mapID, info.name
+end
+
+local zoneIdCache = {}
+function Geo.ZoneIdAt(p)
+  local key = p.c .. ":" .. math.floor(p.x / K.ZONE_CELL) .. ":" .. math.floor(p.y / K.ZONE_CELL)
+  local z = zoneIdCache[key]
   if z == nil then
-    z = false
-    local ok, ui, mp = pcall(C_Map.GetMapPosFromWorldPos, p.c, CreateVector2D(p.x, p.y))
-    if ok and ui and mp then
-      local mx, my = mp:GetXY()
-      local okI, info = pcall(C_Map.GetMapInfoAtPosition, ui, mx, my)
-      local zoneMap = (okI and info and info.mapID) or ui
-      local lv = OM.levels[zoneMap]
-      if lv and lv[1] then
-        z = { name = (okI and info and info.name) or AreaName(0), min = lv[1] }
+    local id, name = Geo.ZoneIdRaw(p)
+    z = id and { id = id, name = name } or false
+    zoneIdCache[key] = z
+  end
+  if not z then return nil end
+  return z.id, z.name
+end
+
+-- Zone (name, minimum level) at a world point. Levels: OpenMap.MapLevels (the client's tables
+-- have none); zones it does not list (cities...) have no level.
+local levelZones = {}
+local function ZoneAt(p)
+  local id, name = Geo.ZoneIdAt(p)
+  local lv = id and OM.levels[id]
+  if not (lv and lv[1]) then return nil end
+  levelZones[id] = levelZones[id] or { name = name or AreaName(0), min = lv[1] }
+  return levelZones[id]
+end
+
+-- Passes learned in game: { c, x, y, a, b, n } (world point, the zones' uiMapIDs a < b, times seen).
+function Geo.LearnedPasses()
+  local s = Settings()
+  s.passes = s.passes or {}
+  return s.passes
+end
+
+-- Passes from QuestieDB's patrols: two ends of a patrol's paths in two zones, close to each other.
+local function PatrolPasses(out)
+  for _, id in ipairs(ns.PASS_PATROLS or {}) do
+    local ends = {}
+    local wp = QGet(QDB.Npc, id, "waypoints")
+    for area, paths in pairs(type(wp) == "table" and wp or {}) do
+      local zone = Geo.AreaUi(area)
+      for _, path in ipairs(zone and type(paths) == "table" and paths or {}) do
+        for _, pt in ipairs({ path[1], path[#path] }) do
+          local w = type(pt) == "table" and pt[1] and pt[1] >= 0 and WorldPos(area, pt[1], pt[2])
+          if w then ends[#ends + 1] = { p = w, zone = zone } end
+        end
       end
     end
-    zoneCache[key] = z
+    for i = 1, #ends do
+      for j = i + 1, #ends do
+        local e, f = ends[i], ends[j]
+        local d = e.zone ~= f.zone and Dist(e.p, f.p)
+        if d and d < K.PATROL_GAP then
+          out[#out + 1] = { c = e.p.c, x = (e.p.x + f.p.x) / 2, y = (e.p.y + f.p.y) / 2,
+            a = math.min(e.zone, f.zone), b = math.max(e.zone, f.zone) }
+        end
+      end
+    end
   end
-  return z or nil
+end
+
+-- Every pass: { c, x, y, a, b }. A pair of zones with a learned pass uses only the learned ones.
+function Geo.Passes()
+  if Geo.passList then return Geo.passList end
+  local list, learned, others = {}, {}, {}
+  for _, ps in ipairs(Geo.LearnedPasses()) do
+    list[#list + 1] = ps
+    learned[ps.a .. ":" .. ps.b] = true
+  end
+  if GeoReady() then pcall(PatrolPasses, others) end
+  for _, s in ipairs(ns.PASSES or {}) do
+    local ok, c, w = pcall(C_Map.GetWorldPosFromMapPos, s[1], CreateVector2D(s[2] / 100, s[3] / 100))
+    if ok and c and w then
+      local x, y = w:GetXY()
+      others[#others + 1] = { c = c, x = x, y = y, a = math.min(s[1], s[4]), b = math.max(s[1], s[4]) }
+    end
+  end
+  for _, ps in ipairs(others) do
+    if not learned[ps.a .. ":" .. ps.b] then list[#list + 1] = ps end
+  end
+  Geo.passList = list
+  return list
+end
+
+function Geo.PassesChanged()
+  Geo.passList, Geo.passGraph = nil, nil
+end
+
+-- Shortest ways between the passes of a continent (Floyd-Warshall): two passes are joined when
+-- they share a zone (a straight line across it).
+local function PassGraph(c)
+  Geo.passGraph = Geo.passGraph or {}
+  local g = Geo.passGraph[c]
+  if g then return g end
+  local pts, byZone = {}, {}
+  for _, ps in ipairs(Geo.Passes()) do
+    if ps.c == c then
+      pts[#pts + 1] = ps
+      for _, z in ipairs({ ps.a, ps.b }) do
+        byZone[z] = byZone[z] or {}
+        table.insert(byZone[z], #pts)
+      end
+    end
+  end
+  local n, D, nxt = #pts, {}, {}
+  for i = 1, n do
+    D[i], nxt[i] = {}, {}
+    local p = pts[i]
+    for j = 1, n do
+      local q = pts[j]
+      local shared = p.a == q.a or p.a == q.b or p.b == q.a or p.b == q.b
+      D[i][j] = (i == j and 0) or (shared and Dist(p, q)) or math.huge
+      nxt[i][j] = j
+    end
+  end
+  for k = 1, n do
+    local Dk = D[k]
+    for i = 1, n do
+      local dik = D[i][k]
+      if dik < math.huge then
+        local Di, Ni, nik = D[i], nxt[i], nxt[i][k]
+        for j = 1, n do
+          local v = dik + Dk[j]
+          if v < Di[j] then Di[j], Ni[j] = v, nik end
+        end
+      end
+    end
+  end
+  g = { pts = pts, byZone = byZone, D = D, nxt = nxt }
+  Geo.passGraph[c] = g
+  return g
+end
+
+-- Walking distance from a to b (nil: other continent) and the passes it goes through, in order
+-- (nil: straight line). Same zone, unknown zone, or a zone without any pass: straight line.
+function Geo.WalkWay(a, b)
+  local d = Dist(a, b)
+  if not d or d < K.PASS_MIN then return d end
+  local za, zb = Geo.ZoneIdAt(a), Geo.ZoneIdAt(b)
+  if not (za and zb) or za == zb then return d end
+  local g = PassGraph(a.c)
+  local ia, ib = g.byZone[za], g.byZone[zb]
+  if not (ia and ib) then return d end
+  local best, bi, bj = math.huge, nil, nil
+  for _, i in ipairs(ia) do
+    local di = Dist(a, g.pts[i])
+    for _, j in ipairs(ib) do
+      local v = di + g.D[i][j] + Dist(g.pts[j], b)
+      if v < best then best, bi, bj = v, i, j end
+    end
+  end
+  if not bi then return d end
+  local way, i = { g.pts[bi] }, bi
+  while i ~= bj do
+    i = g.nxt[i][bj]
+    way[#way + 1] = g.pts[i]
+  end
+  return best, way
+end
+
+-- Walking time from a to b at `speed` (nil: other continent), and the passes on the way.
+function Geo.WalkTime(a, b, speed)
+  local d, way = Geo.WalkWay(a, b)
+  if not d then return nil end
+  return d * (way and K.PASS_PATH_FACTOR or K.PATH_FACTOR) / speed, way
+end
+
+-- Learning, every K.PASS_TICK seconds: a walk from a zone to another (not flying, not on a boat:
+-- the move matches the player's own speed) records the pass between the two readings.
+function Geo.PassTick()
+  local last = Geo.passLast
+  Geo.passLast = nil
+  local p = PlayerPos()
+  if not p or (IsInInstance and IsInInstance()) or (UnitOnTaxi and UnitOnTaxi("player")) then return end
+  local zone, name = Geo.ZoneIdRaw(p)
+  local speed = GetUnitSpeed and GetUnitSpeed("player") or 0
+  local now = GetTime()
+  Geo.passLast = { p = p, zone = zone, name = name, speed = speed, t = now }
+  if not (last and zone and last.zone and last.zone ~= zone) then return end
+  local dt, d = now - last.t, Dist(last.p, p)
+  if not d or dt > K.PASS_TICK * 2 or d > math.max(speed, last.speed) * dt * K.PASS_SLACK + 5 then return end
+  local mid = { c = p.c, x = (last.p.x + p.x) / 2, y = (last.p.y + p.y) / 2 }
+  local a, b = math.min(last.zone, zone), math.max(last.zone, zone)
+  local list = Geo.LearnedPasses()
+  for _, ps in ipairs(list) do
+    if ps.a == a and ps.b == b and Dist(ps, mid) and Dist(ps, mid) < K.PASS_MERGE then
+      ps.n = (ps.n or 1) + 1
+      return
+    end
+  end
+  list[#list + 1] = { c = mid.c, x = math.floor(mid.x + 0.5), y = math.floor(mid.y + 0.5), a = a, b = b, n = 1 }
+  Geo.PassesChanged()
+  ns.Print(string.format(L["Zone pass learned: %s - %s."], last.name or "?", name or "?"))
 end
 
 -- Level range "lo-hi" in the quest colours for the player (OpenMap's own colouring).
@@ -465,19 +663,55 @@ function Geo.ZoneLevelText(uiMapID)
   return lv and lv[1] and Geo.LevelRange(lv[1], lv[2]) or nil
 end
 
--- Walking time between two points; also returns the dangerous zone crossed.
-local function WalkCost(a, b, net, plevel)
-  local d = Dist(a, b)
-  if not d then return math.huge end
-  local t = d * K.PATH_FACTOR / net.speed
-  local worst
-  if d > 300 then
-    for _, f in ipairs({ 0.25, 0.5, 0.75, 1 }) do
-      local z = ZoneAt({ c = a.c, x = a.x + (b.x - a.x) * f, y = a.y + (b.y - a.y) * f })
-      if z and z.min > plevel + K.DANGER_MARGIN and (not worst or z.min > worst.min) then worst = z end
+-- Level range of a place known by its name (quest log headers, Available categories): a dungeon
+-- (its entrance's group finder range, OpenMap) or a zone (OpenMap.MapLevels). Coloured, or nil.
+-- The name -> { lo, hi } index is built once; colours follow the player's current level.
+function Geo.PlaceLevelText(name)
+  if not name then return nil end
+  if not Geo.placeLevels then
+    if not GeoReady() then return nil end
+    local idx = {}
+    for ui, lv in pairs(OM.levels) do
+      local info = lv[1] and C_Map.GetMapInfo and C_Map.GetMapInfo(ui)
+      if info and info.name and info.name ~= "" then idx[info.name] = { lv[1], lv[2] } end
     end
-    if worst then t = t * K.DANGER_FACTOR end
+    for area, ui in pairs(Geo.areaToUi) do
+      local lv = OM.levels[ui]
+      local n = lv and lv[1] and AreaName(area)
+      if n and not idx[n] then idx[n] = { lv[1], lv[2] } end
+    end
+    for d in pairs(QDB.dungeons) do -- a dungeon wins over a zone of the same name
+      local w = DungeonEntrance(d)
+      if w and w.lmin then idx[AreaName(d) or "?"] = { w.lmin, w.lmax } end
+    end
+    Geo.placeLevels = idx
   end
+  local r = Geo.placeLevels[name]
+  return r and Geo.LevelRange(r[1], r[2]) or nil
+end
+
+-- "label lo-hi": the label followed by the level range of the place name (unchanged if unknown).
+function Geo.WithLevel(label, name)
+  local lv = Geo.PlaceLevelText(name)
+  return lv and (label .. " " .. lv) or label
+end
+
+-- Walking time between two points (through the zone passes); also returns the dangerous zone crossed.
+local function WalkCost(a, b, net, plevel)
+  local t, way = Geo.WalkTime(a, b, net.speed)
+  if not t then return math.huge end
+  local worst, p = nil, a
+  for k = 1, (way and #way or 0) + 1 do
+    local q = way and way[k] or b
+    if Dist(p, q) > 300 then
+      for _, f in ipairs({ 0.25, 0.5, 0.75, 1 }) do
+        local z = ZoneAt({ c = p.c, x = p.x + (q.x - p.x) * f, y = p.y + (q.y - p.y) * f })
+        if z and z.min > plevel + K.DANGER_MARGIN and (not worst or z.min > worst.min) then worst = z end
+      end
+    end
+    p = q
+  end
+  if worst then t = t * K.DANGER_FACTOR end
   return t, worst
 end
 
@@ -517,9 +751,9 @@ local function BuildNetwork(speed, extra)
         D[i][j] = 0
       else
         local b = hubs[j]
-        local d = Dist(a.p, b.p)
         local best, how = math.huge, nil
-        if d then best, how = d * K.PATH_FACTOR / speed, "walk" end
+        local walk = Geo.WalkTime(a.p, b.p, speed)
+        if walk then best, how = walk, "walk" end
         local len = fd and b.kind == "taxi" and b.node and fd[b.node]
         if len then
           local fl = len / K.FLIGHT_SPEED + K.FLIGHT_OVERHEAD
@@ -592,10 +826,11 @@ local function RouteText(a, b, net, plevel)
   local _, choice = Route(a, b, net, plevel)
   local parts = {}
   local function walk(p, q, toName)
-    local d = Dist(p, q)
+    local d, way = Geo.WalkWay(p, q)
     if not d or d < 40 then return end
     local _, warn = WalkCost(p, q, net, plevel)
     local s = toName and string.format(L["walk to %s (%.0f m)"], toName, d) or string.format(L["walk %.0f m"], d)
+    if way then s = s .. string.format(L[" through %d zone pass(es)"], #way) end
     if warn then s = s .. Color("ff6060", L[" [crosses "] .. (warn.name or "?") .. L[", level "] .. warn.min .. "+]") end
     parts[#parts + 1] = s
   end

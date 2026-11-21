@@ -105,14 +105,14 @@ local function RenderTodo(a)
   local singles = {}
   for _, g in ipairs(a.groups) do
     if #g.quests >= 2 then
-      category("zone", "zone:" .. g.name, g.name, g.quests, normalDetail)
+      category("zone", "zone:" .. g.name, Geo.WithLevel(g.name, g.name), g.quests, normalDetail)
     else
       singles[#singles + 1] = g.quests[1]
     end
   end
 
   for _, g in ipairs(a.dungeons) do
-    category("dungeon", "dungeon:" .. g.name, L["Dungeon: "] .. g.name, g.quests, normalDetail)
+    category("dungeon", "dungeon:" .. g.name, Geo.WithLevel(L["Dungeon: "] .. g.name, g.name), g.quests, normalDetail)
   end
 
   if #singles > 0 then
@@ -320,7 +320,7 @@ local function RenderAvailable()
     local list = {}
     for _, e in ipairs(g.list) do list[#list + 1] = { id = e.id, title = e.name, level = e.level } end
     local addAll, removeAll = Geo.CustomBulkButtons(list)
-    items[#items + 1] = { header = true, kind = g.kind, key = g.name, label = g.name .. " - " .. Plural(#g.list, L["quest"]),
+    items[#items + 1] = { header = true, kind = g.kind, key = g.name, label = (g.kind == "class" and g.name or Geo.WithLevel(g.name, g.name)) .. " - " .. Plural(#g.list, L["quest"]),
       b1 = addAll, b2 = removeAll }
     for _, e in ipairs(g.list) do
       local D = K.DESC

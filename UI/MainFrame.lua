@@ -11,11 +11,11 @@ local SelectTab, Settings, Snapshot, State, StopNearTicker, expandedCategories =
 local journalStates, nearStates, panels, tabButtons = ns.journalStates, ns.nearStates, ns.panels, ns.tabButtons
 
 -- Roadbook tab ("auto" or "custom"), options at the top:
---   auto:                       [  search  ]                     [Start|Pause] [Delete]
+--   auto:                       [  search  ]                     [Map] [Start|Pause] [Delete]
 --         +-------------------------------------------------------------------------+
 --         | Goal: (o) Session of [2 h v]   (o) Reach level [25 v]          [Generate] |
 --         +-------------------------------------------------------------------------+
---   custom:                     [  search  ]                     [Start|Pause] [Delete]
+--   custom:                     [  search  ]                     [Map] [Start|Pause] [Delete]
 -- (no goal box for the custom Roadbook: it is computed at each change of its list)
 -- The buttons act on the Roadbook of the tab; "Start" also makes it the active one (shown by a light
 -- in the tab title, Geo.AddTabLed).
@@ -83,6 +83,19 @@ local function CreateRoadbookPanel(f, kind)
   end)
   startB:SetPoint("RIGHT", delete, "LEFT", -6, 0)
   Tooltip(startB, L["Start / Pause"], L["Start: this Roadbook becomes the active one and the Objective button follows it. Pause: the tracking stops, the progress is kept."])
+  -- Preview on OpenMap's map (RoadbookMap.lua): lit while it is shown.
+  local mapB = CreateFrame("Button", nil, xp, "UIPanelButtonTemplate")
+  mapB:SetSize(80, 22)
+  mapB:SetText(L["Map"])
+  mapB:SetScript("OnClick", function() Geo.MapPreview(kind) end)
+  mapB:SetPoint("RIGHT", startB, "LEFT", -6, 0)
+  Tooltip(mapB, L["Map"], L["Shows this Roadbook on the world map: its steps numbered in order and its route; your map pins are hidden meanwhile. Closing the map gives it back as it was."])
+  local function UpdateMapButton()
+    local o = Geo.MapOwner()
+    if o and o.mode == "preview" and o.kind == kind then mapB:LockHighlight() else mapB:UnlockHighlight() end
+  end
+  Geo.mapButtons = Geo.mapButtons or {}
+  Geo.mapButtons[kind] = UpdateMapButton
   local generate
   if not custom then -- the custom Roadbook is computed at each change of its list
     generate = Button(L["Generate"], 80, function() CP.Generate(kind) end)
@@ -135,6 +148,8 @@ local function CreateRoadbookPanel(f, kind)
     local following = Geo.ActiveKind() == kind and Geo.Tracking()
     startB:SetText(following and L["Pause"] or L["Start"])
     startB:SetEnabled(Geo.computing ~= kind and (following or Geo.HasRoadbook(kind)))
+    mapB:SetEnabled(Geo.computing ~= kind and Geo.HasRoadbook(kind))
+    UpdateMapButton()
     delete:SetEnabled(Geo.computing ~= kind and (Geo.HasRoadbook(kind) or (custom and #Geo.CustomRec().list > 0)))
     if generate then generate:SetEnabled(Geo.computing == nil) end
   end

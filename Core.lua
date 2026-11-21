@@ -160,7 +160,19 @@ local function InitOpenMap()
   if not (type(i) == "table" and type(i[4]) == "table" and type(i[4][1]) == "table") then return bad("MapPlaces.instances") end
   if type(lv) ~= "table" then return bad("MapLevels") end
   if not (okM and type(wm) == "table" and type(wm.LevelColor) == "function") then return bad("worldmap") end
-  OM.flights, OM.places, OM.levels, OM.worldmap = fl, pl, lv, wm
+  -- Map pins and drawing (RoadbookMap.lua): its waypoint and pins (worldmap module), its stitched
+  -- map's pin sets and lines (MapStitch), and its public API (OpenMapAPI).
+  for _, name in ipairs({ "TrackPoint", "ClearPin", "WaypointPoint", "RefreshWaypoint", "PinsHidden", "SetPinsHidden",
+    "AddPin", "DropWaypoint", "SetPinMode", "PinAt" }) do
+    if type(wm[name]) ~= "function" then return bad("worldmap." .. name) end
+  end
+  local S, api = om.MapStitch, rawget(_G, "OpenMapAPI")
+  if type(S) ~= "table" then return bad("MapStitch") end
+  for _, name in ipairs({ "PinSet", "AddPin", "AddLine", "ClearPinSet", "FromYards", "IsBuilt" }) do
+    if type(S[name]) ~= "function" then return bad("MapStitch." .. name) end
+  end
+  if not (type(api) == "table" and api.major == 1 and (api.version or 0) >= 2) then return bad("OpenMapAPI") end
+  OM.flights, OM.places, OM.levels, OM.worldmap, OM.stitch, OM.api = fl, pl, lv, wm, S, api
 end
 
 -- Both dependencies; nil when ready, otherwise the error message.

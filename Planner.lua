@@ -281,8 +281,7 @@ function Geo.BestSpot(r, from)
   local speed = Geo.planSpeed or 7
   local best, bc
   for _, sp in ipairs(spots) do
-    local d = Dist(from, sp.p)
-    local travel = d and (d * K.PATH_FACTOR / speed) or K.CROSS_CONTINENT
+    local travel = Geo.WalkTime(from, sp.p, speed) or K.CROSS_CONTINENT
     local cost = travel + kills * Geo.MobTime(r.tg) * Geo.SpotFactor(sp, kills)
     if not bc or cost < bc then best, bc = sp, cost end
   end

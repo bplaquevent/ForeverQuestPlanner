@@ -242,7 +242,7 @@ end
 
 StaticPopupDialogs["FQP_CUSTOM_CLEAR"] = {
   text = L["Remove every quest from the custom Roadbook?"],
-  button1 = L["Empty the list"],
+  button1 = L["Remove all"],
   button2 = CANCEL or L["Cancel"],
   OnAccept = function() Geo.CustomClear() end,
   timeout = 0,

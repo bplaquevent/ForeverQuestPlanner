@@ -65,6 +65,7 @@ GetXPExhaustion
 GetZoneText
 InCombatLockdown
 IsAltKeyDown
+IsInInstance
 IsControlKeyDown
 IsMounted
 IsQuestWatched
@@ -122,6 +123,7 @@ debugprofilestop
 debugstack
 hooksecurefunc
 ipairs
+wipe
 loadstring
 math
 next

@@ -63,7 +63,10 @@ f:SetScript("OnEvent", function(_, event, ...)
     end
     Geo.ResetActiveIfEmpty()
     pcall(Geo.ApplyParams)
+    local okM, errM = pcall(Geo.MapInit) -- the Roadbook on OpenMap's map (RoadbookMap.lua)
+    if not okM then Print(L["Map drawing error: "] .. tostring(errM)) end
     CreateMinimapButton()
+    C_Timer.NewTicker(K.PASS_TICK, function() pcall(Geo.PassTick) end) -- zone passes learned on foot
     if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
     ScheduleSnapshot()
   elseif event == "PLAYER_LOGOUT" then
@@ -168,6 +171,13 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     ToggleMainFrame("avail")
   elseif msg == "settings" or msg == "config" or msg == "reglages" or msg == "réglages" then
     Geo.ToggleSettings()
+  elseif msg == "passes" or msg == "passages" then
+    local learned, all = #Geo.LearnedPasses(), #Geo.Passes()
+    Print(string.format(L["Zone passes: %d learned on foot, %d in all."], learned, all))
+  elseif msg == "passes reset" or msg == "passages reset" then
+    wipe(Geo.LearnedPasses())
+    Geo.PassesChanged()
+    Print(L["Learned zone passes forgotten."])
   elseif msg == "export" then
     ToggleMainFrame("export")
   else
