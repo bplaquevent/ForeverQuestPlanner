@@ -1003,8 +1003,10 @@ function Geo.ServiceNpcs()
       local isTrainer = false
       if HasBit(flags, K.NPC_FLAG_TRAINER) then
         local sub = QGet(QDB.Npc, id, "subName")
-        isTrainer = type(sub) == "string" and ((classLoc and sub:find(classLoc, 1, true))
-          or (classEn and sub:find(classEn, 1, true))) and true or false
+        -- Case-insensitive: "Maître des paladins" must match the class "Paladin".
+        local low = type(sub) == "string" and sub:lower() or nil
+        isTrainer = low and ((classLoc and low:find(classLoc:lower(), 1, true))
+          or (classEn and low:find(classEn:lower(), 1, true))) and true or false
       end
       if isVendor or isRepair or isTrainer or isBank then
         local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
