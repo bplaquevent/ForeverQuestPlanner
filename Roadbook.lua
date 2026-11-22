@@ -874,25 +874,35 @@ end
 -- Click on the button. Roadbook being computed: nothing (until it is computed and started). No
 -- Roadbook: the window opens on its tab, where one is made. Roadbook not followed: it starts and
 -- the steps panel (RoadbookPanel.lua) is shown. Followed: the steps panel is shown or hidden.
-function CP.ObjectiveClickUnsafe()
+-- Left click: the map opens on the followed step (closed when already open); a Roadbook not followed is started (the steps
+-- panel shown, the map left closed). Right click: the steps panel shown or hidden.
+function CP.ObjectiveClickUnsafe(button)
   if Geo.computing then return end -- until the Roadbook is computed (and started)
   if not Geo.Frozen() then
     CP.ShowActive()
     return
   end
-  -- Not followed: started, then the steps panel shown.
+  if button == "RightButton" then
+    Geo.MapPanelOpen(true)
+    return
+  end
   if not Geo.Tracking() then
     if Geo.IsFinished() then
       CP.FinishedMessage()
       CP.ShowActive()
-    else
-      CP.DoStart()
-      Geo.MapPanelOpen(false)
+      return
     end
+    CP.DoStart() -- started only: the map does not open
+    Geo.MapPanelOpen(false)
     return
   end
-  -- Followed: the steps panel shown or hidden.
-  Geo.MapPanelOpen(true)
+  -- Map already open: the click closes it.
+  if WorldMapFrame and WorldMapFrame:IsShown() then
+    if ToggleWorldMap then pcall(ToggleWorldMap) else WorldMapFrame:Hide() end
+    return
+  end
+  local s = CP.CurrentFocus()
+  if s then Geo.ShowStep(s) else Geo.MapPanelOpen(false) end
 end
 
 -- Skips a step with no quest (hearthstone, transport…): it is marked done; if it is the followed
@@ -947,8 +957,8 @@ function CP.SkipQuest(s)
   CP.Replan(L["Quest removed: "] .. (s.task.title or tostring(id)) .. ". ")
 end
 
-function CP.ObjectiveClick()
-  local ok, err = xpcall(function() CP.ObjectiveClickUnsafe() end, function(e)
+function CP.ObjectiveClick(button)
+  local ok, err = xpcall(function() CP.ObjectiveClickUnsafe(button) end, function(e)
     return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
   end)
   if not ok then Print(L["|cffff6060Error while validating the checkpoint|r (copy it to report it):\n"] .. err) end
@@ -1523,13 +1533,24 @@ function CP.CreateCheckpointButton()
     local point, _, _, x, y = self:GetPoint()
     Settings().checkpointPos = { point, x, y }
   end)
-  b:RegisterForClicks("LeftButtonUp")
-  b:SetScript("OnClick", function()
+  b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  b:SetScript("OnClick", function(_, button)
     if b.dragEnd and GetTime and GetTime() - b.dragEnd < 0.3 then return end -- release of a Shift-drag
-    CP.ObjectiveClick()
+    CP.ObjectiveClick(button)
   end)
-  b:SetScript("OnEnter", function(self) if self.HoverIn then self.HoverIn() end end)
-  b:SetScript("OnLeave", function(self) if self.HoverOut then self.HoverOut() end end)
+  b:SetScript("OnEnter", function(self)
+    if self.HoverIn then self.HoverIn() end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(L["Objective"])
+    GameTooltip:AddLine(L["Click: open or close the map on the objective"], 1, 1, 1)
+    GameTooltip:AddLine(L["Right-click: the steps"], 1, 1, 1)
+    GameTooltip:AddLine(L["Shift-drag: move"], 0.75, 0.75, 0.75)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function(self)
+    if self.HoverOut then self.HoverOut() end
+    GameTooltip:Hide()
+  end)
   CP.checkpointButton = b
   CP.UpdateCheckpointButton()
   CP.RefreshButton()

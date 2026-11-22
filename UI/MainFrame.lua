@@ -100,7 +100,7 @@ local function CreateRoadbookPanel(f)
   stepsB:SetText(L["Steps"])
   stepsB:SetScript("OnClick", function() Geo.MapPanelOpen(true) end)
   stepsB:SetPoint("TOPLEFT", 14, -70) -- left of the search line (the right one is full)
-  Tooltip(stepsB, L["Steps"], L["Shows or hides the panel of the Roadbook's steps. The Objective button does it too."])
+  Tooltip(stepsB, L["Steps"], L["Shows or hides the panel of the Roadbook's steps. A right-click on the Objective button does it too."])
   function xp.UpdateStepsButton()
     stepsB:SetEnabled(Geo.Frozen() ~= nil)
   end
