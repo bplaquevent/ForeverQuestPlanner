@@ -262,7 +262,7 @@ function Geo.MapDraw()
     if not CP.StepDone(st) then
       n = n + 1
       local u, v = Geo.MapUV(st.p)
-      if u then
+      if u and not st.nopin then -- a step without a place is not drawn
         if whole then
           if pu and not st.p.teleport then Geo.MapWalk(set.lines, pu, pv, pp, st.p, u, v) end
           pu, pv, pp = u, v, st.p
@@ -313,7 +313,7 @@ end
 -- Roadbook drawn (previewed when no Roadbook holds the map), and the quest log on its quest.
 -- The Forever Quest Planner window stays open.
 function Geo.ShowStep(st)
-  if not (st and st.p) then return end
+  if not (st and st.p) or st.nopin then return end
   if not Geo.MapOwner() and Geo.Frozen() then Geo.MapClaim("preview") end
   local qid = st.task and st.task.id
   if qid and IsInLog(qid) then OpenQuestDetails(qid) end

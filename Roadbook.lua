@@ -51,6 +51,7 @@ function CP.StepPinLabel(s)
   if s.kind == "dungeon" then return L["enter the dungeon"] end
   if s.kind == "fm" then return L["activate the flight master"] end
   if s.kind == "bind" then return L["bind the hearthstone"] end
+  if s.kind == "skill" then return L["raise the skill"] end
   if s.kind == "hearth" then return s.task.spell and L["teleport"] or L["hearthstone"] end
   if s.kind == "travel" then return L["transport"] end
   if s.kind == "take" then return L["pick up the quest"] end
@@ -61,6 +62,9 @@ end
 function CP.StepText(s)
   if s.kind == "fm" or s.kind == "bind" or s.kind == "service" then return (s.task.title or "?") .. " (" .. (s.task.npc or "?") .. ")" end
   if s.kind == "hearth" or s.kind == "travel" or s.kind == "dungeon" then return s.task.title or "?" end
+  if s.kind == "skill" then
+    return string.format(L["Raise the %s skill to level %d"], s.skill.name, s.skill.need) .. " - " .. (s.task.title or "?")
+  end
   local tag = (s.escort and L["Escort"]) or (s.kind == "take" and L["Pick up"]) or (s.kind == "obj" and L["Objective"]) or L["Turn in"]
   local extra = s.kind == "obj" and s.r and (L[": "] .. (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count)
     or (s.search and string.format(L[" (possible place %d/%d)"], s.search.i, s.search.n)) or ""
@@ -109,7 +113,7 @@ function CP.FocusStep(s)
       .. (s.task.title or "?"))
   end
   Geo.MapClaim("track") -- the followed Roadbook holds the map (RoadbookMap.lua)
-  PinPoint(s.p, s.task.title, CP.StepPinLabel(s), qid)
+  if not s.nopin then PinPoint(s.p, s.task.title, CP.StepPinLabel(s), qid) end
   CP.RefreshButton()
   CP.WatchTransport(s)
 end
@@ -321,6 +325,9 @@ function CP.StepDone(st)
     if src then return Geo.ItemCount(src) > 0 end
     local o = Geo.TargetObjective(id, st.r and st.r.tg, GetObjectives(id))
     return o and o.finished and true or false
+  end
+  if st.kind == "skill" then
+    return not (id and Geo.SkillNeed(id, CP.LogEntry(id)))
   end
   if st.kind == "fm" then
     local node = (st.fmHub and st.fmHub.node) or Geo.NodeAt(st.p)
@@ -1323,6 +1330,8 @@ function CP.OnGameEvent(event, a1, a2)
     end
   elseif s.kind == "fm" then
     if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
+  elseif s.kind == "skill" then
+    if event == "SKILL_LINES_CHANGED" and CP.StepDone(s) then CP.AutoUpdate(L["Skill level reached"]) end
   elseif s.kind == "service" then
     if event == K.SERVICE_EVENTS[s.task.service or "vendor"] then
       Geo.ServiceClear() -- done: the next computations no longer plan it
@@ -1380,6 +1389,11 @@ function CP.StepSummary(s)
     for _, m in ipairs(task.members or {}) do if not CP.StepDone(m) then left = left + 1 end end
     return K.DUNGEON_ICON .. " " .. (task.title or "?"),
       string.format(L["%d quest step(s) inside"], left) .. " · " .. place .. " · ~" .. FormatTime(s.work or 0)
+  elseif s.kind == "skill" then
+    local sk = s.skill
+    return "|TInterface\\Icons\\INV_Misc_Book_11:14:14|t " .. string.format(L["Raise the %s skill to level %d"], sk.name, sk.need),
+      (s.npc and (L["Train with "] .. s.npc .. " · " .. place) or L["trainer not located"])
+        .. " · " .. string.format(L["skill %d/%d"], sk.have, sk.need) .. " · " .. task.title
   elseif s.kind == "service" then
     local icon = "Interface\\Icons\\INV_Misc_Coin_01"
     for _, def in ipairs(K.SERVICES) do if def.key == task.service then icon = def.icon end end

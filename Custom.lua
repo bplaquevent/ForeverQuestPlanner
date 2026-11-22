@@ -330,7 +330,7 @@ function Geo.CustomTask(e, pos, plevel, logById)
   local need = Geo.SkillNeed(e.id, q)
   if need then
     if q and q.complete then return nil, Geo.SkillNeedText(need) end
-    task.warn = Geo.SkillNeedText(need)
+    task.skillNeed = need -- a step "raise the skill" comes before the turn-in (MakeStops)
   end
   task.stops = MakeStops(task, pos, plevel)
   if not task.stops then return nil, L["not located"] end

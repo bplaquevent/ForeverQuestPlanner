@@ -46,25 +46,29 @@ function Geo.SkillNeed(id, q)
   local skills, _, known = PlayerSkills()
   if not known then return nil end
   local skill, need
+  -- QuestieDB's requiredSkill is the level to pick the quest up: the turn-in may ask for more (the
+  -- profession introductions: "reach 20"), so the quest texts are read too and the highest level wins.
   local req = QGet(QDB.Quest, id, "requiredSkill")
   if type(req) == "table" and req[1] and (req[2] or 0) > 0 then skill, need = req[1], req[2] end
-  if not skill then
-    local parts = {}
-    local Q = QDB.Quest
-    local okR, raw = false, nil
-    if Q and Q.GetRaw then okR, raw = pcall(Q.GetRaw, id, "objectivesText") end
-    for _, list in ipairs({ okR and raw or QGet(Q, id, "objectivesText"), q and q.objectivesText }) do
-      if type(list) == "table" then
-        for _, t in ipairs(list) do parts[#parts + 1] = tostring(t) end
-      elseif type(list) == "string" then
-        parts[#parts + 1] = list
-      end
+  local parts = {}
+  local Q = QDB.Quest
+  local okR, raw = false, nil
+  if Q and Q.GetRaw then okR, raw = pcall(Q.GetRaw, id, "objectivesText") end
+  for _, list in ipairs({ okR and raw or QGet(Q, id, "objectivesText"), q and q.objectivesText }) do
+    if type(list) == "table" then
+      for _, t in ipairs(list) do parts[#parts + 1] = tostring(t) end
+    elseif type(list) == "string" then
+      parts[#parts + 1] = list
     end
-    if q and type(q.description) == "string" then parts[#parts + 1] = q.description end
-    for _, t in ipairs(parts) do
-      skill, need = Geo.SkillFromText(t)
-      if skill then break end
-    end
+  end
+  for _, o in ipairs(q and q.objectives or {}) do
+    if type(o.text) == "string" then parts[#parts + 1] = o.text end
+  end
+  if q and type(q.description) == "string" then parts[#parts + 1] = q.description end
+  for _, t in ipairs(parts) do
+    local s2, n2 = Geo.SkillFromText(t)
+    if s2 and (not skill or (s2 == skill and n2 > need)) then skill, need = s2, n2 end
+    if s2 and s2 == skill then break end
   end
   if not skill then return nil end
   local have = skills[skill] or 0
@@ -75,6 +79,67 @@ end
 -- Warning line of a quest whose turn-in waits for a profession level.
 function Geo.SkillNeedText(n)
   return string.format(L["%s %d required to turn in (you: %d)"], n.name, n.need, n.have)
+end
+
+-- Time to raise a profession by one point, averaged over every profession (setting "Time per skill point").
+K.SKILL_TIME = 20
+-- Words of a profession trainer's sub title (QuestieDB subName, English and French), by skill id.
+K.SKILL_STEMS = {
+  [164] = { "blacksmith", "forgeron", "forge" }, [165] = { "leatherwork", "travail du cuir" },
+  [171] = { "alchem", "alchim" }, [182] = { "herbalis", "herboris" }, [185] = { "cook", "cuisin" },
+  [186] = { "mining", "mineur", "minage" }, [197] = { "tailor", "couture", "tailleur" },
+  [202] = { "engineer", "ingénieur", "ingenieur" }, [333] = { "enchant" },
+  [356] = { "fishing", "fisher", "pêch", "peche" }, [393] = { "skinning", "dépeçage", "depecage" },
+  [129] = { "first aid", "premiers soins" },
+}
+
+-- Trainers of a profession (player's faction), read once per skill: { id, name, p } per place.
+function Geo.SkillTrainers(skill)
+  Geo.skillTrainers = Geo.skillTrainers or {}
+  if Geo.skillTrainers[skill] then return Geo.skillTrainers[skill] end
+  local out = {}
+  Geo.skillTrainers[skill] = out
+  local fac = UnitFactionGroup and UnitFactionGroup("player")
+  local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
+  local stems = K.SKILL_STEMS[skill]
+  if not (letter and stems) then return out end
+  local npcs = QDB.Npc
+  local okIds, ids = pcall(npcs.GetAllIds)
+  if not okIds or type(ids) ~= "table" then return out end
+  if #ids == 0 and next(ids) then -- some versions give a set
+    local list = {}
+    for k in pairs(ids) do list[#list + 1] = k end
+    ids = list
+  end
+  for _, id in ipairs(ids) do
+    local flags = QGet(npcs, id, "npcFlags")
+    if type(flags) == "number" and HasBit(flags, K.NPC_FLAG_TRAINER) then
+      local sub = QGet(npcs, id, "subName")
+      local low = type(sub) == "string" and sub:lower() or nil
+      local match = false
+      for _, w in ipairs(low and stems or {}) do
+        if low:find(w, 1, true) then match = true break end
+      end
+      local friendly = match and QGet(npcs, id, "friendlyToFaction")
+      if match and type(friendly) == "string" and friendly:find(letter) then
+        local name = QGet(npcs, id, "name") or ("#" .. id)
+        for _, pt in ipairs(EntityPoints("npc", id)) do
+          if not pt.instance then out[#out + 1] = { id = id, name = name, p = pt } end
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- The trainer of a profession nearest to a point (straight line), or nil.
+function Geo.NearestSkillTrainer(skill, from)
+  local best, bd
+  for _, e in ipairs(Geo.SkillTrainers(skill)) do
+    local d = Dist(e.p, from)
+    if d and (not bd or d < bd) then best, bd = e, d end
+  end
+  return best
 end
 
 ---------------------------------------------------------------------------
@@ -408,6 +473,16 @@ local function MakeStops(task, pos, plevel)
       stops[#stops + 1] = st
       from = bp
     end
+  end
+  -- Profession level to reach before the turn-in: a step at the nearest trainer of the profession
+  -- (no place when none is known: it then stays where the route is).
+  local need = task.skillNeed
+  if need and task.kind ~= "turnin" then
+    local trainer = Geo.NearestSkillTrainer(need.skill, from)
+    stops[#stops + 1] = { task = task, kind = "skill", p = trainer and trainer.p or Geo.CopyPoint(from),
+      work = math.max(1, need.need - need.have) * K.SKILL_TIME, skill = need, npc = trainer and trainer.name,
+      nopin = not trainer or nil }
+    if trainer then from = trainer.p end
   end
   local f = Nearest(t.finish, from)
   if not f then return nil end

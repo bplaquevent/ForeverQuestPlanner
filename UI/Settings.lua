@@ -16,6 +16,7 @@ K.PARAMS = {
   { key = "MOB_TIME", label = L["Time per monster"], unit = L[" s"], min = 10, max = 90, step = 5 },
   { key = "ELITE_MOB_TIME", label = L["Time per elite monster"], unit = L[" s"], min = 20, max = 240, step = 5 },
   { key = "KILLS_NO_RATE", label = L["Monsters per item (unknown drop rate)"], unit = "", min = 1, max = 20, step = 1 },
+  { key = "SKILL_TIME", label = L["Time per skill point"], unit = L[" s"], min = 5, max = 120, step = 5 },
   { key = "DUNGEON_TIME", label = L["Time in a dungeon (Roadbook list)"], unit = L[" min"], min = 15, max = 180, step = 5 },
 }
 for _, d in ipairs(K.PARAMS) do
@@ -144,7 +145,7 @@ function Geo.CreateSettingsPanel(f)
   -- Roadbook: hearthstone, class teleports, flight masters, objective button, then difficulty and time estimates.
   -- Layout: boxes 8 px apart; content 10 px from the left edge, first row 28-30 px below the
   -- top edge, 12 px of padding under the last row (slider row = 46 px).
-  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -102, 792, 350)
+  local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -102, 792, 396)
   Geo.SettingsCheck(rb, L["Use the hearthstone"], 18, -28,
     function() return not Settings().noHearth end,
     function(v)
@@ -180,8 +181,8 @@ function Geo.CreateSettingsPanel(f)
   center:SetText(L["Center horizontally"])
   center:SetScript("OnClick", function() CP.CenterCheckpointButton() end)
   local boxes = {
-    Geo.SettingsBox(rb, L["Difficulty"], 8, -128, 384, 214),
-    Geo.SettingsBox(rb, L["Time estimates"], 400, -128, 384, 214),
+    Geo.SettingsBox(rb, L["Difficulty"], 8, -128, 384, 260),
+    Geo.SettingsBox(rb, L["Time estimates"], 400, -128, 384, 260),
   }
   local sec, n = 0, 0
   for _, d in ipairs(K.PARAMS) do
@@ -297,7 +298,7 @@ function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
     -- Same look as the main window and the Objective button.
-    w = Geo.CreateWindow("ForeverQuestPlannerSettingsFrame", L["Forever Quest Planner - Roadbook settings"], 820, 524)
+    w = Geo.CreateWindow("ForeverQuestPlannerSettingsFrame", L["Forever Quest Planner - Roadbook settings"], 820, 570)
     w:SetPoint("CENTER", 40, -20)
     w.panel = Geo.CreateSettingsPanel(w)
     Geo.AddVersionFooter(w)
