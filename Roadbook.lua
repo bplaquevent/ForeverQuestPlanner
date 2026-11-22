@@ -949,7 +949,9 @@ function CP.Recompute(goal, keep, attempt, token, re)
       return
     end
     -- Recomputed while followed: the focus goes to the first step of the new plan that can be done
-    -- (steps inserted before the current one come first); a change of step is announced.
+    -- (steps inserted before the current one come first); a change of step is announced (compared
+    -- with the step followed now: it may have moved on during the computation).
+    was = CP.CurrentFocus() or was
     CP.ClearFocus()
     CP.FocusNext(true)
     local now = CP.focused
@@ -957,13 +959,15 @@ function CP.Recompute(goal, keep, attempt, token, re)
   end, keep, re)
 end
 
--- Click on the button. Roadbook being computed: nothing (until it is computed and started). No
+-- Click on the button. Roadbook being computed: nothing (until it is computed and started), unless it
+-- is adapted while followed (the followed step stays shown, the click works on it). No
 -- Roadbook: the window opens on its tab, where one is made. Roadbook not followed: it starts and
 -- the steps panel (RoadbookPanel.lua) is shown. Followed: the steps panel is shown or hidden.
 -- Left click: the map opens on the followed step (closed when already open); a Roadbook not followed is started (the steps
 -- panel shown, the map left closed). Right click: the steps panel shown or hidden.
 function CP.ObjectiveClickUnsafe(button)
-  if Geo.computing then return end -- until the Roadbook is computed (and started)
+  -- Roadbook being computed: nothing, unless it is adapted while followed (its step stays shown).
+  if Geo.computing and not (Geo.Tracking() and CP.CurrentFocus()) then return end
   if not Geo.Frozen() then
     CP.ShowActive()
     return
@@ -1409,8 +1413,8 @@ function CP.RefreshButton()
   local b = CP.checkpointButton
   if not (b and b.title) then return end
   local s = CP.CurrentFocus()
-  if Geo.computing then
-    -- Roadbook being computed (start, adapted route…): no step to show, the click does nothing.
+  if Geo.computing and not s then
+    -- Roadbook being computed with no step followed (made by "Generate", start…): the click does nothing.
     b.title:SetText(L["Objective"])
     b.sub:SetText(L["Recomputing…"])
     b.current = nil
@@ -1432,6 +1436,8 @@ function CP.RefreshButton()
     b.title:SetText(t)
     local sub = CP.PackInfos(b.sub, d, maxW)
     if types ~= "" then sub = types .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
+    -- Roadbook adapted while followed: the step stays shown meanwhile, replaced at the end if needed.
+    if Geo.computing then sub = Color("ffd100", L["Recomputing…"]) .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
     b.sub:SetText(sub)
     b.current = s
   else
