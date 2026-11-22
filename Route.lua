@@ -133,31 +133,66 @@ function Geo.RecordBind(p)
     ui = (not p.area) and mp.ui or nil, zoneName = mp.zoneName, name = GetBindLocation and GetBindLocation() or nil }
 end
 
--- Zones (zone ids) with this name, or containing the subzone with this name.
+-- Zones (zone ids) with this name (value true), or containing the subzone with this name (value "sub").
 function Geo.ZonesNamed(name)
   local zones = {}
-  for id in pairs(Geo.areaToUi or {}) do
-    if AreaName(id) == name then zones[Geo.parent[id] or id] = true end
-  end
   for id, parent in pairs(Geo.parent or {}) do
-    if AreaName(id) == name then zones[parent] = true end
+    if AreaName(id) == name then zones[parent] = "sub" end
+  end
+  for id in pairs(Geo.areaToUi or {}) do
+    if AreaName(id) == name then zones[Geo.parent[id] or id] = Geo.parent[id] and "sub" or true end
   end
   return zones
 end
 
--- Estimated bind location from its name, from the most to the least precise:
--- the innkeeper of that zone, the center of the zone's innkeepers, the center of the zone.
+-- Bind point of a new character: the start position of its race (no inn there). `areas` are the
+-- AreaIDs (AreaTable) of the names GetBindLocation can give there ("Shadow Grave" seen in game for an
+-- Undead; the others cover the start area and its subzones). Position: world coordinates of the
+-- server table playercreateinfo (same as Geo's world points: c = continent, x, y).
+K.START_BINDS = {
+  { areas = { 2117, 154 }, c = 0, x = 1676.71, y = 1678.31 },   -- Undead: Shadow Grave, Deathknell
+  { areas = { 24, 9 }, c = 0, x = -8949.95, y = -132.493 },     -- Human: Northshire Abbey / Valley
+  { areas = { 77, 132 }, c = 0, x = -6240.32, y = 331.033 },    -- Dwarf, Gnome: Anvilmar, Coldridge Valley
+  { areas = { 256, 188 }, c = 1, x = 10311.3, y = 832.463 },    -- Night Elf: Aldrassil, Shadowglen
+  { areas = { 363 }, c = 1, x = -618.518, y = -4251.67 },       -- Orc, Troll: Valley of Trials
+  { areas = { 221, 220 }, c = 1, x = -2917.58, y = -257.98 },   -- Tauren: Camp Narache, Red Cloud Mesa
+}
+
+function Geo.StartBind(name)
+  for _, e in ipairs(K.START_BINDS) do
+    for _, a in ipairs(e.areas) do
+      if AreaName(a) == name then return Geo.MapPoint({ c = e.c, x = e.x, y = e.y }) end
+    end
+  end
+end
+
+-- Estimated bind location from its name, from the most to the least precise: the starting area of
+-- a race, the innkeeper of that zone, the center of the zone's innkeepers, the center of the zone.
+-- A subzone name only gives its zone's innkeepers (the subzone of an innkeeper is not known):
+-- the result is then approximate.
 function Geo.GuessBind(name)
   if Geo.bindGuess and Geo.bindGuess.name == name then return Geo.bindGuess.p end
+  local p = Geo.StartBind(name)
   local zones = Geo.ZonesNamed(name)
-  local list = {}
-  for _, inn in ipairs(Geo.Innkeepers()) do
+  local list, sub = {}, false
+  for _, inn in ipairs(p and {} or Geo.Innkeepers()) do
     local a = inn.p.area
-    if AreaName(a) == name or zones[a] or (Geo.parent[a] and zones[Geo.parent[a]]) then list[#list + 1] = inn.p end
+    local z = (AreaName(a) == name and true) or zones[a] or (Geo.parent[a] and zones[Geo.parent[a]])
+    if z then
+      list[#list + 1] = inn.p
+      if z == "sub" then sub = true end
+    end
   end
-  local p
-  if #list == 1 then
+  if p then
+    -- starting area
+  elseif #list == 1 then
     p = list[1]
+    if sub then
+      local q = {}
+      for k, v in pairs(p) do q[k] = v end
+      q.approx = true
+      p = q
+    end
   elseif #list > 1 then
     local c, x, y, n = list[1].c, 0, 0, 0
     for _, q in ipairs(list) do
