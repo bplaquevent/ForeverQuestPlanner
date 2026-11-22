@@ -1052,6 +1052,15 @@ function Geo.NpcInfo()
   out[#out + 1] = string.format("npcFlags=%s subName=%s friendlyToFaction=%s", tostring(QGet(QDB.Npc, id, "npcFlags")),
     tostring(QGet(QDB.Npc, id, "subName")), tostring(QGet(QDB.Npc, id, "friendlyToFaction")))
   out[#out + 1] = string.format("faction=%s points=%d", tostring(UnitFactionGroup("player")), #EntityPoints("npc", id))
+  for _, field in ipairs({ "questStarts", "questEnds" }) do
+    local list = QGet(QDB.Npc, id, field)
+    local parts = {}
+    for _, qid in ipairs(type(list) == "table" and list or {}) do
+      if #parts >= 12 then parts[#parts + 1] = "…" break end
+      parts[#parts + 1] = qid .. ":classes=" .. tostring(QGet(QDB.Quest, qid, "requiredClasses"))
+    end
+    out[#out + 1] = field .. " (" .. (type(list) == "table" and #list or 0) .. "): " .. table.concat(parts, " ")
+  end
   local n = 0
   for _, e in ipairs(Geo.ServiceNpcs().trainer) do if e.id == id then n = n + 1 end end
   out[#out + 1] = string.format("entries in the trainer list: %d of %d", n, #Geo.ServiceNpcs().trainer)
