@@ -1166,14 +1166,19 @@ local function RemainingTargets(q, t)
   local out = {}
   local objs = (q and q.objectives) or {}
   local map, used = Geo.MatchObjectives(objs, t)
+  local allDone = true -- every objective listed by the game is done
+  for _, o in ipairs(objs) do
+    if not (o.finished or (o.need and o.have and o.need > 0 and o.have >= o.need)) then allDone = false end
+  end
   for i, tg in ipairs(t) do
     local match = tg.sourceItem and -1 or map[i] -- source item: needed while it is not in the bags
     local count = tg.defaultCount
-    -- The game lists its objectives and none is this "talk" target: QuestieDB lists the turn-in NPC
-    -- as an objective ("Touring the Grounds": 3 NPCs to meet, then Danitha Morr), the game does not.
+    -- The game lists its objectives and none is this "talk" target: a hidden objective (QuestieDB lists
+    -- the turn-in NPC of "On Patrol" after the 3 NPCs to meet; the game shows only those 3 and the quest
+    -- completes once the player has spoken to the turn-in NPC). Planned once every listed objective is done.
     if not match and tg.kind == "talk" and #objs > 0 then
-      count = 0
-    elseif match == -1 then
+      if not allDone then count = 0 end
+    elseif match == -1 then    elseif match == -1 then
       if Geo.ItemCount(tg.sourceItem) > 0 then count = 0 end
     elseif match then
       local o = objs[match]
