@@ -1016,9 +1016,16 @@ function Geo.AddItemTarget(add, itemId)
   local kind = (#npcs == 0 and #objs > 0) and "object" or "item"
   if #pts == 0 then
     -- Not dropped by anything located: sold by vendors (QuestieDB `vendors`): one purchase.
-    local vendors = QGet(QDB.Item, itemId, "vendors") or {}
-    for i = 1, math.min(#vendors, 6) do
-      for _, p in ipairs(EntityPoints("npc", vendors[i])) do pts[#pts + 1] = p end
+    -- Every vendor of the player's faction (a common item has many: the nearest one is chosen later).
+    local fac = UnitFactionGroup and UnitFactionGroup("player")
+    local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
+    for _, vid in ipairs(QGet(QDB.Item, itemId, "vendors") or {}) do
+      local friendly = QGet(QDB.Npc, vid, "friendlyToFaction")
+      if not (letter and type(friendly) == "string" and not friendly:find(letter, 1, true)) then
+        for _, p in ipairs(EntityPoints("npc", vid)) do
+          if not p.instance then pts[#pts + 1] = p end
+        end
+      end
     end
     if #pts > 0 then kind = "buy" end
   end
