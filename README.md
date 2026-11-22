@@ -33,6 +33,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
   - **Start**: the Objective button follows the Roadbook. It is matched to where you are: the next transport steps whose destination you already reached are done, and a flight or boat far from you is replaced by the route from here.
   - **Pause**: only the tracking stops; the steps and their progress are kept.
   - **Delete** (after confirmation): its tracking stops, its steps and the list are emptied. It is the only way to empty the steps done.
+  - **Level reached**: when a Roadbook generated for a level reaches it (while followed, or when started afterwards), a question is asked once: **Turn in only** (the quests of the list not complete leave it, only the turn-ins of the complete ones stay), **Finish all** (the Roadbook goes on as planned), or **Stop** (the list is emptied, the steps to come removed, the steps done kept).
   - At its end, the Roadbook is paused, every step done, and kept as it is: it can no longer be started, only extended (quests added to the list), generated again or deleted.
   - The steps done are checked and have no button (they cannot be removed or skipped). A click on a step, done or not, opens the world map centered on it with the Roadbook drawn; Shift-click: quest link in the chat.
 - Changing the option of **Generate** (each with its radio button) keeps the current Roadbook: it is used by the next **Generate**. At max level, only **the whole list** is possible.

@@ -332,12 +332,14 @@ function S.Route(W, a, b, net, plevel)
   local best = (a.c == b.c) and (S.WalkCost(W, a, b, speed, plevel)) or math.huge
   local choice
   if #net.hubs > 0 then
-    local hb = NearHubs(W, net, b)
+    -- Walk from each arrival hub to b: computed once, it does not depend on the departure hub.
+    local hb, wb = NearHubs(W, net, b), {}
+    for m, j in ipairs(hb) do wb[m] = (S.WalkCost(W, net.hubs[j].p, b, speed, plevel)) end
     for _, i in ipairs(NearHubs(W, net, a)) do
       local wa = S.WalkCost(W, a, net.hubs[i].p, speed, plevel)
       if wa < best then
-        for _, j in ipairs(hb) do
-          local v = wa + net.D[i][j] + (S.WalkCost(W, net.hubs[j].p, b, speed, plevel))
+        for m, j in ipairs(hb) do
+          local v = wa + net.D[i][j] + wb[m]
           if v < best then best, choice = v, { i = i, j = j } end
         end
       end

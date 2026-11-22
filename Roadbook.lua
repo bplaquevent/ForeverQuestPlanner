@@ -553,6 +553,7 @@ function CP.DoStart()
   if not (ok and res) then CP.FocusNext(false) end
   CP.RefreshButton()
   if Refresh then Refresh() end
+  C_Timer.After(1, function() pcall(CP.LevelReached, UnitLevel("player")) end) -- goal reached while paused
 end
 
 -- Start of a Roadbook: if the hearthstone / teleport cooldowns changed since it was saved, or if you
@@ -1270,7 +1271,85 @@ function CP.GiverFound(a1, a2)
   return handled
 end
 
+-- Level goal of a Roadbook made by "Generate" reached while it is followed (or when it is started
+-- afterwards): asked once whether to finish it, keep only the turn-ins of the quests of the list
+-- already complete, or stop it (its steps done kept).
+function CP.LevelReached(level)
+  local fz = Geo.Frozen()
+  local g = fz and fz.info.generated
+  if not (g and g.kind == "level" and g.value and not g.asked and level and level >= g.value) then return end
+  if not Geo.Tracking() or Geo.IsFinished() then return end
+  g.asked = true -- saved with the Roadbook (kept by its recomputes)
+  local ready = #CP.LevelGoalSplit()
+  local left = #Geo.CustomList()
+  if ready > 0 then
+    StaticPopup_Show("FQP_LEVEL_REACHED", string.format(L["Level %d reached: the goal of this Roadbook.\n\n%d quest(s) of the list are complete, %d in all. Only turn in the complete ones, finish the whole Roadbook, or stop it (its steps done are kept)?"], level, ready, left))
+  else
+    StaticPopup_Show("FQP_LEVEL_REACHED_STOP", string.format(L["Level %d reached: the goal of this Roadbook.\n\nNo quest of the list is complete yet (%d in all). Finish the whole Roadbook, or stop it (its steps done are kept)?"], level, left))
+  end
+end
+
+-- Quests of the list complete in the log (only their turn-in left), and the other ones.
+function CP.LevelGoalSplit()
+  local ready, rest = {}, {}
+  for _, e in ipairs(Geo.CustomList()) do
+    if IsInLog(e.id) and C_QuestLog.IsComplete and C_QuestLog.IsComplete(e.id) then
+      ready[#ready + 1] = e
+    else
+      rest[#rest + 1] = e
+    end
+  end
+  return ready, rest
+end
+
+-- Only the turn-ins of the complete quests: the other quests leave the list (Roadbook recomputed).
+function CP.LevelTurnInOnly()
+  local ready, rest = CP.LevelGoalSplit()
+  if #ready == 0 then return CP.LevelStop() end
+  if #rest == 0 then return end
+  for _, e in ipairs(ready) do e.pre = nil end -- stays even if it was added as a prerequisite of a quest leaving
+  Print(L["Level goal reached: only the turn-ins of the complete quests are kept."])
+  Geo.CustomRemoveList(rest)
+end
+
+-- Roadbook stopped: the list emptied, the steps to come removed, the steps done kept (Geo.CustomChanged).
+function CP.LevelStop()
+  Geo.CustomRec().list = {}
+  Geo.customUnplanned = nil
+  Print(L["Level goal reached: Roadbook stopped, its steps done are kept."])
+  Geo.CustomChanged()
+end
+
+StaticPopupDialogs["FQP_LEVEL_REACHED"] = {
+  text = "%s",
+  button1 = L["Turn in only"],
+  button2 = L["Finish all"],
+  button3 = L["Stop"],
+  OnAccept = function() CP.LevelTurnInOnly() end,
+  OnCancel = function() end, -- also Escape: the Roadbook goes on
+  OnAlt = function() CP.LevelStop() end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
+StaticPopupDialogs["FQP_LEVEL_REACHED_STOP"] = {
+  text = "%s",
+  button1 = L["Stop"],
+  button2 = L["Finish all"],
+  OnAccept = function() CP.LevelStop() end,
+  OnCancel = function() end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
 function CP.OnGameEvent(event, a1, a2)
+  if event == "PLAYER_LEVEL_UP" and a1 then -- after the turn-in that gave the level is processed
+    C_Timer.After(2, function() pcall(CP.LevelReached, a1) end)
+  end
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
   if (event == "QUEST_LOG_UPDATE" or event == "ZONE_CHANGED_NEW_AREA") and not CP.quickPending and Geo.Tracking() and Geo.frozen then
     CP.quickPending = true
