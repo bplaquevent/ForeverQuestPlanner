@@ -9,10 +9,12 @@ local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData
 ---------------------------------------------------------------------------
 -- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
 -- character in the saved data (the last K.TRACE_MAX lines) to find out how a step got its state.
+-- Off by default (Settings().traceOn, /fqp trace on).
 ---------------------------------------------------------------------------
 K.TRACE_MAX = 300
 function Geo.Trace(kind, text)
   local st = Settings()
+  if not st.traceOn then return end -- off by default: /fqp trace on
   st.roadbookTrace = st.roadbookTrace or {}
   local t = st.roadbookTrace
   t[#t + 1] = (date and date("%d/%m %H:%M:%S") or "") .. " " .. kind .. " " .. tostring(text)

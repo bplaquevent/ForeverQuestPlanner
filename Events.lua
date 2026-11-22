@@ -209,8 +209,14 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     Print(L["Learned zone passes forgotten."])
   elseif msg == "export" then
     ToggleMainFrame("export")
+  elseif msg == "trace on" or msg == "trace off" then
+    Settings().traceOn = (msg == "trace on") or nil
+    Print(msg == "trace on" and L["Roadbook trace on."] or L["Roadbook trace off."])
   elseif msg == "trace" or msg == "trace clear" then
     local t = Settings().roadbookTrace or {}
+    if msg == "trace" then
+      Print(Settings().traceOn and L["Roadbook trace on."] or L["Roadbook trace off (/fqp trace on to record)."])
+    end
     if msg == "trace clear" then
       Settings().roadbookTrace = nil
       Print(L["Roadbook trace emptied."])
