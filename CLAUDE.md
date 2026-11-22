@@ -3,6 +3,7 @@
 World of Warcraft addon for the **Forever** server (client 1.60.1, Interface 16001: Classic-era API, Lua 5.1).
 QuestieDB is an optional dependency (quest data, NPC/object spawns, chains); without it only the game API is used.
 No way to run the game here: check with `tools/check.sh` (compiles every file, detects unknown globals).
+Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cases/*.lua>` on a problem captured by `/fqp dump`.
 
 ## Files (load order = `ForeverQuestPlanner.toc`)
 
@@ -10,15 +11,17 @@ No way to run the game here: check with `tools/check.sh` (compiles every file, d
 |---|---|
 | `Locales/Locales.lua`, `Locales/frFR.lua` | `ns.L` table; French translations |
 | `Data/Passes.lua` | walking passes between zones known before any is learned: Warcraft Wiki rows `ns.PASSES`, QuestieDB patrol NPCs `ns.PASS_PATROLS` (listed by `tools/patrol_npcs.py`) |
-| `Core.lua` | utilities (`Print`, `Settings`, `Color`…), constants table `K`, `State`, QuestieDB access (`QDB`, `QGet`, `QuestMeta`, `ChainInfo`), quest log capture (`Snapshot`), reward analysis, `Analyze()` |
+| `Solver.lua` | Roadbook solver in pure Lua (no game API, also run by `tools/bench.lua`): XP formulas (`MobXP`, `QuestXP`), world model from a captured problem (walks, passes, danger, network `S.Network` / `S.Route`), route evaluation `S.Evaluate`, goal value `S.Objective`, teleports `S.AddRecalls` / `S.Simulate`, optimizer `S.Optimize` of both Roadbooks (automatic: construction, local search, destroy and rebuild; custom: `S.ValidCustom`, `S.BuildCustom`; tuning `S.OPT`) |
+| `Core.lua` | utilities (`Print`, `Settings` = saved data of the character, `Color`…), constants table `K`, `State`, QuestieDB access (`QDB`, `QGet`, `QuestMeta`, `ChainInfo`), quest log capture (`Snapshot`), reward analysis, `Analyze()` |
 | `Available.lua` | available quests: `CheckAvailable`, frame-sliced scan `StartScan` / `scan` |
 | `Geo.lua` | world coordinates, travel times, zone passes (`Geo.ZoneIdAt`, `Geo.Passes`, `Geo.WalkWay` / `WalkTime`, learning `Geo.PassTick`), flight/zeppelin/boat network (`Route`, `RouteText`), quest targets (`QuestTargets`) |
 | `Planner.lua` | Roadbook model: Nearby items, XP / levels, monster spots, tasks, priorities (`Geo.Priority`), rewards interest |
-| `Route.lua` | Roadbook route: flight master / transport stops, hearthstone, improvement, `PlanXP`, `Geo.RequestPlan` |
-| `Custom.lua` | custom Roadbook: quest list (`Geo.CustomAdd` / `CustomRemove`, active Roadbook `Geo.ActiveKind` / `Geo.Tracking`, `Geo.FrozenKey`), fastest-route planner `Geo.PlanCustom` (dungeon visits, order constraints, flight masters to activate, per-leg networks `Geo.RouteNets`) |
+| `Route.lua` | Roadbook route: transport stops, hearthstone and class teleports (`Geo.RecallSources`, `RecallState`, `RecallStep`), planning with the solver (`PlanXP`, `Geo.Solve`, solver route -> game route `Geo.FromSolver`, skipped quest `Geo.Reroute`), `Geo.RequestPlan` |
+| `Custom.lua` | custom Roadbook: quest list (`Geo.CustomAdd` / `CustomRemove`, active Roadbook `Geo.ActiveKind` / `Geo.Tracking`, `Geo.FrozenKey`), dungeon visits and order rules (`Geo.GroupDungeons`, `Geo.CustomConstraints`), planning with the solver `Geo.PlanCustom`, per-leg networks `Geo.RouteNets` |
+| `Problem.lua` | the Roadbook problem read from the game for the solver: `Geo.Problem` (live: steps keep their game step in `src`), custom list `Geo.CustomPlanSteps`; `/fqp dump` (`Geo.BenchDump`) captures it into `ForeverQuestPlannerBench` for `tools/bench.lua` |
 | `UI/Lists.lua` | window state, list engine (`RenderList`, `ListRow`), quest tracking and map pins, quest descriptions (`Geo.QuestTitle`, `Geo.DescLine`, badges, `K.DESC`), search |
 | `UI/Tabs.lua` | Quest log (`RenderTodo`), Available (`RenderAvailable`, rewards line), Nearby (`RenderNear`) tabs |
-| `Roadbook.lua` | `CP` table: checkpoints/focus, saved Roadbook (`Geo.Freeze`…), quick wins, auto-advance on game events, floating Objective button |
+| `Roadbook.lua` | `CP` table: checkpoints/focus, saved Roadbook (`Geo.Freeze`…), quick wins, auto-advance on game events, teleport cooldown checks (`CP.RecallCheck`, `CP.ScheduleRecallCheck`), floating Objective button |
 | `RoadbookMap.lua` | Roadbook on OpenMap's map: map ownership (`Geo.MapClaim` / `MapRelease`, `Geo.MapOwner`), locks on OpenMap's pin functions, drawing (`Geo.MapSync` / `MapDraw`), preview (`Geo.MapPreview`) |
 | `RoadbookPanel.lua` | Roadbook steps panel beside the world map (`Geo.MapPanelSync`, placement `Geo.MapPanelPlace`, option `Geo.MapPanelGet` / `MapPanelSet`) |
 | `UI/Window.lua` | Roadbook tabs (automatic `RenderXP`, custom `Geo.RenderCustomXP`, `Geo.RouteStepItems`), filter bars, `SelectTab`, `Refresh` |
@@ -34,6 +37,9 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
   It ends with `-- Shared with the next files.` followed by `ns.X = X` for the locals other files use.
 - A file can only import from files loaded before it. For a call to a later file, call `ns.Name()` at runtime
   (example: `Refresh` in `Available.lua` forwards to the real one in `UI/Window.lua`).
+- Saved data: `Settings()` returns the character's own table (`ForeverQuestPlannerSettings.chars[CharKey()]`);
+  only what is learned about the world and true for every character (zone passes, teleport arrivals) is shared:
+  `SharedData()`.
 - Mutable variables read by several files live in the `State` table (`State.mainFrame`, `State.currentTab`,
   `State.availFilter`, `State.xpHorizon`, `State.nearRadius`, search queries…). Never export a local that is reassigned later.
 - Lua limits: 200 locals per function/file and 60 upvalues per function. That is why constants are in `K` and many

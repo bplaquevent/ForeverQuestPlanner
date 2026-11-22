@@ -26,7 +26,7 @@ function Geo.RoadbookStatus(kind, doneCount, total)
   return Color(D.meta, L["Not started"]) .. Color(D.meta, L[" (\"Start\" to follow it)"])
 end
 
--- Header of a Roadbook: state, plan, level, travel and hearthstone in four short lines.
+-- Header of a Roadbook: state, plan, level, travel, hearthstone and teleports in four short lines.
 function Geo.RouteHeader(route, info, doneCount, kind)
   local frozenRec = Geo.FrozenRec(kind)
   local need = (UnitXPMax and UnitXP) and (UnitXPMax("player") - UnitXP("player")) or nil
@@ -79,6 +79,20 @@ function Geo.RouteHeader(route, info, doneCount, kind)
       l3[#l3 + 1] = L["hearth: "] .. where .. " (" .. (ready > 0 and FormatTime(ready) or L["ready"]) .. ")"
     end
   end
+  -- Class teleports: cooldown of each one, runes left for the mage teleports.
+  local runes
+  for _, src in ipairs(Geo.RecallSources()) do
+    if src.spell then
+      if src.charges then
+        runes = src.charges
+      elseif (src.cd or 0) > 0 then
+        l3[#l3 + 1] = src.name .. " (" .. (src.ready > 0 and FormatTime(src.ready) or L["ready to cast"]) .. ")"
+      else
+        l3[#l3 + 1] = src.name
+      end
+    end
+  end
+  if runes then l3[#l3 + 1] = string.format(L["teleports: %d rune(s)"], runes) end
   if info.custom then
     if (info.skipped or 0) > 0 then l3[#l3 + 1] = Color("ff6060", Plural(info.skipped, L["quest"]) .. L[" cannot be planned"]) end
   else
@@ -147,8 +161,9 @@ function Geo.RouteStepItems(items, route, info, remove, query, kind)
         kindLabel = "|TInterface\\Minimap\\Tracking\\Innkeeper:14:14|t" .. Color("ffb060", L["[Innkeeper]"])
         action = L["Talk to "] .. (task.npc or "?") .. L[" and choose \"Make this inn your home\""] .. K.DESC_SEP .. PointText(s.p)
       elseif s.kind == "hearth" then
-        kindLabel = "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t" .. Color("ffb060", L["[Hearthstone]"])
-        action = L["Use the hearthstone · saves ~"] .. FormatTime(s.gain or 0)
+        local icon, tag, what = Geo.RecallText(s)
+        kindLabel = icon .. Color("ffb060", tag)
+        action = what
       elseif s.kind == "travel" then
         kindLabel = "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t" .. Color("80c0ff", L["[Transport]"])
         action = (task.mode == "vol" and (L["Talk to the flight master at "] .. (task.from or "?") .. L[", destination "] .. (task.dest or "?"))

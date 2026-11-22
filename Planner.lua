@@ -98,7 +98,6 @@ State.xpGoal = { kind = "time", value = 7200 }
 K.MAX_TAKE_CANDIDATES = 80
 K.TAKE_PER_LEVEL = 20               -- goal "reach level": candidates per unlock level, at least
 K.MAX_TAKE_CANDIDATES_LEVEL = 600   -- goal "reach level": most candidates
-K.LOOKAHEAD_WEIGHT = 1   -- a quest is also judged with what it unlocks, at full weight
 K.MAX_FOLLOW_DEPTH = 12  -- safety: maximum length of an evaluated quest chain
 K.SLICE_MS = 15          -- maximum computation time per frame (the computation is spread over several frames)
 K.REPLAN_DISTANCE = 150  -- beyond this distance (m), the Roadbook is recomputed from the new position
@@ -127,26 +126,7 @@ function Geo.XPNeeded(level)
 end
 
 -- Monster XP (Classic formula: level difference, gray monsters, elites x2).
-function Geo.MobXP(clevel, mlevel, elite)
-  if not mlevel or mlevel <= 0 then return 0 end
-  local gray
-  if clevel <= 5 then gray = 0
-  elseif clevel <= 39 then gray = clevel - math.floor(clevel / 10) - 5
-  else gray = clevel - math.floor(clevel / 5) - 1 end
-  if mlevel <= gray then return 0 end
-  local base = clevel * 5 + 45
-  local xp
-  if mlevel >= clevel then
-    xp = base * (1 + 0.05 * math.min(mlevel - clevel, 4))
-  else
-    local zd = (clevel <= 7 and 5) or (clevel <= 9 and 6) or (clevel <= 11 and 7) or (clevel <= 15 and 8)
-      or (clevel <= 19 and 9) or (clevel <= 29 and 11) or (clevel <= 39 and 12) or (clevel <= 44 and 13)
-      or (clevel <= 49 and 14) or (clevel <= 54 and 15) or (clevel <= 59 and 16) or 17
-    xp = base * (1 - (clevel - mlevel) / zd)
-  end
-  if elite then xp = xp * 2 end
-  return math.max(0, math.floor(xp))
-end
+Geo.MobXP = ns.Solver.MobXP
 
 -- XP of the monsters killed for an objective (kill, or loot an item from monsters).
 function Geo.ObjectiveXP(r, plevel)
@@ -838,7 +818,7 @@ local function MakeTravel(net, plevel)
   local cache = {}
   return function(a, b)
     if a == b then return 0 end
-    if b.teleport then return K.HEARTH_TIME end -- hearthstone: usable from anywhere
+    if b.teleport then return b.cast or K.HEARTH_TIME end -- hearthstone, teleport spell: usable from anywhere
     local row = cache[a]
     if not row then
       row = {}
@@ -853,34 +833,6 @@ local function MakeTravel(net, plevel)
   end
 end
 
--- Inserts a quest's steps into the route at the lowest extra cost, keeping their order.
--- Returns the extra cost (travel + work) and the new route.
-local function InsertStops(route, stops, travel, startIdx)
-  local r = {}
-  for i, s in ipairs(route) do r[i] = s end
-  local delta, minIdx = 0, startIdx or 1
-  for k, s in ipairs(stops) do
-    local bestI, bestD
-    local lo, hi = minIdx, #r
-    if s.glue and k > 1 then hi = minIdx end -- right after the previous step of the quest
-    for i = lo, hi do -- insertion after r[i]
-      local a, b = r[i], r[i + 1]
-      if not (b and b.glue) then
-        local d = travel(a.p, s.p)
-        if b then d = d + travel(s.p, b.p) - travel(a.p, b.p) end
-        if not bestD or d < bestD then bestI, bestD = i, d end
-      end
-    end
-    if not bestI then return math.huge, route end
-    table.insert(r, bestI + 1, s)
-    delta = delta + bestD + s.work
-    minIdx = bestI + 1
-  end
-  return delta, r
-end
-
-K.MAX_PLAN_QUESTS = 50
-K.FM_DETOUR = 250      -- maximum detour (m, as the crow flies) to activate an unknown flight master
 K.FM_KNOWN_RADIUS = 150 -- yards: the QuestieDB flight master NPC standing at a flight node
 
 -- Service NPCs of the player's faction (QuestieDB), read once per session:
@@ -952,72 +904,5 @@ function Geo.Innkeepers()
   return Geo.inn or {}
 end
 
--- Flight masters not yet activated by the character (flight paths learned: OpenMap's list).
-function Geo.UnknownFlightMasters()
-  local known, out = Geo.KnownNodes(), {}
-  for _, fm in ipairs(Geo.FlightMasters()) do
-    if not known[fm.node] then out[#out + 1] = fm end
-  end
-  return out
-end
-
--- Adds an "activate the flight master" step when the route passes near an unknown
--- flight master (only on parts done on foot or mounted).
-function Geo.AddFlightMasterStops(route, nets, plevel)
-  local unknown, planned = {}, {}
-  for _, st in ipairs(route) do if st.fmHub then planned[st.fmHub.id or 0] = true end end
-  for _, fm in ipairs(Geo.UnknownFlightMasters()) do
-    if not planned[fm.id] then unknown[#unknown + 1] = fm end -- already a step of the route
-  end
-  if #unknown == 0 or #route < 2 then return route end
-  local legs = {}
-  for k = 2, #route do
-    local a, b = route[k - 1].p, route[k].p
-    local net = Geo.LegNet(nets, k)
-    local _, choice = Route(a, b, net, plevel)
-    local segs = {}
-    if route[k].kind == "hearth" or route[k].glue then
-      -- teleport: nothing is passed on the way; escort: no detour
-    elseif choice then
-      segs[1] = { a, net.hubs[choice.i].p }
-      segs[2] = { net.hubs[choice.j].p, b }
-    elseif a.c == b.c then
-      segs[1] = { a, b }
-    end
-    legs[k] = segs
-  end
-  local inserts = {}
-  for _, fm in ipairs(unknown) do
-    local bestK, bestD, bestFrom
-    for k = 2, #route do
-      for _, s in ipairs(legs[k]) do
-        local d1, d2, d0 = Dist(s[1], fm.p), Dist(fm.p, s[2]), Dist(s[1], s[2])
-        if d1 and d2 and d0 then
-          local detour = d1 + d2 - d0
-          if not bestD or detour < bestD then bestK, bestD, bestFrom = k, detour, d1 end
-        end
-      end
-    end
-    if bestK and bestD <= K.FM_DETOUR then
-      inserts[bestK] = inserts[bestK] or {}
-      table.insert(inserts[bestK], { fm = fm, from = bestFrom })
-    end
-  end
-  if not next(inserts) then return route end
-  local out = { route[1] }
-  for k = 2, #route do
-    local list = inserts[k]
-    if list then
-      table.sort(list, function(x, y) return x.from < y.from end)
-      for _, it in ipairs(list) do
-        out[#out + 1] = { kind = "fm", p = it.fm.p, fmId = it.fm.id, fmNode = it.fm.node, work = K.OVERHEAD / 2,
-          task = { title = L["Activate the flight path of "] .. (AreaName(it.fm.p.area) or it.fm.name), npc = it.fm.name, xp = 0, fm = true } }
-      end
-    end
-    out[#out + 1] = route[k]
-  end
-  return out
-end
-
 -- Shared with the next files.
-ns.BuildTasks, ns.CurrentMapSet, ns.InsertStops, ns.MakeStops, ns.MakeTravel, ns.NearItems = BuildTasks, CurrentMapSet, InsertStops, MakeStops, MakeTravel, NearItems
+ns.BuildTasks, ns.CurrentMapSet, ns.MakeStops, ns.MakeTravel, ns.NearItems = BuildTasks, CurrentMapSet, MakeStops, MakeTravel, NearItems

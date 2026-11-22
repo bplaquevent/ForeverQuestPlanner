@@ -150,7 +150,7 @@ function Geo.CreateSettingsPanel(f)
       if mb then mb:SetShown(v) end
     end, panel)
 
-  -- Roadbook: hearthstone, flight masters, objective button, then difficulty and time estimates.
+  -- Roadbook: hearthstone, class teleports, flight masters, objective button, then difficulty and time estimates.
   -- Layout: boxes 8 px apart; content 10 px from the left edge, first row 28-30 px below the
   -- top edge, 12 px of padding under the last row (slider row = 46 px).
   local rb = Geo.SettingsBox(panel, L["Roadbook"], 14, -102, 792, 350)
@@ -158,15 +158,21 @@ function Geo.CreateSettingsPanel(f)
     function() return not Settings().noHearth end,
     function(v)
       Settings().noHearth = not v or nil
-      Geo.planCache = nil
+      Geo.planCache, Geo.customCache = nil, nil
     end, panel)
-  Geo.SettingsCheck(rb, L["Activate nearby flight masters"], 300, -28,
+  Geo.SettingsCheck(rb, L["Use class teleports"], 210, -28,
+    function() return not Settings().noRecallSpells end,
+    function(v)
+      Settings().noRecallSpells = not v or nil
+      Geo.planCache, Geo.customCache = nil, nil
+    end, panel)
+  Geo.SettingsCheck(rb, L["Activate nearby flight masters"], 405, -28,
     function() return not Settings().noFMDetour end,
     function(v)
       Settings().noFMDetour = not v or nil
       Geo.planCache, Geo.customCache = nil, nil
     end, panel)
-  Geo.SettingsCheck(rb, L["Whole Roadbook on the map"], 560, -28, Geo.MapWholeGet, Geo.MapWholeSet, panel)
+  Geo.SettingsCheck(rb, L["Whole Roadbook on the map"], 600, -28, Geo.MapWholeGet, Geo.MapWholeSet, panel)
   -- Objective button: shown, compass, centered.
   local obj = Geo.SettingsBox(rb, L["Objective"], 8, -58, 776, 62)
   Geo.SettingsCheck(obj, L["Show"], 10, -28, CP.CHECKPOINT_TOGGLE.get, CP.CHECKPOINT_TOGGLE.set, panel)

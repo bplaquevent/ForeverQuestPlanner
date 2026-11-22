@@ -3,7 +3,7 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, CharKey, Color, HasBit, K, L = ns.AreaName, ns.CharKey, ns.Color, ns.HasBit, ns.K, ns.L
-local OM, QDB, QGet, Settings = ns.OM, ns.QDB, ns.QGet, ns.Settings
+local OM, QDB, QGet, Settings, SharedData = ns.OM, ns.QDB, ns.QGet, ns.Settings, ns.SharedData
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
@@ -38,15 +38,42 @@ local function GeoReady()
   return Geo.ready
 end
 
--- Drop rate (%) of an item on an NPC, from the Wowhead data shipped with QuestieDB.
+-- Drop rate (%) of an item on an NPC, in Questie's order: manual corrections, then the private server
+-- data (quest-only drops, measured on players having the quest), then Wowhead's (every kill counted:
+-- far too low for an item that only drops during the quest). Questie's own DropDB when Questie is
+-- loaded, otherwise the same order on the tables shipped with QuestieDB. nil: unknown.
+K.DROP_WOWHEAD, K.DROP_PSERVER = -1, -2 -- correction pointing to another table (Questie's DropDB.correctionKeys)
 local function DropRate(itemId, npcId)
+  if Geo.dropDB == nil then
+    Geo.dropDB = false
+    if QuestieLoader and QuestieLoader.ImportModule then
+      local ok, db = pcall(QuestieLoader.ImportModule, QuestieLoader, "DropDB")
+      if ok and type(db) == "table" and db.GetItemDroprate then Geo.dropDB = db end
+    end
+  end
+  if Geo.dropDB and Geo.dropDB.tablePserver then -- Questie loaded and its drop tables ready
+    local ok, r = pcall(Geo.dropDB.GetItemDroprate, itemId, npcId)
+    if ok then return type(r) == "table" and r[1] or nil end
+  end
   if Geo.drops == nil then
     Geo.drops = false
     local ok, mod = pcall(QDB.lib.Support.Get, "QuestieClassicItemDrops")
-    if ok and type(mod) == "table" then Geo.drops = LoadDataString(mod.wowheadData) or false end
+    if ok and type(mod) == "table" then
+      local okC, fix = pcall(QDB.lib.Support.Get, "QuestieItemDropCorrections")
+      Geo.drops = { wowhead = LoadDataString(mod.wowheadData) or {}, pserver = LoadDataString(mod.cmangosData) or {},
+        fix = okC and type(fix) == "table" and type(fix.Era) == "table" and fix.Era or {} }
+    end
   end
-  local t = Geo.drops and Geo.drops[itemId]
-  return t and t[npcId]
+  local d = Geo.drops
+  if not d then return nil end
+  local function get(t)
+    local row = t[itemId]
+    return row and row[npcId]
+  end
+  local fix = get(d.fix)
+  if fix and fix >= 0 then return fix end
+  if fix == K.DROP_WOWHEAD and get(d.wowhead) then return get(d.wowhead) end
+  return get(d.pserver) or get(d.wowhead)
 end
 
 -- Zone (AreaID) -> uiMapID (QuestieDB tables; a sub-zone takes its parent's map), or nil.
@@ -483,9 +510,7 @@ end
 
 -- Passes learned in game: { c, x, y, a, b, n } (world point, the zones' uiMapIDs a < b, times seen).
 function Geo.LearnedPasses()
-  local s = Settings()
-  s.passes = s.passes or {}
-  return s.passes
+  return SharedData().passes
 end
 
 -- Passes from QuestieDB's patrols: two ends of a patrol's paths in two zones, close to each other.
@@ -944,12 +969,14 @@ local function QuestTargets(id)
     end
     for _, o in ipairs(obj[3] or {}) do
       local itemId = o[1]
+      -- Drop rate: average over the monsters, each weighted by its number of spawns (the ones met).
       local pts, rateSum, rateN = {}, 0, 0
       local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
       for i = 1, math.min(#npcs, 6) do
-        for _, p in ipairs(EntityPoints("npc", npcs[i])) do pts[#pts + 1] = p end
+        local spawns = EntityPoints("npc", npcs[i])
+        for _, p in ipairs(spawns) do pts[#pts + 1] = p end
         local r = DropRate(itemId, npcs[i])
-        if r then rateSum, rateN = rateSum + r, rateN + 1 end
+        if r and #spawns > 0 then rateSum, rateN = rateSum + r * #spawns, rateN + #spawns end
       end
       local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
       for i = 1, math.min(#objs, 6) do

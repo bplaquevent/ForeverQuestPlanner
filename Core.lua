@@ -16,18 +16,109 @@ local function Print(msg)
   DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg))
 end
 
-local function Settings()
-  ForeverQuestPlannerSettings = ForeverQuestPlannerSettings or {}
-  ForeverQuestPlannerSettings.keep = nil -- old "Keep" list, removed
-  ForeverQuestPlannerSettings.excluded = nil -- old global list of removed quests (now kept per Roadbook)
-  ForeverQuestPlannerSettings.taxi = nil -- old flight paths recorded by FQP (now read from OpenMap)
-  return ForeverQuestPlannerSettings
-end
-
 local function CharKey()
   local name, realm = UnitFullName("player")
   realm = realm or (GetNormalizedRealmName and GetNormalizedRealmName()) or GetRealmName()
   return (name or "?") .. "-" .. (realm or "?")
+end
+
+-- What FQP saves is per character: ForeverQuestPlannerSettings.chars[CharKey()]; only what it learns
+-- about the world, true for every character, is shared (SharedData).
+-- Former versions saved most settings for the whole account: each character takes them over once,
+-- at its first use (its own entries of the tables keyed by character move to it, the other values
+-- are copied as its defaults), except the values tied to another character.
+local CHAR_TABLES = { roadbook = true, bind = true, pins = true, mapSaved = true, activeRoadbook = true,
+  custom = true, roadbookMigrated = true }
+local NOT_INHERITED = { chars = true, shared = true, passes = true, teleportArrivals = true, goal = true, goalLevel = true, mountSpeed = true, lastTab = true,
+  horizon = true, keep = true, excluded = true, taxi = true, rewardFilter = true, collapsed = true, focus = true }
+
+local function DeepCopy(v)
+  if type(v) ~= "table" then return v end
+  local t = {}
+  for k, x in pairs(v) do t[k] = DeepCopy(x) end
+  return t
+end
+
+local function MigrateSettings(root, key)
+  local st = {}
+  for k, v in pairs(root) do
+    if CHAR_TABLES[k] then
+      if type(v) == "table" then
+        st[k] = {}
+        for sub, val in pairs(v) do
+          if sub == key or sub == key .. "|custom" then
+            st[k][sub] = val
+            v[sub] = nil
+          end
+        end
+      end
+    elseif not NOT_INHERITED[k] then
+      st[k] = DeepCopy(v)
+    end
+  end
+  -- The session duration is a preference; a level goal is only taken over by a character below it
+  -- (the one that set it: the others, above it, could not use it).
+  local level = UnitLevel and UnitLevel("player") or 0
+  if root.goalLevel and root.goalLevel > level then st.goalLevel = root.goalLevel end
+  local g = root.goal
+  if type(g) == "table" and (g.kind == "time" or (g.kind == "level" and (g.value or 0) > level)) then
+    st.goal = DeepCopy(g)
+  end
+  return st
+end
+
+-- Learned about the world, shared by every character: zone passes walked ({ c, x, y, a, b, n }) and
+-- the places really reached by the teleport spells (spell -> point). Created once from what was saved
+-- before (account-wide, then per character in 2.56.16): the same pass seen twice is kept once.
+local function SharedData()
+  local root = ForeverQuestPlannerSettings
+  if type(root) ~= "table" then
+    root = {}
+    ForeverQuestPlannerSettings = root
+  end
+  if root.shared then return root.shared end
+  local shared = { passes = {}, teleportArrivals = {} }
+  local function take(t)
+    if type(t) ~= "table" then return end
+    for _, ps in ipairs(type(t.passes) == "table" and t.passes or {}) do
+      local same
+      for _, q in ipairs(shared.passes) do
+        if q.a == ps.a and q.b == ps.b and q.c == ps.c and math.abs(q.x - ps.x) < 150 and math.abs(q.y - ps.y) < 150 then
+          same = q
+          break
+        end
+      end
+      if same then same.n = math.max(same.n or 1, ps.n or 1) else table.insert(shared.passes, ps) end
+    end
+    for spell, p in pairs(type(t.teleportArrivals) == "table" and t.teleportArrivals or {}) do
+      shared.teleportArrivals[spell] = shared.teleportArrivals[spell] or p
+    end
+    t.passes, t.teleportArrivals = nil, nil
+  end
+  take(root)
+  for _, st in pairs(root.chars or {}) do take(st) end
+  root.shared = shared
+  return shared
+end
+
+local settingsCache = {}
+local function Settings()
+  local root = ForeverQuestPlannerSettings
+  if type(root) ~= "table" then
+    root = {}
+    ForeverQuestPlannerSettings = root
+  end
+  if settingsCache.root == root then return settingsCache.st end
+  root.chars = root.chars or {}
+  local key = CharKey()
+  local st = root.chars[key]
+  if not st then
+    st = MigrateSettings(root, key)
+    root.chars[key] = st
+  end
+  -- Cached once the character is fully known (name and realm).
+  if not (key:find("^%?%-") or key:find("%-%?$")) then settingsCache.root, settingsCache.st = root, st end
+  return st
 end
 
 local function Color(hex, s) return "|cff" .. hex .. tostring(s) .. "|r" end
@@ -80,7 +171,7 @@ K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above (o
 K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your level
 -- Technical search bound: quests whose required level is up to this many levels above yours are
 -- examined, but a quest only enters the Roadbook from the step where the expected level reaches its
--- required level (see Geo.StartIndex).
+-- required level (checked by the solver's evaluation).
 K.LOOKAHEAD_LEVELS = 5
 K.MAX_QUESTS = 40 -- quest log size on the Forever server
 
@@ -255,16 +346,7 @@ end
 local function DBXP(id, plevel)
   local row = QDB.xp[id]
   if not row then return nil end
-  local qLevel, xp = row[1], row[2]
-  if not qLevel or qLevel <= 0 or not xp or xp <= 0 then return 0 end
-  if GetMaxPlayerLevel and plevel >= GetMaxPlayerLevel() then return 0 end
-  local mult = math.max(1, math.min(10, 2 * (qLevel - plevel) + 20))
-  xp = xp * mult / 10
-  if xp <= 100 then xp = 5 * math.floor((xp + 2) / 5)
-  elseif xp <= 500 then xp = 10 * math.floor((xp + 5) / 10)
-  elseif xp <= 1000 then xp = 25 * math.floor((xp + 12) / 25)
-  else xp = 50 * math.floor((xp + 25) / 50) end
-  return math.floor(xp)
+  return ns.Solver.QuestXP(row[1], row[2], plevel, GetMaxPlayerLevel and GetMaxPlayerLevel() or nil)
 end
 
 local function NextQuests(m)
@@ -803,4 +885,4 @@ ns.HasBit, ns.InitDeps, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMet
 ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PROFESSION_SKILLS, ns.PlayerBits = K, L, MoneyText, NextQuests, PROFESSION_SKILLS, PlayerBits
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.SLOTS, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = SLOTS, ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
-ns.OM, ns.TurnInText = OM, TurnInText
+ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText

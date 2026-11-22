@@ -8,7 +8,7 @@ local ICON, IsCompleted, IsInLog, K, L, Nearest = ns.ICON, ns.IsCompleted, ns.Is
 local PinPoint, PlayerPos, PointText, Print, QDB, QGet = ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet
 local QuestTargets, Refresh, Route, Settings, Snapshot, StartScan = ns.QuestTargets, ns.Refresh, ns.Route, ns.Settings, ns.Snapshot, ns.StartScan
 local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.KnownFlights, ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
-local scan = ns.scan
+local OpenQuestDetails, scan = ns.OpenQuestDetails, ns.scan
 
 ---------------------------------------------------------------------------
 -- Roadbook checkpoints: focus on the next step from a floating button
@@ -51,7 +51,7 @@ function CP.StepPinLabel(s)
   if s.kind == "dungeon" then return L["enter the dungeon"] end
   if s.kind == "fm" then return L["activate the flight master"] end
   if s.kind == "bind" then return L["bind the hearthstone"] end
-  if s.kind == "hearth" then return L["hearthstone"] end
+  if s.kind == "hearth" then return s.task.spell and L["teleport"] or L["hearthstone"] end
   if s.kind == "travel" then return L["transport"] end
   if s.kind == "take" then return L["pick up the quest"] end
   if s.kind == "obj" then return s.r and s.r.tg.name or L["objective"] end
@@ -112,16 +112,14 @@ function CP.FocusedStepIndex(plan)
   return nil
 end
 
--- Validate the checkpoint: focus on the next step of the saved Roadbook if the current one is
--- done in the game (see CP.ValidateUnsafe).
 ---------------------------------------------------------------------------
 -- Saved Roadbook: once computed, the plan no longer changes until its end, or until a
--- recompute request (duration change, Recalculate button, Ctrl-click on the button).
+-- recompute request (duration change, Recalculate button).
 ---------------------------------------------------------------------------
 function Geo.CopyPoint(p)
   if not p then return nil end
   return { c = p.c, x = p.x, y = p.y, area = p.area, ui = p.ui, mx = p.mx, my = p.my, zoneName = p.zoneName,
-    teleport = p.teleport, instance = p.instance, lmin = p.lmin, lmax = p.lmax }
+    teleport = p.teleport, cast = p.cast, instance = p.instance, lmin = p.lmin, lmax = p.lmax }
 end
 
 -- Quest steps done inside a dungeon (dungeon step of the custom Roadbook).
@@ -149,7 +147,7 @@ end
 function Geo.SerializeStep(st)
   local t = st.task or {}
   return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots, quick = st.quick,
-    escort = st.escort, glue = st.glue,
+    escort = st.escort, glue = st.glue, via = st.via, bindDest = st.bindDest,
     fmHub = st.fmHub and { id = st.fmHub.id, node = st.fmHub.node, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil,
     members = Geo.SerializeMembers(t.members),
     spotN = st.spot and st.spot.n, done = st.done, p = Geo.CopyPoint(st.p),
@@ -158,7 +156,7 @@ function Geo.SerializeStep(st)
     task = { id = t.id, title = t.title, level = t.level, xp = t.xp, starter = t.starter, reqLevel = t.reqLevel,
       depTitle = t.dep and t.dep.title, tags = t.tags, npc = t.npc, mode = t.mode, from = t.from, dest = t.dest,
       destP = Geo.CopyPoint(t.destP), kind = t.kind, quick = t.quick, dungeon = t.dungeon, warn = t.warn,
-      levelWarn = t.levelWarn, orderWarn = t.orderWarn } }
+      levelWarn = t.levelWarn, orderWarn = t.orderWarn, spell = t.spell } }
 end
 
 function Geo.DeserializeStep(rec, tasks)
@@ -169,12 +167,12 @@ function Geo.DeserializeStep(rec, tasks)
     task = { id = tr.id, title = tr.title, level = tr.level, xp = tr.xp, starter = tr.starter, reqLevel = tr.reqLevel,
       dep = tr.depTitle and { title = tr.depTitle } or nil, tags = tr.tags, npc = tr.npc, mode = tr.mode,
       from = tr.from, dest = tr.dest, destP = tr.destP, kind = tr.kind, quick = tr.quick, stops = {},
-      dungeon = tr.dungeon, warn = tr.warn, levelWarn = tr.levelWarn, orderWarn = tr.orderWarn,
+      dungeon = tr.dungeon, warn = tr.warn, levelWarn = tr.levelWarn, orderWarn = tr.orderWarn, spell = tr.spell,
       members = Geo.DeserializeMembers(rec.members) }
     tasks[key] = task
   end
   local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots, quick = rec.quick,
-    escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub,
+    escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub, via = rec.via, bindDest = rec.bindDest,
     spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task,
     r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind }, count = rec.count } or nil }
   if rec.first then task.stops[1] = st end
@@ -204,7 +202,7 @@ function Geo.Freeze(route, info, excluded, kind)
     custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered,
     goal = info.goal, goalStage = info.goalStage }
   Geo.FrozenStore()[Geo.FrozenKey(kind)] = { saved = date and date("%H:%M") or "",
-    start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, excluded = excluded }
+    start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, excluded = excluded, recall = Geo.RecallState() }
   Geo.frozen[kind] = { route = route, info = info }
   Geo.MapSync() -- a new or adapted plan: redrawn on the map if it is there
 end
@@ -509,10 +507,16 @@ function CP.DoStart(kind)
   if Refresh then Refresh() end
 end
 
--- Start of a Roadbook: its next transport steps are matched to where the player is now. The ones
+-- Start of a Roadbook: if the hearthstone / teleport cooldowns changed since it was saved, or if you
+-- are elsewhere while one can be used, the steps to come are computed again (CP.RecallCheck).
+-- Otherwise its next transport steps are matched to where the player is now. The ones
 -- up to a destination already reached are done; a flight / boat step far from both its departure
--- and the previous step is replaced by the route from here. Returns true if the focus was placed.
+-- and the previous step is replaced by the route from here. Returns true if the focus was placed
+-- (or will be, after the computation).
 function CP.Resync(kind)
+  local okR, replanned = pcall(CP.RecallCheck, kind, true)
+  if not okR then Print(L["Roadbook update error: "] .. tostring(replanned)) end
+  if okR and replanned then return true end
   local fz = Geo.Frozen(kind)
   local pos = PlayerPos()
   if not (fz and pos) then return false end
@@ -545,6 +549,116 @@ function CP.Resync(kind)
   end
   if far(st.p) and far(route[nextI - 1].p) then return CP.Reroute(st, pos, L["Position changed: new route. "]) end
   return false
+end
+
+-- Hearthstone and class teleports ---------------------------------------------
+-- The saved Roadbook keeps the state of the ways back (cooldowns, runes, bind location) it was
+-- computed with. When it changes (or, at start, when you are elsewhere), the steps to come are
+-- adapted to the position and the cooldowns now; the steps done stay (history).
+
+-- The planned use of a way back (or the planned bind) is not a change: the saved state follows it.
+function Geo.RestampRecalls(kind)
+  local rec = Geo.FrozenRec(kind or Geo.ActiveKind())
+  if rec then rec.recall = Geo.RecallState() end
+end
+
+-- Returns true if an update was started. atStart: the tracking (re)starts; the position counts too.
+function CP.RecallCheck(kind, atStart)
+  local fz, rec = Geo.Frozen(kind), Geo.FrozenRec(kind)
+  if not (fz and rec) or Geo.computing then return false end
+  local now = Geo.RecallState()
+  if not rec.recall and not atStart then -- Roadbook from a former version: its state starts now
+    rec.recall = now
+    return false
+  end
+  local route, first = fz.route, nil
+  for i = 2, #route do if not CP.StepDone(route[i]) then first = i break end end
+  if not first then return false end
+  local changed = Geo.RecallChanged(rec.recall, now)
+  if not changed and atStart then
+    local ahead = next(now.src) ~= nil
+    for i = first, #route do
+      if route[i].kind == "hearth" or route[i].kind == "bind" then ahead = true break end
+    end
+    local pos = PlayerPos()
+    local d = ahead and pos and Dist(pos, route[first - 1].p)
+    changed = d ~= nil and d > K.LANDING_RADIUS
+  end
+  if not changed then return false end
+  return CP.RecallReplan(kind, L["Position or hearthstone / teleport cooldowns changed: the steps to come are updated. "])
+end
+
+-- Steps to come computed again from here: the automatic Roadbook keeps its quests and their order
+-- (only travel, flight master, hearthstone and teleport steps change); the custom one is planned
+-- again from its list. The focus stays on the same step if it is still there.
+function CP.RecallReplan(kind, msg)
+  if kind == "custom" then
+    if #Geo.CustomList() == 0 or not GeoReady() then return false end
+    Print(msg)
+    CP.focusAfter = kind
+    CP.Recompute(kind, true)
+    return true
+  end
+  local fz = Geo.Frozen(kind)
+  local was = CP.CurrentFocus()
+  local ok, route, info = pcall(Geo.Reroute, fz, false, CP.StepDone)
+  if not ok then
+    Print(L["Roadbook update error: "] .. tostring(route))
+    return false
+  end
+  Geo.Freeze(route, info, Geo.FrozenRec(kind) and Geo.FrozenRec(kind).excluded, kind)
+  local target
+  for i = 2, #route do
+    local st = route[i]
+    if not CP.StepDone(st) then
+      target = target or st
+      if was and CP.SameStep(st, was) then target = st break end
+    end
+  end
+  CP.ClearFocus()
+  if target then
+    Print(msg .. L["Focus: "] .. CP.StepText(target))
+    CP.FocusStep(target)
+  else
+    Print(msg)
+    CP.FocusNext(false)
+  end
+  if Refresh then C_Timer.After(0.2, Refresh) end
+  return true
+end
+
+-- While a Roadbook is followed: cooldown, rune, spell or bind changes are checked a few seconds
+-- later (never during a flight, a fight or a computation).
+function CP.ScheduleRecallCheck(delay)
+  if not (Geo.Tracking() and GetTime) then return end
+  local now = GetTime()
+  local at = math.max(CP.recallAt or 0, now + (delay or 3))
+  CP.recallAt = at
+  CP.recallToken = (CP.recallToken or 0) + 1
+  local token = CP.recallToken
+  C_Timer.After(at - now, function()
+    if token ~= CP.recallToken then return end
+    CP.recallAt = nil
+    local kind = Geo.ActiveKind()
+    if not (Geo.Tracking() and Geo.Frozen(kind)) then return end
+    if CP.flying or Geo.computing or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
+      or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) or not PlayerPos() then
+      CP.ScheduleRecallCheck(10)
+      return
+    end
+    local ok, err = pcall(CP.RecallCheck, kind, false)
+    if not ok then Print(L["Roadbook update error: "] .. tostring(err)) end
+  end)
+end
+
+-- Cast of the hearthstone or of a class teleport (key: "hearth" or the spell id).
+function CP.RecallCast(key)
+  local s = CP.CurrentFocus()
+  if s and s.kind == "hearth" and tostring(s.via or "hearth") == tostring(key) then
+    C_Timer.After(1.5, function() Geo.RestampRecalls() end) -- the planned one
+  else
+    CP.ScheduleRecallCheck(8) -- unplanned: the route is adapted after the arrival
+  end
 end
 
 StaticPopupDialogs["FQP_SWITCH"] = {
@@ -708,6 +822,8 @@ function CP.Recompute(kind, keep, attempt, token)
   end
   local was = Geo.ActiveKind() == kind and CP.CurrentFocus() or nil
   Geo.Recompute(kind, function(route, err)
+    local refocus = CP.focusAfter == kind -- tracking (re)started during the computation
+    CP.focusAfter = nil
     if not route or #route < 2 then
       Print(err or L["The Roadbook is empty: no step to follow."])
       CP.RefreshButton()
@@ -718,7 +834,10 @@ function CP.Recompute(kind, keep, attempt, token)
       CP.RefreshButton()
       return
     end
-    if not was then CP.RefreshButton() return end
+    if not was then
+      if refocus and Geo.ActiveKind() == kind then CP.FocusNext(false) else CP.RefreshButton() end
+      return
+    end
     -- Custom Roadbook recomputed while followed: the current objective stays if it is still there.
     local first
     for i = 2, #route do
@@ -732,10 +851,10 @@ function CP.Recompute(kind, keep, attempt, token)
   end, keep)
 end
 
--- Click on the button: focus the next step only if the current one is done in the game.
--- Active Roadbook empty: the window opens on its tab (a Roadbook is only made there);
--- otherwise, not followed yet: it starts.
-function CP.ValidateUnsafe()
+-- Click on the button. Active Roadbook not followed: it starts (empty: the window opens on its tab,
+-- where a Roadbook is made). Followed: the game's quest log opens on the quest of the current step,
+-- or, with no quest in the log, the world map centered on the step's pin.
+function CP.ObjectiveClickUnsafe()
   local kind = Geo.ActiveKind()
   if not Geo.Frozen(kind) then
     if Geo.computing == kind then Print(L["Computing the Roadbook, please wait…"]) else CP.ShowActive() end
@@ -751,44 +870,13 @@ function CP.ValidateUnsafe()
     return
   end
   local cur = CP.CurrentFocus()
-  if cur and not CP.StepDone(cur) then
-    CP.FocusStep(cur) -- tracking active: the pin is placed on the current step again
-    Print(L["Focus: "] .. CP.StepText(cur))
-    return
+  if not cur then return end
+  local qid = cur.task and cur.task.id
+  if qid and IsInLog(qid) then
+    OpenQuestDetails(qid)
+  else
+    Geo.ShowStep(cur, kind)
   end
-  if cur then Geo.MarkDone(cur) end
-  CP.FocusNext(false, cur) -- no tracking yet, or step done: first step left to do
-end
-
--- Ctrl-click: pauses the active Roadbook (its progress is kept).
-function CP.StopTracking()
-  if not Geo.Tracking() then
-    Print(L["No objective tracked."])
-    return
-  end
-  CP.Pause(Geo.ActiveKind())
-end
-
--- Shift-click: link of the quest of the followed step in the chat.
-function CP.LinkCurrentQuest()
-  local cur = CP.CurrentFocus()
-  local id = cur and cur.task and cur.task.id
-  if id then Geo.LinkQuestInChat(id) else Print(L["No quest for this objective."]) end
-end
-
--- Ctrl-Alt-click: skips the current step. A quest step skips the whole quest (the route is
--- adapted), after confirmation; any other step (flight, hearthstone…) is just skipped.
-function CP.SkipCurrentStep()
-  local cur = CP.CurrentFocus()
-  if not cur then
-    Print(L["No objective tracked."])
-    return
-  end
-  if cur.task and cur.task.id then
-    CP.ConfirmSkipQuest(cur, Geo.ActiveKind())
-    return
-  end
-  CP.SkipStep(cur)
 end
 
 -- Skips a step with no quest (hearthstone, transport…): it is marked done; if it is the followed
@@ -862,8 +950,8 @@ function CP.SkipQuest(s, kind)
   end
 end
 
-function CP.Validate()
-  local ok, err = xpcall(function() CP.ValidateUnsafe() end, function(e)
+function CP.ObjectiveClick()
+  local ok, err = xpcall(function() CP.ObjectiveClickUnsafe() end, function(e)
     return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
   end)
   if not ok then Print(L["|cffff6060Error while validating the checkpoint|r (copy it to report it):\n"] .. err) end
@@ -1066,8 +1154,10 @@ function CP.OnGameEvent(event, a1, a2)
   if s.kind == "bind" then
     if event == "HEARTHSTONE_BOUND" then CP.AutoUpdate(L["Hearthstone bound"]) end
   elseif s.kind == "hearth" then
-    if event == "FQP_HEARTH_ARRIVED" then
-      CP.AutoUpdate(L["Back by hearthstone"])
+    if event == "FQP_HEARTH_ARRIVED" and tostring(a1 or "hearth") == tostring(s.via or "hearth") then
+      CP.AutoUpdate(a1 and a1 ~= "hearth" and L["Teleport done"] or L["Back by hearthstone"])
+    elseif event == "FQP_HEARTH_ARRIVED" then
+      CP.CheckHearthArrival(s)
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK" then
       CP.CheckHearthArrival(s)
     end
@@ -1110,8 +1200,8 @@ function CP.StepSummary(s)
     return "|TInterface\\Minimap\\Tracking\\Innkeeper:14:14|t " .. (task.title or "?"),
       L["Talk to "] .. (task.npc or "?") .. " · " .. place
   elseif s.kind == "hearth" then
-    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t " .. (task.title or "?"),
-      L["Use the hearthstone · saves ~"] .. FormatTime(s.gain or 0)
+    local icon, _, action = Geo.RecallText(s)
+    return icon .. " " .. (task.title or "?"), action
   elseif s.kind == "travel" then
     return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.mode == "vol" and L["Flight"] or K.MODE_NAME[task.mode] or task.mode or L["Transport"]) ..
       L[" to "] .. (task.dest or "?"), L["Departure: "] .. (task.from or "?") .. " · " .. place
@@ -1197,13 +1287,6 @@ function CP.RefreshButton()
   b.compassTarget = CP.CompassTarget()
 end
 
--- Commands of the Objective button, shown in its tooltip (two per line).
-K.OBJECTIVE_COMMANDS = {
-  { "Click: start", "Ctrl-click: pause" },
-  { "Shift-click: chat link", "Ctrl-Alt-click: skip the step" },
-  { "Right-click: Roadbook", "Shift-right-click: center" },
-  { "Shift-drag: move" },
-}
 K.OBJECTIVE_TEXT_X = 59       -- text of the Objective button, right of the compass square
 K.OBJECTIVE_MAX_WIDTH = 380   -- widest Objective button (beyond, one information per line)
 
@@ -1392,56 +1475,17 @@ function CP.CreateCheckpointButton()
   end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
-    self.dragEnd = GetTime and GetTime() or 0 -- the release of a Shift-drag must not count as a Shift-click (link)
+    self.dragEnd = GetTime and GetTime() or 0 -- the release of a Shift-drag must not count as a click
     local point, _, _, x, y = self:GetPoint()
     Settings().checkpointPos = { point, x, y }
   end)
-  b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-  b:SetScript("OnClick", function(_, button)
-    if b.dragEnd and GetTime and GetTime() - b.dragEnd < 0.3 then return end
-    if button == "RightButton" then
-      if IsShiftKeyDown and IsShiftKeyDown() then
-        CP.CenterCheckpointButton() -- Shift-right-click: center the button horizontally
-      elseif CP.OpenWindow then
-        CP.OpenWindow(Geo.TabOf(Geo.ActiveKind())) -- right-click: window opened on the active Roadbook
-      end
-    else
-      local alt = IsAltKeyDown and IsAltKeyDown()
-      local ctrl = IsControlKeyDown and IsControlKeyDown()
-      local shift = IsShiftKeyDown and IsShiftKeyDown()
-      if alt and ctrl then
-        CP.SkipCurrentStep()     -- Ctrl-Alt-click: skip the step (a quest step skips the whole quest)
-      elseif alt then
-        return                   -- Alt-click: nothing (a new Roadbook is made from the Roadbook tab)
-      elseif ctrl then
-        CP.StopTracking()        -- Ctrl-click: stop following the objective
-      elseif shift then
-        CP.LinkCurrentQuest()    -- Shift-click: link of the objective's quest in the chat
-      else
-        CP.Validate()            -- click: start / follow the objective
-      end
-    end
+  b:RegisterForClicks("LeftButtonUp")
+  b:SetScript("OnClick", function()
+    if b.dragEnd and GetTime and GetTime() - b.dragEnd < 0.3 then return end -- release of a Shift-drag
+    CP.ObjectiveClick()
   end)
-  b:SetScript("OnEnter", function(self)
-    if self.HoverIn then self.HoverIn() end
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine(L["Forever Quest Planner - Roadbook"])
-    if self.current then
-      GameTooltip:AddLine(L["Current step: "] .. CP.StepText(self.current), 1, 1, 1, true)
-    else
-      GameTooltip:AddLine(L["No objective tracked."], 1, 1, 1, true)
-    end
-    -- Commands: compact, two per line, dimmed (the step detail stays the main content).
-    GameTooltip:AddLine(" ")
-    for _, pair in ipairs(K.OBJECTIVE_COMMANDS) do
-      GameTooltip:AddDoubleLine(L[pair[1]], pair[2] and L[pair[2]] or "", 0.55, 0.55, 0.55, 0.55, 0.55, 0.55)
-    end
-    GameTooltip:Show()
-  end)
-  b:SetScript("OnLeave", function(self)
-    if self.HoverOut then self.HoverOut() end
-    GameTooltip:Hide()
-  end)
+  b:SetScript("OnEnter", function(self) if self.HoverIn then self.HoverIn() end end)
+  b:SetScript("OnLeave", function(self) if self.HoverOut then self.HoverOut() end end)
   CP.checkpointButton = b
   CP.UpdateCheckpointButton()
   CP.RefreshButton()

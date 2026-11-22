@@ -1,11 +1,10 @@
--- Forever Quest Planner: Roadbook: transport stops, hearthstone, route optimization (PlanXP).
+-- Forever Quest Planner: Roadbook: transport stops, hearthstone and class teleports, planning with the solver (PlanXP).
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, BuildNetwork, BuildScanContext, BuildTasks, CharKey, DBXP, Dist = ns.AreaName, ns.BuildNetwork, ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.DBXP, ns.Dist
-local Geo, GetItemInfoCompat, InsertStops, K, L, MakeTravel = ns.Geo, ns.GetItemInfoCompat, ns.InsertStops, ns.K, ns.L, ns.MakeTravel
-local PlayerPos, Print, Route, Settings, TaxiCount, TravelSpeed = ns.PlayerPos, ns.Print, ns.Route, ns.Settings, ns.TaxiCount, ns.TravelSpeed
-local WorldPos, scan = ns.WorldPos, ns.scan
+local AreaName, BuildNetwork, CharKey, Dist, Geo, GetItemInfoCompat = ns.AreaName, ns.BuildNetwork, ns.CharKey, ns.Dist, ns.Geo, ns.GetItemInfoCompat
+local K, L, PlayerPos, Print, Route, Settings = ns.K, ns.L, ns.PlayerPos, ns.Print, ns.Route, ns.Settings
+local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData, ns.Solver, ns.TaxiCount, ns.TravelSpeed, ns.WorldPos, ns.scan
 
 ---------------------------------------------------------------------------
 -- Transports: "take the flight / zeppelin / boat" step at the boarding point
@@ -90,7 +89,8 @@ function Geo.AddTransportStops(route, nets, plevel)
 end
 
 ---------------------------------------------------------------------------
--- Hearthstone: bind at an innkeeper and hearth back, to save travel time
+-- Hearthstone and class teleports: bind at an innkeeper, hearth back, Astral Recall, mage and
+-- druid teleports, to save travel time
 ---------------------------------------------------------------------------
 K.HEARTHSTONE = 6948
 K.HEARTH_SPELL = 8690
@@ -99,6 +99,25 @@ K.HEARTH_CD = 3600      -- hearthstone cooldown
 K.HEARTH_MIN_GAIN = 120 -- minimum gain (s) to suggest hearthing
 K.BIND_WORK = 20        -- talking to the innkeeper
 K.INN_DETOUR = 500      -- maximum detour (m, as the crow flies) to go and bind
+K.RECALL_TOLERANCE = 60 -- a cooldown that moved by more than this (s) changes the plan
+K.TELEPORT_RUNE = 17031 -- Rune of Teleportation (mage teleports)
+K.TELEPORT_MAX_GAP = 1500 -- a place farther than this (m) from the default arrival is not the arrival
+-- Class spells: bind = back to the hearthstone's bind point; otherwise a fixed arrival (AreaID +
+-- 0-100 coordinates, approximate: replaced by the place really reached after the first cast).
+-- cast = cast + loading (s); cd = cooldown used to space two uses (the real remaining time is read).
+-- The mage portals are left out: alone, they lead to the same places as the teleports.
+K.RECALL_SPELLS = {
+  { spell = 556, bind = true, cast = 30, cd = 900 },                                  -- Astral Recall (shaman)
+  { spell = 3561, area = 1519, x = 38.0, y = 79.0, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Stormwind
+  { spell = 3562, area = 1537, x = 25.5, y = 7.0, cast = 30, reagent = K.TELEPORT_RUNE },  -- Teleport: Ironforge
+  { spell = 3565, area = 1657, x = 40.0, y = 82.0, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Darnassus
+  { spell = 3567, area = 1637, x = 38.5, y = 85.5, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Orgrimmar
+  { spell = 3563, area = 1497, x = 84.5, y = 17.0, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Undercity
+  { spell = 3566, area = 1638, x = 22.5, y = 16.5, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Thunder Bluff
+  { spell = 18960, area = 493, x = 44.0, y = 45.0, cast = 30 },                       -- Teleport: Moonglade (druid)
+}
+K.RECALL_BY_SPELL = {}
+for _, e in ipairs(K.RECALL_SPELLS) do K.RECALL_BY_SPELL[e.spell] = e end
 
 function Geo.BindStore()
   local st = Settings()
@@ -182,221 +201,141 @@ function Geo.HearthReady()
   return 0
 end
 
-function Geo.RouteTime(route, travel)
-  local t = 0
-  for i = 2, #route do t = t + travel(route[i - 1].p, route[i].p) + route[i].work end
-  return t
+-- Spell name, icon and cooldown: the C_Spell API of recent clients (Forever's client no longer has
+-- GetSpellInfo and the like), otherwise the former functions.
+function Geo.SpellName(spell)
+  local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spell)
+  if not name and GetSpellInfo then name = GetSpellInfo(spell) end
+  return name
 end
 
-function Geo.HearthStep(bindP, gain)
-  local dest = AreaName(bindP.area) or bindP.zoneName or bindP.name or "?"
-  return { kind = "hearth", work = 0, gain = gain,
-    p = { c = bindP.c, x = bindP.x, y = bindP.y, area = bindP.area, ui = bindP.ui, mx = bindP.mx, my = bindP.my,
-      zoneName = bindP.zoneName, teleport = true },
-    task = { title = L["Hearthstone: back to "] .. dest, xp = 0, hearth = true } }
+function Geo.SpellIcon(spell)
+  local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spell)
+  if not tex and GetSpellTexture then tex = GetSpellTexture(spell) end
+  return tex
 end
 
--- Places hearths where they save the most, respecting the cooldown.
--- The bind location changes after a "bind" step.
-function Geo.ApplyHearth(route, travel, bind0, ready0)
-  local cands, clock, bindP = {}, 0, bind0
-  for i = 2, #route do
-    local prev, cur = route[i - 1], route[i]
-    local normal = travel(prev.p, cur.p)
-    if bindP and cur.kind ~= "hearth" and not cur.glue then
-      local gain = normal - (K.HEARTH_TIME + travel(bindP, cur.p))
-      if gain >= K.HEARTH_MIN_GAIN then cands[#cands + 1] = { i = i, t = clock, gain = gain, bindP = bindP } end
-    end
-    clock = clock + normal + cur.work
-    if cur.kind == "bind" then bindP = cur.bindP end
+-- Seconds until a spell is ready (0 = ready); the global cooldown does not count.
+function Geo.SpellReady(spell)
+  if not GetTime then return 0 end
+  local start, dur
+  if C_Spell and C_Spell.GetSpellCooldown then
+    local info = C_Spell.GetSpellCooldown(spell)
+    if type(info) == "table" then start, dur = info.startTime, info.duration end
+  elseif GetSpellCooldown then
+    start, dur = GetSpellCooldown(spell)
   end
-  table.sort(cands, function(a, b) return a.gain > b.gain end)
-  local chosen, byIndex, total = {}, {}, 0
-  for _, c in ipairs(cands) do
-    local ok = c.t >= ready0
-    for _, o in ipairs(chosen) do
-      if math.abs(c.t - o.t) < K.HEARTH_CD then ok = false break end
-    end
-    if ok then
-      chosen[#chosen + 1] = c
-      byIndex[c.i] = c
-      total = total + c.gain
-    end
-  end
-  if #chosen == 0 then return route, 0 end
-  local out = { route[1] }
-  for i = 2, #route do
-    local c = byIndex[i]
-    if c then out[#out + 1] = Geo.HearthStep(c.bindP, c.gain) end
-    out[#out + 1] = route[i]
-  end
-  return out, total
+  if start and dur and start > 0 and dur > 1.5 then return math.max(0, start + dur - GetTime()) end
+  return 0
 end
 
--- Removes hearths that became impossible (stone not ready yet) and recomputes their gain.
-function Geo.FixHearth(route, travel, ready0)
-  local out, clock, ready = { route[1] }, 0, ready0
-  for i = 2, #route do
-    local s = route[i]
-    local keep = true
-    if s.kind == "hearth" then
-      if clock < ready then keep = false else ready = clock + K.HEARTH_CD end
-    end
-    if keep then
-      clock = clock + travel(out[#out].p, s.p) + s.work
-      out[#out + 1] = s
-    end
-  end
-  -- A bind with no hearth after it is useless.
-  local final, needed = {}, false
-  for i = #out, 1, -1 do
-    local s = out[i]
-    if s.kind == "hearth" then needed = true end
-    if s.kind == "bind" then
-      if needed then table.insert(final, 1, s) end
-      needed = false
-    else
-      table.insert(final, 1, s)
-    end
-  end
-  return final
+function Geo.SpellKnown(spell)
+  if IsPlayerSpell and IsPlayerSpell(spell) then return true end
+  return (IsSpellKnown and IsSpellKnown(spell)) and true or false
 end
 
--- Best strategy: hearths to the current bind location, or binding at an inn
--- met on the way and then hearthing back to it.
-function Geo.OptimizeHearth(route, travel)
-  if Settings().noHearth or #route < 3 then return route end
-  local ready0 = Geo.HearthReady()
-  if not ready0 then return route end
-  local bind0 = Geo.CurrentBind()
-  local best, bestT = route, Geo.RouteTime(route, travel)
-  if bind0 then
-    local r, gain = Geo.ApplyHearth(route, travel, bind0, ready0)
-    if gain > 0 then
-      local t = Geo.RouteTime(r, travel)
-      if t < bestT then best, bestT = r, t end
+local function ItemCount(id)
+  return (C_Item and C_Item.GetItemCount and C_Item.GetItemCount(id)) or (GetItemCount and GetItemCount(id)) or 0
+end
+
+-- Arrival of a teleport spell: the place reached after its last cast, otherwise the default one.
+function Geo.TeleportStore()
+  return SharedData().teleportArrivals
+end
+
+function Geo.RecordTeleport(spell, p)
+  local e = K.RECALL_BY_SPELL[spell]
+  if not (p and e and e.area) then return end
+  -- Still before the loading screen (or somewhere else): not the arrival.
+  local d = Dist(p, WorldPos(e.area, e.x, e.y) or {})
+  if not d or d > K.TELEPORT_MAX_GAP then return end
+  local mp = Geo.MapPoint({ c = p.c, x = p.x, y = p.y })
+  Geo.TeleportStore()[spell] = { c = p.c, x = p.x, y = p.y, area = p.area, mx = p.mx or mp.mx, my = p.my or mp.my,
+    ui = (not p.area) and mp.ui or nil, zoneName = mp.zoneName }
+  Geo.recallDest = nil
+end
+
+function Geo.TeleportDest(e)
+  Geo.recallDest = Geo.recallDest or {}
+  local p = Geo.recallDest[e.spell]
+  if p then return p end
+  p = Geo.TeleportStore()[e.spell]
+  if not p then
+    p = WorldPos(e.area, e.x, e.y)
+    if p then p.approx = true end
+  end
+  Geo.recallDest[e.spell] = p
+  return p
+end
+
+-- Ways back usable by the Roadbook now, according to the options: the hearthstone (key "hearth"),
+-- then the class spells known (key = spell id). Each one: { key, bind (to the bind point) or p,
+-- cast, cd, ready (s until usable), charges (uses left, nil = unlimited), spell, name }.
+function Geo.RecallSources()
+  local out = {}
+  if not Settings().noHearth then
+    local ready = Geo.HearthReady()
+    if ready then
+      out[#out + 1] = { key = "hearth", bind = true, cast = K.HEARTH_TIME, cd = K.HEARTH_CD, ready = ready,
+        name = L["Hearthstone"] }
     end
   end
-  for _, inn in ipairs(Geo.Innkeepers()) do
-    local same = bind0 and Dist(bind0, inn.p)
-    if not (same and same < 60) then
-      local bestK, bestD
-      for k = 2, #route do
-        if route[k].kind ~= "hearth" and not route[k].glue then
-          local a, b = route[k - 1].p, route[k].p
-          local d1, d2, d0 = Dist(a, inn.p), Dist(inn.p, b), Dist(a, b)
-          if d1 and d2 and d0 and (not bestD or d1 + d2 - d0 < bestD) then bestK, bestD = k, d1 + d2 - d0 end
-        end
-      end
-      if bestK and bestD <= K.INN_DETOUR then
-        local r = {}
-        for k = 1, #route do
-          if k == bestK then
-            r[#r + 1] = { kind = "bind", p = inn.p, bindP = inn.p, work = K.BIND_WORK,
-              task = { title = L["Bind your hearthstone: "] .. (AreaName(inn.p.area) or "?"), npc = inn.name, xp = 0, bind = true } }
-          end
-          r[#r + 1] = route[k]
-        end
-        local r2, gain = Geo.ApplyHearth(r, travel, bind0, ready0)
-        if gain > 0 then
-          local t = Geo.RouteTime(r2, travel)
-          if t < bestT - K.HEARTH_MIN_GAIN then best, bestT = r2, t end
-        end
+  if Settings().noRecallSpells then return out end
+  for _, e in ipairs(K.RECALL_SPELLS) do
+    if Geo.SpellKnown(e.spell) then
+      local charges = e.reagent and ItemCount(e.reagent) or nil
+      local p = not e.bind and Geo.TeleportDest(e) or nil
+      if (charges == nil or charges > 0) and (e.bind or p) then
+        local name = Geo.SpellName(e.spell)
+        out[#out + 1] = { key = e.spell, spell = e.spell, bind = e.bind, p = p, cast = e.cast, cd = e.cd or 0,
+          ready = Geo.SpellReady(e.spell), charges = charges, name = name or ("#" .. e.spell) }
       end
     end
   end
-  return best
+  return out
 end
 
--- Task insertion constraints: after the turn-in of the quest it follows, and after the
--- moment the expected level reaches its required level. Returns the index to insert after, or nil.
-function Geo.StartIndex(task, lv, idx)
-  local si = 1
-  if task.dep then
-    local i = idx[task.dep.stops[#task.dep.stops]]
-    if not i then return nil end
-    si = i
+-- State of the ways back, saved with a Roadbook to tell later whether it changed:
+-- { [key] = { ready = server time when usable, charges }, bind = bind location name }.
+function Geo.RecallState()
+  local now = time and time() or 0
+  local state = { bind = GetBindLocation and GetBindLocation() or nil, src = {} }
+  for _, s in ipairs(Geo.RecallSources()) do
+    state.src[tostring(s.key)] = { ready = now + math.floor(s.ready + 0.5), charges = s.charges }
   end
-  if task.reqLevel then
-    local found
-    for i = si, #lv do
-      if lv[i] >= task.reqLevel then found = i break end
-    end
-    if not found then return nil end
-    si = found
-  end
-  return si
+  return state
 end
 
-function Geo.Index(route)
-  local idx = {}
-  for i, st in ipairs(route) do idx[st] = i end
-  return idx
+-- The ways back changed since `saved` (Geo.RecallState): one more or less, a cooldown used or
+-- reset, a rune more or less, another bind location.
+function Geo.RecallChanged(saved, now)
+  if not saved then return true end
+  now = now or Geo.RecallState()
+  if saved.bind ~= now.bind then return true end
+  local a, b = saved.src or {}, now.src or {}
+  for k, v in pairs(a) do
+    local w = b[k]
+    if not w or w.charges ~= v.charges or math.abs((w.ready or 0) - (v.ready or 0)) > K.RECALL_TOLERANCE then return true end
+  end
+  for k in pairs(b) do if not a[k] then return true end end
+  return false
 end
 
--- Checks that no quest is picked up before reaching its required level.
-function Geo.LevelsOK(route)
-  local lv = Geo.Levels(route)
-  for i = 2, #route do
-    local st = route[i]
-    if st.kind == "take" and st.task.reqLevel and lv[i - 1] < st.task.reqLevel then return false end
+-- Teleport step (kind "hearth") with the way back `src` to `destP`.
+function Geo.RecallStep(src, destP, gain)
+  local dest = AreaName(destP.area) or destP.zoneName or destP.name or "?"
+  local title
+  if src.key == "hearth" then
+    title = L["Hearthstone: back to "] .. dest
+  elseif src.bind then
+    title = src.name .. L[": back to "] .. dest
+  else
+    title = src.name
   end
-  return true
-end
-
--- Local improvement: moves each step to the best allowed place (order of a quest's
--- steps, follow-ups after their parent quest, required level) as long as the route gets shorter.
-function Geo.Improve(route, travel)
-  for _ = 1, 3 do
-    local improved = false
-    local i = 2
-    while i <= #route do
-      local st = route[i]
-      local task = st.task
-      -- An escort and its pick-up are not moved (they must stay side by side).
-      if task and st.kind ~= "start" and not st.glue and not (route[i + 1] and route[i + 1].glue) then
-        local prev, nxt = route[i - 1], route[i + 1]
-        local gain = travel(prev.p, st.p) + (nxt and (travel(st.p, nxt.p) - travel(prev.p, nxt.p)) or 0)
-        table.remove(route, i)
-        -- Allowed window (insertion after index j, lo <= j <= hi).
-        local lo, hi = 1, #route
-        local last = task.stops[#task.stops]
-        local depLast = task.dep and task.dep.stops[#task.dep.stops]
-        local seenSelfAfter = false
-        for j = 1, #route do
-          local o = route[j]
-          if o.task == task then
-            if j < i then lo = math.max(lo, j) elseif not seenSelfAfter then hi = math.min(hi, j - 1) seenSelfAfter = true end
-          end
-          if depLast and o == depLast then lo = math.max(lo, j) end
-          if st == last and o.task and o.task.dep == task and o.kind == "take" then hi = math.min(hi, j - 1) end
-        end
-        local bestJ, bestC
-        for j = lo, hi do
-          if j ~= i - 1 and not (route[j + 1] and route[j + 1].glue) then
-            local a, b = route[j], route[j + 1]
-            local c = travel(a.p, st.p) + (b and (travel(st.p, b.p) - travel(a.p, b.p)) or 0)
-            if not bestC or c < bestC then bestJ, bestC = j, c end
-          end
-        end
-        if bestC and bestC < gain - 1 then
-          table.insert(route, bestJ + 1, st)
-          if Geo.LevelsOK(route) then
-            improved = true
-          else
-            table.remove(route, bestJ + 1)
-            table.insert(route, i, st)
-          end
-        else
-          table.insert(route, i, st)
-        end
-      end
-      i = i + 1
-      Geo.Yield()
-    end
-    if not improved then break end
-  end
-  return route
+  return { kind = "hearth", work = 0, gain = gain, via = src.key, bindDest = src.bind or nil,
+    p = { c = destP.c, x = destP.x, y = destP.y, area = destP.area, ui = destP.ui, mx = destP.mx, my = destP.my,
+      zoneName = destP.zoneName, teleport = true, cast = src.cast },
+    task = { title = title, xp = 0, hearth = true, spell = src.spell } }
 end
 
 -- Reward items of the quests (log and available) asked to the game before planning, up to
@@ -432,213 +371,77 @@ end
 -- A far level is reached in stages: one computation plans at most this much, then "Generate"
 -- at the end of the Roadbook computes the next stage (with the real XP and flight paths).
 K.LEVEL_PLAN_MAX_TIME = 40 * 3600 -- level goal: longest Roadbook computed
-K.MAX_PLAN_QUESTS_LEVEL = 300      -- level goal: most quests in the Roadbook
-K.LEVEL_INSERT_WINDOW = 60         -- level goal: a quest is inserted among the last steps only (speed)
-K.LEVEL_IMPROVE_MAX = 250          -- level goal: route shortened only up to this many steps (speed)
+K.PLAN_TIME = 12                  -- seconds of computation for a Roadbook, at most (solver budget)
 
--- Quest XP when it is done at the expected level `level` (lower once the quest turns green or gray).
-function Geo.TaskXPAt(task, level, plevel)
-  if not task.id or level == plevel then return task.xp or 0 end
-  local xp = DBXP(task.id, level)
-  if not xp then return task.xp or 0 end
-  return math.min(xp, task.xp or xp)
+-- Runs the solver (Solver.lua) on a problem (Geo.Problem), inside the computation coroutine.
+function Geo.Solve(P, goal)
+  Solver.yield = Geo.Yield
+  Solver.clock = debugprofilestop and function() return debugprofilestop() / 1000 end or nil
+  return Solver.Optimize(P, goal, { maxTime = K.PLAN_TIME, maxRouteTime = K.LEVEL_PLAN_MAX_TIME })
 end
 
--- Level reached at the end of a route.
-function Geo.EndLevel(route)
-  local lv = Geo.Levels(route)
-  return lv[#lv]
+-- Game route from a solver route `sroute` and its evaluation `res`: the game steps of the quests (src),
+-- with the XP of the level they are done at, the teleports, binds and flight paths activated the
+-- solver chose, then the boarding steps (flights, boats, zeppelins). Returns the route and its info.
+function Geo.FromSolver(P, sroute, res)
+  local pl = P.player
+  local srcByKey = {}
+  for _, s in ipairs(P.world.recall) do srcByKey[tostring(s.key)] = s end
+  local route = { { kind = "start", p = pl.posSrc or pl.pos, work = 0 } }
+  for i = 2, #sroute do
+    local s = sroute[i]
+    local st = s.src
+    if st then
+      if st.kind == "obj" or st.kind == "turnin" then st.xp = res.rawXP[i] end
+    elseif s.kind == "hearth" and srcByKey[tostring(s.via)] then
+      st = Geo.RecallStep(srcByKey[tostring(s.via)], s.p, s.gain)
+    elseif s.kind == "bind" then
+      st = { kind = "bind", p = s.p, bindP = s.p, work = s.work, task = { title = L["Bind your hearthstone: "]
+        .. (AreaName(s.p.area) or "?"), npc = s.inn and s.inn.name, xp = 0, bind = true } }
+    elseif s.kind == "fm" and s.fm then
+      st = Geo.FlightMasterStep(s.fm)
+    end
+    if st then
+      st.at = res.at[i]
+      route[#route + 1] = st
+    end
+  end
+  local cache = {}
+  local nets = Geo.RouteNets(route, pl.speed, pl.level, cache)
+  local okT, withT = pcall(Geo.AddTransportStops, route, function(k) return nets[k].net end, pl.level)
+  if not okT then Print(L["Transport steps error: "] .. tostring(withT)) end
+  if okT and withT then route = withT end
+  for i = 2, #route do route[i].at = route[i].at or route[i - 1].at or 0 end -- boardings: on the way
+  local ids, count = {}, 0
+  for _, st in ipairs(route) do
+    local id = st.task and st.task.id
+    if id and not ids[id] then ids[id], count = true, count + 1 end
+  end
+  local net = BuildNetwork(pl.speed)
+  local info = { total = res.time, xp = res.xp, mobXP = res.mobXP, levels = Geo.Levels(route), speed = pl.speed,
+    plevel = pl.level, net = net, count = count, netCache = cache }
+  return route, info
 end
 
 local function PlanXP(goal)
   Geo.PreloadRewardItems()
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
-  local plevel = UnitLevel("player")
-  if plevel >= Geo.MaxLevel() then
+  if UnitLevel("player") >= Geo.MaxLevel() then
     return nil, L["Max level reached: no more XP to earn. Use the custom Roadbook to choose your quests."]
   end
-  local byLevel = goal.kind == "level"
-  local target = byLevel and math.max(goal.value, plevel + 1) or nil
-  local horizon = byLevel and K.LEVEL_PLAN_MAX_TIME or goal.value
-  local limit = byLevel and horizon or horizon * 1.1 -- time a candidate may reach
-  local maxQuests = byLevel and K.MAX_PLAN_QUESTS_LEVEL or K.MAX_PLAN_QUESTS
-  local function goalReached(route, total)
-    if byLevel then return Geo.EndLevel(route) >= target end
-    return total >= horizon
-  end
   Geo.xpScale = nil
-  Geo.laterList, Geo.laterCache = {}, {}
-  local speed = TravelSpeed()
-  Geo.planSpeed = speed
-  local net = BuildNetwork(speed)
-  local travel = MakeTravel(net, plevel)
-  local tasks, skipped = BuildTasks(pos, plevel)
-  local ctx = BuildScanContext()
-  -- Insertion of a quest's steps; far level goal: only among the last steps of the route (it is
-  -- built in time order), otherwise a long route makes every insertion too slow.
-  local function insert(r, stops, si)
-    if byLevel then si = math.max(si or 1, #r - K.LEVEL_INSERT_WINDOW) end
-    return InsertStops(r, stops, travel, si)
-  end
-
-  local route = { { kind = "start", p = pos, work = 0 } }
-  local total, count = 0, 0
-  local usedIds = {}
-
-  -- What inserting a task unlocks: its follow-ups, and the quests whose required level is
-  -- reached thanks to its XP.
-  -- What inserting a task unlocks, evaluated as a whole:
-  -- * the quest's whole chain (every step doable within the session, with its XP,
-  --   its rewards, its required level), keeping the best value / time ratio;
-  -- * the quests whose required level is reached thanks to its XP.
-  local function lookahead(task, nr, d, lvEnd, locked)
-    local best
-    local function consider(v, dd)
-      local sc = v / math.max(dd, 30)
-      if not best or sc > best then best = sc end
-    end
-    local base = task.value
-    if #locked > 0 then
-      local nlv = Geo.Levels(nr)
-      if nlv[#nlv] > lvEnd then
-        local nidx = Geo.Index(nr)
-        for _, u in ipairs(locked) do
-          if u.reqLevel <= nlv[#nlv] and not usedIds[u.id] and not u.dep then
-            local si = Geo.StartIndex(u, nlv, nidx)
-            if si then
-              local du = insert(nr, u.stops, si)
-              if total + d + du <= limit then consider(base + u.value, d + du) end
-            end
-          end
-        end
-      end
-    end
-    -- Whole chain: chain, step by step, the best available follow-up.
-    local cur, r, v, dd = task, nr, base, d
-    local seen = { [task.id or 0] = true }
-    for _ = 1, K.MAX_FOLLOW_DEPTH do
-      local followers = Geo.Followers(cur, ctx, plevel)
-      if #followers == 0 then break end
-      local lvR, idxR = Geo.Levels(r), Geo.Index(r)
-      local pick
-      for _, u in ipairs(followers) do
-        if u.stops and not usedIds[u.id] and not seen[u.id] then
-          local si = Geo.StartIndex(u, lvR, idxR)
-          if si then
-            local du, ur = insert(r, u.stops, si)
-            if total + dd + du <= limit then
-              local val = u.value
-              local rate = val / math.max(du, 30)
-              if not pick or rate > pick.rate then pick = { u = u, du = du, r = ur, val = val, rate = rate } end
-            end
-          end
-        end
-      end
-      if not pick then break end
-      seen[pick.u.id] = true
-      v, dd, r, cur = v + pick.val, dd + pick.du, pick.r, pick.u
-      consider(v, dd)
-    end
-    return best
-  end
-
-  local function fill()
-    while count < maxQuests and not goalReached(route, total) do
-      local lv, idx = Geo.Levels(route), Geo.Index(route)
-      local lvEnd = lv[#lv]
-      local locked = {}
-      for _, task in ipairs(tasks) do
-        if task.stops and not task.used and task.reqLevel and task.reqLevel > lvEnd and not usedIds[task.id] then
-          locked[#locked + 1] = task
-        end
-      end
-      local best
-      for _, task in ipairs(tasks) do
-        if task.stops and not task.used and not usedIds[task.id] and (not task.dep or task.dep.used) then
-          local si = Geo.StartIndex(task, lv, idx)
-          if si then
-            local d, nr = insert(route, task.stops, si)
-            if total + d <= limit then
-              -- XP at the level expected when the quest is done (less if it turned green or gray).
-              local qxp = Geo.TaskXPAt(task, lv[si], plevel)
-              local value = task.value - (task.xp or 0) + qxp
-              local score = value / math.max(d, 30)
-              local pair = lookahead(task, nr, d, lvEnd, locked)
-              if pair and pair * K.LOOKAHEAD_WEIGHT > score then score = pair * K.LOOKAHEAD_WEIGHT end
-              if not best or score > best.score then best = { task = task, score = score, d = d, route = nr, xp = qxp } end
-            end
-          end
-          Geo.Yield()
-        end
-      end
-      if not best then break end
-      best.task.used = true
-      if best.task.id then usedIds[best.task.id] = true end
-      if best.xp ~= (best.task.xp or 0) then -- done at a higher level: its turn-in gives less XP
-        local last = best.task.stops[#best.task.stops]
-        if last and last.kind == "turnin" then last.xp = best.xp end
-        best.task.value = best.task.value - (best.task.xp or 0) + best.xp
-        best.task.xp = best.xp
-      end
-      route, total, count = best.route, total + best.d, count + 1
-      -- The chosen quest's follow-ups become candidates.
-      for _, f in ipairs(Geo.Followers(best.task, ctx, plevel)) do tasks[#tasks + 1] = f end
-    end
-  end
-
-  fill()
-  -- Shorten the route, then use the saved time for other quests.
-  if not byLevel or #route <= K.LEVEL_IMPROVE_MAX then
-    route = Geo.Improve(route, travel)
-    total = Geo.RouteTime(route, travel)
-    fill()
-  end
-
-  -- Hearthstone: bind + hearths, then the saved time is used to add quests.
-  local okH, withH = pcall(Geo.OptimizeHearth, route, travel)
-  if not okH then Print(L["Hearthstone error: "] .. tostring(withH)) end
-  if okH and withH and withH ~= route then
-    route = withH
-    total = Geo.RouteTime(route, travel)
-    fill()
-    route = Geo.FixHearth(route, travel, Geo.HearthReady() or 0)
-  end
-
-  route = Geo.FinishRoute(route, net, travel, plevel)
-  local info = Geo.RouteInfo(route, travel)
-  info.speed, info.skipped, info.count, info.net, info.plevel, info.later = speed, skipped, count, net, plevel, Geo.laterList
-  info.goal = { kind = goal.kind, value = byLevel and target or goal.value }
+  Geo.planSpeed = TravelSpeed()
+  local P = Geo.Problem("auto", pos)
+  local opt = Geo.Solve(P, goal)
+  local route, info = Geo.FromSolver(P, opt.route, opt.res)
+  local g = opt.goal
+  info.skipped, info.later = P.skipped, P.later
+  info.goal = { kind = g.kind, value = g.kind == "level" and g.target or g.value }
   -- Target not reached in one computation (its size, or the quests known now): this Roadbook is a
   -- stage; "Generate" at its end plans the next one from the real level, XP and flight paths.
-  if byLevel and Geo.EndLevel(route) < target then info.goalStage = true end
+  if g.kind == "level" and not opt.res.reach then info.goalStage = true end
   return route, nil, info
-end
-
--- Last steps of a route: activation of the unknown flight masters met on the way (if the option is
--- on), then the flight / zeppelin / boat boarding steps.
-function Geo.FinishRoute(route, net, travel, plevel)
-  if not Settings().noFMDetour then
-    local okFM, withFM = pcall(Geo.AddFlightMasterStops, route, net, plevel)
-    if okFM and withFM then route = withFM end
-  end
-  local okT, withT = pcall(Geo.AddTransportStops, route, net, plevel)
-  if not okT then Print(L["Transport steps error: "] .. tostring(withT)) end
-  if okT and withT then route = withT end
-  return route
-end
-
--- Exact time and XP along a route (st.at = time at the end of each step).
-function Geo.RouteInfo(route, travel)
-  local t, questXP, mobXP = 0, 0, 0
-  for i = 2, #route do
-    local st = route[i]
-    t = t + travel(route[i - 1].p, st.p) + st.work
-    st.at = t
-    if st.kind == "turnin" then questXP = questXP + (st.xp or 0) end
-    if st.kind == "obj" then mobXP = mobXP + (st.xp or 0) end
-  end
-  return { total = t, xp = questXP + mobXP, mobXP = mobXP, levels = Geo.Levels(route) }
 end
 
 -- Skipped quest: its steps leave the saved Roadbook `fz` and the route of the steps left is
@@ -647,10 +450,6 @@ end
 -- Returns the new route and its info.
 Geo.AUX_STEPS = { travel = true, fm = true, hearth = true, bind = true }
 function Geo.Reroute(fz, id, isDone)
-  local plevel = UnitLevel("player")
-  local speed = TravelSpeed()
-  local net = BuildNetwork(speed)
-  local travel = MakeTravel(net, plevel)
   local old = fz.route
   local done, todo = {}, {}
   for i = 2, #old do
@@ -662,19 +461,16 @@ function Geo.Reroute(fz, id, isDone)
     end
   end
   local pos = PlayerPos() or (done[#done] or old[1]).p
-  local rest = { { kind = "start", p = pos, work = 0 } }
-  for _, st in ipairs(todo) do rest[#rest + 1] = st end
-  if #rest >= 3 then
-    local okH, withH = pcall(Geo.OptimizeHearth, rest, travel)
-    if okH and withH and withH ~= rest then rest = Geo.FixHearth(withH, travel, Geo.HearthReady() or 0) end
-  end
-  rest = Geo.FinishRoute(rest, net, travel, plevel)
-  local restInfo = Geo.RouteInfo(rest, travel)
+  local P = Geo.Problem("none", pos)
+  local core = { { kind = "start", p = P.player.pos, work = 0 } }
+  for _, st in ipairs(todo) do core[#core + 1] = ns.Problem.Step(st, true) end
+  local goal = fz.info.custom and "custom" or Solver.Goal(P, fz.info.goal)
+  local res, sroute = Solver.Simulate(P, core, goal)
+  local rest, restInfo = Geo.FromSolver(P, sroute, res)
   local info = {}
   for k, v in pairs(fz.info) do info[k] = v end
   local route = Geo.KeepDone(fz, isDone, rest, restInfo, info)
-  info.net, info.speed = net, speed
-  info.net.taxi = TaxiCount()
+  info.net, info.speed, info.netCache = restInfo.net, restInfo.speed, nil
   local levels = info.levels
   if info.goal and info.goal.kind == "level" then info.goalStage = (levels[#levels] or 0) < info.goal.value or nil end
   return route, info
@@ -738,7 +534,7 @@ function Geo.PlanKey(goal)
     for _, it in ipairs(Geo.CustomList()) do list[#list + 1] = it.id end
   end
   return table.concat({ Geo.GoalKey(goal), table.concat(list, ","), tostring(Settings().noHearth),
-    tostring(Settings().noFMDetour), UnitLevel("player"),
+    tostring(Settings().noRecallSpells), tostring(Settings().noFMDetour), UnitLevel("player"),
     UnitXP and UnitXP("player") or 0, e and e.updated or "", tostring(scan.entries), TaxiCount(),
     tostring(b and b.name), tostring(Settings().mountSpeed), Geo.paramsVersion or 0 }, "|")
 end
@@ -804,6 +600,18 @@ local function FormatNumber(n)
   local s = tostring(math.floor(n + 0.5))
   local out = s:reverse():gsub("(%d%d%d)", "%1 "):reverse()
   return (out:gsub("^ ", ""))
+end
+
+-- Teleport step (kind "hearth"): icon, tag and what to do, for the lists and the Objective button.
+function Geo.RecallText(s)
+  local spell = s.task and s.task.spell
+  local saves = L[" · saves ~"] .. FormatTime(s.gain or 0)
+  if not spell then
+    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", L["[Hearthstone]"], L["Use the hearthstone"] .. saves
+  end
+  local tex = Geo.SpellIcon(spell) or "Interface\\Icons\\Spell_Arcane_TeleportStormWind"
+  local name = Geo.SpellName(spell) or ("#" .. spell)
+  return "|T" .. tex .. ":14:14|t", L["[Teleport]"], L["Cast "] .. name .. saves
 end
 
 -- Shared with the next files.

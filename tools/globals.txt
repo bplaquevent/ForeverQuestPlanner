@@ -8,6 +8,7 @@ C_Map
 C_QuestLog
 C_Reputation
 C_SkillInfo
+C_Spell
 C_SuperTrack
 C_TaxiMap
 C_Texture
@@ -23,6 +24,7 @@ DEFAULT_CHAT_FRAME
 DELETE
 ELITE
 Enum
+ForeverQuestPlannerBench
 ForeverQuestPlannerDB
 ForeverQuestPlannerSettings
 GameFontNormalSmall
@@ -59,6 +61,9 @@ GetQuestLogTitle
 GetQuestUiMapID
 GetRealZoneText
 GetRealmName
+GetSpellCooldown
+GetSpellInfo
+GetSpellTexture
 GetTalentTabInfo
 GetTaxiMapID
 GetTime
@@ -70,6 +75,7 @@ IsAltKeyDown
 IsControlKeyDown
 IsInInstance
 IsMounted
+IsPlayerSpell
 IsQuestWatched
 IsShiftKeyDown
 IsSpellKnown
@@ -83,6 +89,7 @@ PlaySound
 QuestLog_SetSelection
 QuestLog_Update
 QuestMapFrame_OpenToQuestDetails
+QuestieLoader
 ReloadUI
 RemoveQuestWatch
 SLASH_FOREVERQUESTPLANNER1
@@ -109,6 +116,7 @@ UiMapPoint
 UnitClass
 UnitFactionGroup
 UnitFullName
+UnitIsDeadOrGhost
 UnitLevel
 UnitName
 UnitOnTaxi
@@ -135,6 +143,7 @@ select
 setmetatable
 string
 table
+time
 tinsert
 tonumber
 tostring

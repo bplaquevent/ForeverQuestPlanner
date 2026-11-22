@@ -161,17 +161,17 @@ local function Create()
   end)
   startB:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.startB = startB
-  -- Show: opens the Roadbook window on this Roadbook's tab.
+  -- Roadbook: opens the Roadbook window on this Roadbook's tab.
   local showB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   showB:SetSize(66, 20)
   showB:SetPoint("RIGHT", startB, "LEFT", -2, 0)
-  showB:SetText(L["Show"])
+  showB:SetText(L["Roadbook"])
   showB:SetScript("OnClick", function()
     if panel.kind and CP.OpenWindow then CP.OpenWindow(Geo.TabOf(panel.kind)) end
   end)
   showB:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine(L["Show"], 1, 1, 1)
+    GameTooltip:AddLine(L["Roadbook"], 1, 1, 1)
     GameTooltip:AddLine(L["Opens this Roadbook in the addon's window."], 0.85, 0.85, 0.85, true)
     GameTooltip:Show()
   end)

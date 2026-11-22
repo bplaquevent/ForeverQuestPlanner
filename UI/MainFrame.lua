@@ -601,7 +601,13 @@ local function CreateMinimapButton()
   border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
   b:SetScript("OnClick", function(_, button)
-    if button == "RightButton" then Geo.ToggleSettings() else ToggleMainFrame() end
+    if button == "RightButton" then
+      Geo.ToggleSettings()
+    elseif State.mainFrame and State.mainFrame:IsShown() then
+      State.mainFrame:Hide()
+    else
+      ToggleMainFrame(Geo.TabOf(Geo.ActiveKind())) -- always opens on the active Roadbook's tab
+    end
   end)
   b:SetScript("OnDragStart", function(self) self:SetScript("OnUpdate", OnDragUpdate) end)
   b:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
@@ -609,7 +615,7 @@ local function CreateMinimapButton()
   b:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddDoubleLine("Forever Quest Planner", "v" .. Geo.Version(), 1, 0.82, 0, 0.6, 0.6, 0.6)
-    GameTooltip:AddLine(L["|cffffff00Click|r: open / close the window"], 1, 1, 1)
+    GameTooltip:AddLine(L["|cffffff00Click|r: active Roadbook / close the window"], 1, 1, 1)
     GameTooltip:AddLine(L["|cffffff00Right-click|r: settings"], 1, 1, 1)
     GameTooltip:AddLine(L["|cffffff00Drag|r: move the icon"], 1, 1, 1)
     GameTooltip:Show()

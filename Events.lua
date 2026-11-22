@@ -28,6 +28,11 @@ pcall(f.RegisterEvent, f, "PLAYER_CONTROL_LOST")
 pcall(f.RegisterEvent, f, "PLAYER_CONTROL_GAINED")
 pcall(f.RegisterEvent, f, "ZONE_CHANGED_NEW_AREA")
 pcall(f.RegisterEvent, f, "PLAYER_ENTERING_WORLD")
+-- Hearthstone and class teleports: cooldowns, runes, spells learned (checked while a Roadbook is followed).
+pcall(f.RegisterEvent, f, "SPELL_UPDATE_COOLDOWN")
+pcall(f.RegisterEvent, f, "BAG_UPDATE_COOLDOWN")
+pcall(f.RegisterEvent, f, "BAG_UPDATE_DELAYED")
+pcall(f.RegisterEvent, f, "SPELLS_CHANGED")
 if f.RegisterUnitEvent then
   pcall(f.RegisterUnitEvent, f, "UNIT_SPELLCAST_SUCCEEDED", "player")
 else
@@ -46,9 +51,6 @@ f:SetScript("OnEvent", function(_, event, ...)
     Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
     -- Options saved from the settings window or the tabs.
     local st = Settings()
-    if st.horizon then -- former setting: duration only
-      st.goal, st.horizon = { kind = "time", value = st.horizon }, nil
-    end
     if type(st.goal) == "table" and st.goal.kind and st.goal.value then
       State.xpGoal = { kind = st.goal.kind, value = st.goal.value }
     end
@@ -71,21 +73,38 @@ f:SetScript("OnEvent", function(_, event, ...)
     ScheduleSnapshot()
   elseif event == "PLAYER_LOGOUT" then
     Snapshot()
+  elseif event == "SPELL_UPDATE_COOLDOWN" or event == "BAG_UPDATE_COOLDOWN" or event == "BAG_UPDATE_DELAYED"
+    or event == "SPELLS_CHANGED" then
+    Geo.recallDest = nil
+    pcall(CP.ScheduleRecallCheck, 3)
   elseif event == "HEARTHSTONE_BOUND" then
     -- New inn: position of the innkeeper targeted by the Roadbook, otherwise ours.
     local s = CP.focused
-    local p = (s and s.kind == "bind" and CP.IsStepFocused(s)) and s.p or PlayerPos()
+    local planned = s and s.kind == "bind" and CP.IsStepFocused(s)
+    local p = planned and s.p or PlayerPos()
     pcall(Geo.RecordBind, p)
+    if planned then
+      C_Timer.After(0.5, function() pcall(Geo.RestampRecalls) end)
+    else
+      pcall(CP.ScheduleRecallCheck, 3) -- another bind location: the route is adapted
+    end
     pcall(CP.OnGameEvent, event)
     if State.mainFrame and State.mainFrame:IsShown() then C_Timer.After(0.5, Refresh) end
   elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
     local unit, _, spellID = ...
-    if unit == "player" and spellID == K.HEARTH_SPELL then
+    local e = K.RECALL_BY_SPELL[spellID]
+    if unit == "player" and (spellID == K.HEARTH_SPELL or e) then
+      local key = e and spellID or "hearth"
+      pcall(CP.RecallCast, key)
       C_Timer.After(5, function()
-        local name = GetBindLocation and GetBindLocation()
-        local st = Geo.BindStore()[CharKey()]
-        if not (st and st.name == name) then pcall(Geo.RecordBind, PlayerPos()) end
-        pcall(CP.OnGameEvent, "FQP_HEARTH_ARRIVED")
+        if e and not e.bind then
+          pcall(Geo.RecordTeleport, spellID, PlayerPos()) -- the real arrival of this teleport
+        else
+          local name = GetBindLocation and GetBindLocation()
+          local st = Geo.BindStore()[CharKey()]
+          if not (st and st.name == name) then pcall(Geo.RecordBind, PlayerPos()) end
+        end
+        pcall(CP.OnGameEvent, "FQP_HEARTH_ARRIVED", key)
       end)
     end
   elseif event == "PLAYER_CONTROL_LOST" then
@@ -154,6 +173,12 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     st.noHearth = not st.noHearth or nil
     Print(st.noHearth and L["Hearthstone ignored by the Roadbook."] or L["Hearthstone used by the Roadbook."])
     if Refresh then Refresh() end
+  elseif msg == "teleport" or msg == "teleports" or msg == "tp" then
+    local st = Settings()
+    st.noRecallSpells = not st.noRecallSpells or nil
+    Geo.planCache, Geo.customCache = nil, nil
+    Print(st.noRecallSpells and L["Class teleports ignored by the Roadbook."] or L["Class teleports used by the Roadbook."])
+    if Refresh then Refresh() end
   elseif msg == "icon" then
     local s = Settings()
     s.hideMinimap = not s.hideMinimap
@@ -180,6 +205,8 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     Print(L["Learned zone passes forgotten."])
   elseif msg == "export" then
     ToggleMainFrame("export")
+  elseif msg == "dump" then
+    Geo.BenchDump()
   else
     ToggleMainFrame()
   end
