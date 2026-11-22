@@ -24,6 +24,8 @@ f:RegisterEvent("TAXIMAP_OPENED")
 -- Service shortcuts (vendor, repair, class trainer): the Roadbook step is done when the NPC window opens.
 pcall(f.RegisterEvent, f, "MERCHANT_SHOW")
 pcall(f.RegisterEvent, f, "TRAINER_SHOW")
+pcall(f.RegisterEvent, f, "PLAYER_TARGET_CHANGED")
+pcall(f.RegisterEvent, f, "UPDATE_MOUSEOVER_UNIT")
 pcall(f.RegisterEvent, f, "BANKFRAME_OPENED")
 pcall(f.RegisterEvent, f, "MAIL_SHOW")
 pcall(f.RegisterEvent, f, "USER_WAYPOINT_UPDATED")
@@ -143,8 +145,11 @@ f:SetScript("OnEvent", function(_, event, ...)
     OnWaypointChanged()
     C_Timer.After(0.2, function() pcall(CP.RefreshButton) end)
     if State.mainFrame and State.mainFrame:IsShown() then C_Timer.After(0.1, Refresh) end
+  elseif event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_MOUSEOVER_UNIT" then
+    pcall(Geo.TrainerSeen, event == "PLAYER_TARGET_CHANGED" and "target" or "mouseover")
   elseif event == "TAXIMAP_OPENED" or event == "MERCHANT_SHOW" or event == "TRAINER_SHOW"
     or event == "BANKFRAME_OPENED" or event == "MAIL_SHOW" then
+    if event == "TRAINER_SHOW" then pcall(Geo.TrainerOpened) end
     pcall(CP.OnGameEvent, event, ...)
   else
     ScheduleSnapshot()

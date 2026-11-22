@@ -984,6 +984,65 @@ local function AllIds(entity)
   return ids
 end
 
+-- Class trainers learned in game, by class token: QuestieDB gives some of them no class (sub title
+-- "Niveau 10"). Shared by the characters of the same class: { [npcId] = true }.
+function Geo.LearnedTrainers()
+  local _, token = UnitClass("player")
+  local sd = ns.SharedData()
+  sd.classTrainers = sd.classTrainers or {}
+  sd.classTrainers[token or "?"] = sd.classTrainers[token or "?"] or {}
+  return sd.classTrainers[token or "?"]
+end
+
+-- Remember an NPC as a trainer of the player's class (the service lists are read again).
+function Geo.LearnTrainer(id)
+  local learned = Geo.LearnedTrainers()
+  if not id or learned[id] then return end
+  local flags = QGet(QDB.Npc, id, "npcFlags")
+  if type(flags) ~= "number" or not HasBit(flags, K.NPC_FLAG_TRAINER) then return end
+  learned[id] = true
+  Geo.svc, Geo.svcNear = nil, nil
+end
+
+local function UnitNpcId(unit)
+  local guid = UnitGUID and UnitGUID(unit)
+  local kind, _, _, _, _, id = strsplit("-", guid or "")
+  return (kind == "Creature" or kind == "Vehicle") and tonumber(id) or nil
+end
+
+-- Window of a trainer opened: a class trainer (not a profession trainer) teaches the player's class.
+function Geo.TrainerOpened()
+  if UnitNpcId("npc") and not (IsTradeskillTrainer and IsTradeskillTrainer()) then
+    Geo.LearnTrainer(UnitNpcId("npc"))
+  end
+end
+
+-- Unit targeted or hovered: its tooltip title ("<Paladin Trainer>") names the player's class.
+function Geo.TrainerSeen(unit)
+  local id = UnitNpcId(unit)
+  if not id or Geo.LearnedTrainers()[id] then return end
+  local flags = QGet(QDB.Npc, id, "npcFlags")
+  if type(flags) ~= "number" or not HasBit(flags, K.NPC_FLAG_TRAINER) then return end
+  local classLoc, token = UnitClass("player")
+  if not Geo.scanTip then
+    Geo.scanTip = CreateFrame("GameTooltip", "FQPScanTip", nil, "GameTooltipTemplate")
+  end
+  local tip = Geo.scanTip
+  tip:SetOwner(UIParent, "ANCHOR_NONE")
+  tip:SetUnit(unit)
+  for i = 2, 3 do
+    local fs = _G["FQPScanTipTextLeft" .. i]
+    local text = fs and fs:GetText()
+    if text then
+      local low = text:lower()
+      if (classLoc and low:find(classLoc:lower(), 1, true)) or (token and low:find(token:lower(), 1, true)) then
+        Geo.LearnTrainer(id)
+        break
+      end
+    end
+  end
+end
+
 -- Vendors, repair NPCs, class trainers and bankers of the player's faction, and mailboxes (objects),
 -- read once per session (QuestieDB). Each entry: { id, name, p }.
 function Geo.ServiceNpcs()
@@ -994,6 +1053,7 @@ function Geo.ServiceNpcs()
   local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
   local classLoc, token = UnitClass("player")
   local classEn = token and (token:sub(1, 1) .. token:sub(2):lower()) or nil
+  local learned = Geo.LearnedTrainers()
   for _, id in ipairs(letter and AllIds(QDB.Npc) or {}) do
     local flags = QGet(QDB.Npc, id, "npcFlags")
     if type(flags) == "number" and flags > 0 then
@@ -1005,8 +1065,8 @@ function Geo.ServiceNpcs()
         local sub = QGet(QDB.Npc, id, "subName")
         -- Case-insensitive: "Maître des paladins" must match the class "Paladin".
         local low = type(sub) == "string" and sub:lower() or nil
-        isTrainer = low and ((classLoc and low:find(classLoc:lower(), 1, true))
-          or (classEn and low:find(classEn:lower(), 1, true))) and true or false
+        isTrainer = (learned[id] or (low and ((classLoc and low:find(classLoc:lower(), 1, true))
+          or (classEn and low:find(classEn:lower(), 1, true))))) and true or false
       end
       if isVendor or isRepair or isTrainer or isBank then
         local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
