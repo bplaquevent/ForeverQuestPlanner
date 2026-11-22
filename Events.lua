@@ -21,6 +21,9 @@ f:RegisterEvent("PLAYER_LEVEL_UP")
 pcall(f.RegisterEvent, f, "UPDATE_FACTION")
 pcall(f.RegisterEvent, f, "SKILL_LINES_CHANGED")
 f:RegisterEvent("TAXIMAP_OPENED")
+-- Service shortcuts (vendor, repair, class trainer): the Roadbook step is done when the NPC window opens.
+pcall(f.RegisterEvent, f, "MERCHANT_SHOW")
+pcall(f.RegisterEvent, f, "TRAINER_SHOW")
 pcall(f.RegisterEvent, f, "USER_WAYPOINT_UPDATED")
 f:RegisterEvent("PLAYER_LOGOUT")
 pcall(f.RegisterEvent, f, "HEARTHSTONE_BOUND")
@@ -138,7 +141,7 @@ f:SetScript("OnEvent", function(_, event, ...)
     OnWaypointChanged()
     C_Timer.After(0.2, function() pcall(CP.RefreshButton) end)
     if State.mainFrame and State.mainFrame:IsShown() then C_Timer.After(0.1, Refresh) end
-  elseif event == "TAXIMAP_OPENED" then
+  elseif event == "TAXIMAP_OPENED" or event == "MERCHANT_SHOW" or event == "TRAINER_SHOW" then
     pcall(CP.OnGameEvent, event, ...)
   else
     ScheduleSnapshot()

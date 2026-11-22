@@ -9,6 +9,7 @@ local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos
 local Refresh, RemainingTargets, Route, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Route, ns.SLOTS, ns.Settings, ns.StartPoints
 local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
+local BuildNetwork = ns.BuildNetwork
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -950,6 +951,126 @@ function Geo.ScanServices()
       end
     end
   end
+end
+
+---------------------------------------------------------------------------
+-- Service NPCs of the shortcuts under the Objective button: any vendor, repair NPC, class trainer
+---------------------------------------------------------------------------
+-- QuestieDB npcFlags (vanilla 1.12 values, like the flight master 8 and innkeeper 128 above).
+K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_REPAIR = 4, 16, 16384
+K.SERVICE_TIME = 60          -- seconds spent at a service NPC (selling, repairing, training)
+K.SERVICE_NEAR = 12          -- candidates kept per continent, nearest in a straight line
+K.SERVICE_CACHE = 20         -- seconds a nearest NPC stays valid (tooltips)
+K.SERVICES = {
+  { key = "vendor", icon = "Interface\\Icons\\INV_Misc_Coin_01", label = L["Vendor"], title = L["Sell and buy: "] },
+  { key = "repair", icon = "Interface\\Icons\\Trade_BlackSmithing", label = L["Repair"], title = L["Repair: "] },
+  { key = "trainer", icon = "Interface\\Icons\\INV_Misc_Book_11", label = L["Class trainer"], title = L["Train: "] },
+}
+
+-- Vendors, repair NPCs and class trainers of the player's faction (QuestieDB), read once per session.
+function Geo.ServiceNpcs()
+  if Geo.svc then return Geo.svc end
+  Geo.svc = { vendor = {}, repair = {}, trainer = {} }
+  local okIds, ids = pcall(QDB.Npc.GetAllIds)
+  if not okIds or type(ids) ~= "table" then return Geo.svc end
+  if #ids == 0 and next(ids) then
+    local list = {}
+    for k in pairs(ids) do list[#list + 1] = k end
+    ids = list
+  end
+  local fac = UnitFactionGroup and UnitFactionGroup("player")
+  local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
+  if not letter then return Geo.svc end
+  local classLoc, token = UnitClass("player")
+  local classEn = token and (token:sub(1, 1) .. token:sub(2):lower()) or nil
+  for _, id in ipairs(ids) do
+    local flags = QGet(QDB.Npc, id, "npcFlags")
+    if type(flags) == "number" and flags > 0 then
+      local isVendor = HasBit(flags, K.NPC_FLAG_VENDOR)
+      local isRepair = HasBit(flags, K.NPC_FLAG_REPAIR)
+      local isTrainer = false
+      if HasBit(flags, K.NPC_FLAG_TRAINER) then
+        local sub = QGet(QDB.Npc, id, "subName")
+        isTrainer = type(sub) == "string" and ((classLoc and sub:find(classLoc, 1, true))
+          or (classEn and sub:find(classEn, 1, true))) and true or false
+      end
+      if isVendor or isRepair or isTrainer then
+        local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
+        if type(friendly) == "string" and friendly:find(letter) then
+          local p = EntityPoints("npc", id)[1]
+          if p and not p.instance then
+            local e = { id = id, name = QGet(QDB.Npc, id, "name") or ("#" .. id), p = p }
+            if isVendor then table.insert(Geo.svc.vendor, e) end
+            if isRepair then table.insert(Geo.svc.repair, e) end
+            if isTrainer then table.insert(Geo.svc.trainer, e) end
+          end
+        end
+      end
+    end
+  end
+  return Geo.svc
+end
+
+-- Nearest NPC of a service (kind: "vendor", "repair", "trainer") by travel time on the transport
+-- network: the nearest ones in a straight line on the player's continent, else on each other
+-- continent the ones nearest to a flight master. Returns { id, name, p, time } or nil.
+function Geo.NearestService(kind, pos)
+  pos = pos or PlayerPos()
+  if not pos then return nil end
+  local cache = Geo.svcNear and Geo.svcNear[kind]
+  local now = GetTime and GetTime() or 0
+  if cache and now - cache.at < K.SERVICE_CACHE and cache.pos and (Dist(pos, cache.pos) or math.huge) < 100 then
+    return cache.best
+  end
+  local list = Geo.ServiceNpcs()[kind] or {}
+  local byCont = {}
+  for _, e in ipairs(list) do
+    local c = e.p.c
+    byCont[c] = byCont[c] or {}
+    table.insert(byCont[c], e)
+  end
+  local refs = {}
+  local function nearest(entries, ref)
+    local scored = {}
+    for _, e in ipairs(entries) do
+      local d = Dist(e.p, ref)
+      if d then scored[#scored + 1] = { e = e, d = d } end
+    end
+    table.sort(scored, function(a, b) return a.d < b.d end)
+    return scored
+  end
+  local cands = {}
+  local here = byCont[pos.c]
+  if here then
+    for i, r in ipairs(nearest(here, pos)) do
+      if i > K.SERVICE_NEAR then break end
+      cands[#cands + 1] = r.e
+    end
+  end
+  if #cands == 0 then
+    for c, entries in pairs(byCont) do
+      local ref
+      for _, fm in ipairs(Geo.FlightMasters()) do if fm.p.c == c then ref = fm.p break end end
+      if ref then
+        for i, r in ipairs(nearest(entries, ref)) do
+          if i > 8 then break end
+          cands[#cands + 1] = r.e
+        end
+      end
+    end
+  end
+  local plevel = UnitLevel("player")
+  local travel = MakeTravel(BuildNetwork(TravelSpeed()), plevel)
+  local best
+  for _, e in ipairs(cands) do
+    local t = travel(pos, e.p)
+    if t and t < math.huge and (not best or t < best.time) then
+      best = { id = e.id, name = e.name, p = e.p, time = t }
+    end
+  end
+  Geo.svcNear = Geo.svcNear or {}
+  Geo.svcNear[kind] = { at = now, pos = pos, best = best }
+  return best
 end
 
 -- Flight masters the character can use: OpenMap's flight nodes (Forever's tables: faction, class),

@@ -969,13 +969,16 @@ end
 -- Custom Roadbook: every step of the list, in an order its rules allow
 ---------------------------------------------------------------------------
 -- P.custom = { steps = { step (ci = its index, ti = its quest's index, glueTo = ci of the step it
--- must follow right away) }, pred = { [ci] = { ci of the steps before it } }, tasks = { { id, title } } }.
+-- must follow right away) }, pred = { [ci] = { ci of the steps before it } }, tasks = { { id, title } },
+-- first = ci of the step that must come first (service shortcut) }.
 S.LEVEL_PENALTY = 3600
 
 function S.ValidCustom(P, core)
   local pos = {}
   for i, st in ipairs(core) do if st.ci then pos[st.ci] = i end end
   local pred = P.custom.pred
+  -- Service shortcut (P.custom.first): the first step of the route, whatever else is in it.
+  if P.custom.first and (not core[2] or core[2].ci ~= P.custom.first) then return false end
   for i, st in ipairs(core) do
     if st.ci then
       if not st.relaxed then
@@ -1293,7 +1296,8 @@ function S.Optimize(P, goal, opts)
     -- The whole list reaching the goal: only its best part; otherwise all of it, completed.
     local whole = S.BuildCustom(P, start, rand)
     mode = reached(sim(whole)) and "pick" or "keep"
-    if mode == "keep" then start = whole end
+    if mode == "keep" then start = whole
+    elseif P.custom.first then start = { start[1], P.custom.steps[P.custom.first] } end -- service shortcut kept
   end
   local core = construct(start, nil, O.BUILD_SHARE)
 
@@ -1386,12 +1390,13 @@ function S.Optimize(P, goal, opts)
     return any
   end
 
-  -- Units of the list removed or added ("pick").
+  -- Units of the list removed or added ("pick"); the service shortcut's unit stays.
+  local svcUnit = mixed and P.custom.first and P.custom.unitOf[P.custom.first] or nil
   local function removeUnits()
     local any = false
     for _, u in ipairs(P.custom.unitList) do
       if out() then break end
-      if S.UnitsIn(P, core)[u] and try(S.WithoutUnit(P, core, u)) then any = true end
+      if u ~= svcUnit and S.UnitsIn(P, core)[u] and try(S.WithoutUnit(P, core, u)) then any = true end
     end
     return any
   end
@@ -1498,7 +1503,7 @@ function S.Optimize(P, goal, opts)
       if custom then key = st.ti
       elseif mode == "pick" then key = st.ci and P.custom.unitOf[st.ci]
       else key = st.tn end
-      if key then
+      if key and key ~= svcUnit then
         if not steps[key] then
           steps[key] = {}
           tasks[#tasks + 1] = key

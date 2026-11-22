@@ -104,7 +104,8 @@ end
 -- Returns { tasks, steps, pred, dungeons, unplanned } (game objects), or nil and the reason.
 function Geo.CustomPlanSteps(pos, plevel)
   local list = Geo.CustomList()
-  if #list == 0 then return nil, L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] end
+  local svc = Geo.ServiceStep()
+  if #list == 0 and not svc then return nil, L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] end
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   local logById = {}
   for _, q in ipairs(e and e.quests or {}) do logById[q.id] = q end
@@ -119,7 +120,7 @@ function Geo.CustomPlanSteps(pos, plevel)
     end
     Geo.Yield()
   end
-  if #tasks == 0 then return nil, L["No quest of the list can be located."], unplanned end
+  if #tasks == 0 and not svc then return nil, L["No quest of the list can be located."], unplanned end
   for _, task in ipairs(tasks) do
     task.pres = {}
     for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
@@ -134,6 +135,7 @@ function Geo.CustomPlanSteps(pos, plevel)
   local dungeons = Geo.GroupDungeons(tasks)
   local pred = Geo.CustomConstraints(tasks)
   local steps, seen = {}, {}
+  if svc then steps[1] = svc end -- service shortcut: before every other step
   for _, task in ipairs(tasks) do
     for _, s in ipairs(task.order) do
       if not seen[s] then
@@ -142,7 +144,13 @@ function Geo.CustomPlanSteps(pos, plevel)
       end
     end
   end
-  return { tasks = tasks, steps = steps, pred = pred, dungeons = dungeons, unplanned = unplanned }
+  if svc then
+    for i = 2, #steps do
+      pred[steps[i]] = pred[steps[i]] or {}
+      table.insert(pred[steps[i]], svc)
+    end
+  end
+  return { tasks = tasks, steps = steps, pred = pred, dungeons = dungeons, unplanned = unplanned, service = svc }
 end
 
 -- The custom list for the solver: steps (ci = index, ti = quest index, glueTo = the step it follows
@@ -194,6 +202,7 @@ function Pb.Custom(P, cp, live)
       end
     end
   end
+  out.first = cp.service and ci[cp.service] or nil -- service shortcut: always the first step
   P.custom = out
 end
 

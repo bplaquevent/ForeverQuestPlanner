@@ -13,6 +13,7 @@
 --                by the solver (the capture's own custom list, if any, otherwise)
 --   --list N     "Generate" with a duration or level goal (--goal) on a list made of the first N captured
 --                quests (0: empty list): kept whole and completed, or only its best part kept
+--   --service    service shortcut test: a service step at the place of the last quest step, that must come first
 --   --steps      print every step of the Roadbooks
 
 local root = ((arg[0]:match("^(.*)/[^/]*$")) or ".") .. "/.."
@@ -32,6 +33,8 @@ while arg[i] do
     i = i + 1
   elseif a == "--steps" then
     opts.steps = true
+  elseif a == "--service" then
+    opts.service = true
   elseif not file then
     file = a
   else
@@ -251,6 +254,18 @@ local function CustomFrom(n)
       byN[t.n] = list
     end
   end
+  if opts.service then
+    -- Service shortcut (Geo.ServiceStep): at the place of the last step (the player's place when the
+    -- list is empty), before every other step.
+    local at = ci > 0 and out.steps[ci].p or P.player.pos
+    local svc = { kind = "service", p = at, work = 60, title = "Service", ci = ci + 1 }
+    out.steps[ci + 1] = svc
+    for k = 1, ci do
+      out.pred[k] = out.pred[k] or {}
+      table.insert(out.pred[k], svc.ci)
+    end
+    out.first = svc.ci
+  end
   return out
 end
 if not opts.list and (opts.custom or (P.custom and P.custom.steps)) then
@@ -274,6 +289,12 @@ if not opts.list and (opts.custom or (P.custom and P.custom.steps)) then
         ZoneName(P, st.p)))
     end
   end
+  if opts.service then
+    local k = 2
+    while co.route[k] and co.route[k].kind == "hearth" do k = k + 1 end -- a teleport may come before it
+    local first = co.route[k]
+    print("  service first: " .. ((first and first.kind == "service") and "OK" or "WRONG (first step: " .. tostring(first and first.kind) .. ")"))
+  end
   if opts.custom then os.exit(0) end
 end
 
@@ -286,7 +307,7 @@ end
 local g = S.Goal(P, goal)
 local listCase = opts.list and tonumber(opts.list)
 if listCase then
-  P.custom = listCase > 0 and CustomFrom(listCase) or nil
+  P.custom = (listCase > 0 or opts.service) and CustomFrom(listCase) or nil
   if P.custom then
     local total = 0
     S.clock = os.clock
@@ -329,6 +350,12 @@ if base and base.route then
 end
 S.clock = os.clock
 local opt = S.Optimize(P, goal, { maxEvals = opts.evals and tonumber(opts.evals) or nil })
+if opts.service and P.custom and P.custom.first then
+  local k = 2
+  while opt.route[k] and opt.route[k].kind == "hearth" do k = k + 1 end -- a teleport may come before it
+  local first = opt.route[k]
+  print("  service first: " .. ((first and first.kind == "service") and "OK" or "WRONG (first step: " .. tostring(first and first.kind) .. ")"))
+end
 Line("optimized", opt.res)
 local nT, nH = 0, 0
 local listIds = {}

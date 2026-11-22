@@ -571,7 +571,7 @@ function Geo.PlanKey(goal)
   return table.concat({ Geo.GoalKey(goal), table.concat(list, ","), tostring(Settings().noHearth),
     tostring(Settings().noRecallSpells), tostring(Settings().noFMDetour), UnitLevel("player"),
     UnitXP and UnitXP("player") or 0, e and e.updated or "", tostring(scan.entries), TaxiCount(),
-    tostring(b and b.name), tostring(Settings().mountSpeed), Geo.paramsVersion or 0, Geo.SkillsKey() }, "|")
+    tostring(b and b.name), tostring(Settings().service and Settings().service.id), tostring(Settings().mountSpeed), Geo.paramsVersion or 0, Geo.SkillsKey() }, "|")
 end
 
 -- Returns true if the cached plan is up to date; otherwise starts (or continues) the computation and
