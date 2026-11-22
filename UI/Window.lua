@@ -251,7 +251,11 @@ local function RenderXP()
     end
   end
   if fz and #fz.route <= 1 and not searching then qItems[#qItems + 1] = { text = L["No usable quest found around you."] } end
-  Geo.PaneHeader(qp, L["Quests"], Color("aaaaaa", L["Quests of the list: "] .. Plural(shown or 0, L["quest"])))
+  -- Search active: "shown / total" so that a filtered list is not taken for a short one.
+  local count = Plural(shown or 0, L["quest"])
+  local total = #Geo.CustomList()
+  if searching and total > (shown or 0) then count = (shown or 0) .. " / " .. Plural(total, L["quest"]) end
+  Geo.PaneHeader(qp, L["Quests"], Color("aaaaaa", L["Quests of the list: "] .. count))
   RenderList(qp, "xp", qItems, searching)
   pcall(CP.RefreshButton)
 end
