@@ -957,7 +957,7 @@ end
 -- Service NPCs of the shortcuts under the Objective button: any vendor, repair NPC, class trainer
 ---------------------------------------------------------------------------
 -- QuestieDB npcFlags (vanilla 1.12 values, like the flight master 8 and innkeeper 128 above).
-K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_REPAIR = 4, 16, 16384
+K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_BANKER, K.NPC_FLAG_REPAIR = 4, 16, 256, 16384
 K.SERVICE_TIME = 60          -- seconds spent at a service NPC (selling, repairing, training)
 K.SERVICE_NEAR = 12          -- candidates kept per continent, nearest in a straight line
 K.SERVICE_CACHE = 20         -- seconds a nearest NPC stays valid (tooltips)
@@ -965,50 +965,74 @@ K.SERVICES = {
   { key = "vendor", icon = "Interface\\Icons\\INV_Misc_Coin_01", label = L["Vendor"], title = L["Sell and buy: "] },
   { key = "repair", icon = "Interface\\Icons\\Trade_BlackSmithing", label = L["Repair"], title = L["Repair: "] },
   { key = "trainer", icon = "Interface\\Icons\\INV_Misc_Book_11", label = L["Class trainer"], title = L["Train: "] },
+  { key = "bank", icon = "Interface\\Icons\\INV_Misc_Bag_10_Blue", label = L["Bank"], title = L["Bank: "] },
+  { key = "mail", icon = "Interface\\Icons\\INV_Letter_15", label = L["Mailbox"], title = L["Mailbox: "] },
 }
+-- Game event that ends the step of each service (the window of the NPC or mailbox opens).
+K.SERVICE_EVENTS = { vendor = "MERCHANT_SHOW", repair = "MERCHANT_SHOW", trainer = "TRAINER_SHOW",
+  bank = "BANKFRAME_OPENED", mail = "MAIL_SHOW" }
 
--- Vendors, repair NPCs and class trainers of the player's faction (QuestieDB), read once per session.
-function Geo.ServiceNpcs()
-  if Geo.svc then return Geo.svc end
-  Geo.svc = { vendor = {}, repair = {}, trainer = {} }
-  local okIds, ids = pcall(QDB.Npc.GetAllIds)
-  if not okIds or type(ids) ~= "table" then return Geo.svc end
+-- Ids of a QuestieDB table as a list (some versions give a set).
+local function AllIds(entity)
+  local okIds, ids = pcall(entity.GetAllIds)
+  if not okIds or type(ids) ~= "table" then return {} end
   if #ids == 0 and next(ids) then
     local list = {}
     for k in pairs(ids) do list[#list + 1] = k end
     ids = list
   end
+  return ids
+end
+
+-- Vendors, repair NPCs, class trainers and bankers of the player's faction, and mailboxes (objects),
+-- read once per session (QuestieDB). Each entry: { id, name, p }.
+function Geo.ServiceNpcs()
+  if Geo.svc then return Geo.svc end
+  local svc = { vendor = {}, repair = {}, trainer = {}, bank = {}, mail = {} }
+  Geo.svc = svc
   local fac = UnitFactionGroup and UnitFactionGroup("player")
   local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
-  if not letter then return Geo.svc end
   local classLoc, token = UnitClass("player")
   local classEn = token and (token:sub(1, 1) .. token:sub(2):lower()) or nil
-  for _, id in ipairs(ids) do
+  for _, id in ipairs(letter and AllIds(QDB.Npc) or {}) do
     local flags = QGet(QDB.Npc, id, "npcFlags")
     if type(flags) == "number" and flags > 0 then
       local isVendor = HasBit(flags, K.NPC_FLAG_VENDOR)
       local isRepair = HasBit(flags, K.NPC_FLAG_REPAIR)
+      local isBank = HasBit(flags, K.NPC_FLAG_BANKER)
       local isTrainer = false
       if HasBit(flags, K.NPC_FLAG_TRAINER) then
         local sub = QGet(QDB.Npc, id, "subName")
         isTrainer = type(sub) == "string" and ((classLoc and sub:find(classLoc, 1, true))
           or (classEn and sub:find(classEn, 1, true))) and true or false
       end
-      if isVendor or isRepair or isTrainer then
+      if isVendor or isRepair or isTrainer or isBank then
         local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
         if type(friendly) == "string" and friendly:find(letter) then
           local p = EntityPoints("npc", id)[1]
           if p and not p.instance then
             local e = { id = id, name = QGet(QDB.Npc, id, "name") or ("#" .. id), p = p }
-            if isVendor then table.insert(Geo.svc.vendor, e) end
-            if isRepair then table.insert(Geo.svc.repair, e) end
-            if isTrainer then table.insert(Geo.svc.trainer, e) end
+            if isVendor then table.insert(svc.vendor, e) end
+            if isRepair then table.insert(svc.repair, e) end
+            if isTrainer then table.insert(svc.trainer, e) end
+            if isBank then table.insert(svc.bank, e) end
           end
         end
       end
     end
   end
-  return Geo.svc
+  -- Mailboxes: objects named "Mailbox" (no flag, neutral).
+  for _, id in ipairs(AllIds(QDB.Object)) do
+    local name = QGet(QDB.Object, id, "name")
+    if type(name) == "string" then
+      local low = name:lower()
+      if low:find("mailbox", 1, true) or low:find("boîte aux lettres", 1, true) or low:find("boite aux lettres", 1, true) then
+        local p = EntityPoints("object", id)[1]
+        if p and not p.instance then table.insert(svc.mail, { id = id, name = name, p = p }) end
+      end
+    end
+  end
+  return svc
 end
 
 -- Nearest NPC of a service (kind: "vendor", "repair", "trainer") by travel time on the transport

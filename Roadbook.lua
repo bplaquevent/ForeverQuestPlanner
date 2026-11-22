@@ -1432,8 +1432,7 @@ function CP.OnGameEvent(event, a1, a2)
   elseif s.kind == "fm" then
     if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
   elseif s.kind == "service" then
-    local want = s.task.service == "trainer" and "TRAINER_SHOW" or "MERCHANT_SHOW"
-    if event == want then
+    if event == K.SERVICE_EVENTS[s.task.service or "vendor"] then
       Geo.ServiceClear() -- done: the next computations no longer plan it
       CP.AutoUpdate(L["Service done"])
     end
@@ -1817,7 +1816,7 @@ function CP.ServiceClick(kind)
   end
   local npc = Geo.NearestService(kind)
   if not npc then
-    Print(L["No such NPC found for your faction."])
+    Print(L["No such place found."])
     return
   end
   Geo.ServiceSet({ kind = kind, id = npc.id, name = npc.name, p = npc.p })
@@ -1873,7 +1872,7 @@ function CP.CreateServiceBar(b)
       if ok and npc then
         GameTooltip:AddLine(string.format(L["Nearest: %s (~%s)"], npc.name or "?", FormatTime(npc.time or 0)), 1, 1, 1)
       else
-        GameTooltip:AddLine(L["No such NPC found for your faction."], 1, 0.4, 0.4)
+        GameTooltip:AddLine(L["No such place found."], 1, 0.4, 0.4)
       end
       local cur = Geo.ServicePending()
       GameTooltip:AddLine((cur and cur.kind == def.key) and L["Click: cancel this priority"]
