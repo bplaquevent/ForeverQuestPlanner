@@ -355,28 +355,36 @@ function Geo.RecallSources()
 end
 
 -- State of the ways back, saved with a Roadbook to tell later whether it changed:
--- { [key] = { ready = server time when usable, charges }, bind = bind location name }.
+-- { [key] = { ready = server time when usable (0 when usable now), charges }, bind = bind location name }.
 function Geo.RecallState()
   local now = time and time() or 0
   local state = { bind = GetBindLocation and GetBindLocation() or nil, src = {} }
   for _, s in ipairs(Geo.RecallSources()) do
-    state.src[tostring(s.key)] = { ready = now + math.floor(s.ready + 0.5), charges = s.charges }
+    local left = math.floor(s.ready + 0.5)
+    -- Usable now: 0, not the current time (it would move with the clock and look like a change).
+    state.src[tostring(s.key)] = { ready = left > 0 and (now + left) or 0, charges = s.charges }
   end
   return state
 end
 
 -- The ways back changed since `saved` (Geo.RecallState): one more or less, a cooldown used or
--- reset, a rune more or less, another bind location.
+-- reset, a rune more or less, another bind location. Returns true and what changed (for the trace).
 function Geo.RecallChanged(saved, now)
-  if not saved then return true end
+  if not saved then return true, "no saved state" end
   now = now or Geo.RecallState()
-  if saved.bind ~= now.bind then return true end
+  if saved.bind ~= now.bind then return true, "bind " .. tostring(saved.bind) .. " -> " .. tostring(now.bind) end
   local a, b = saved.src or {}, now.src or {}
   for k, v in pairs(a) do
     local w = b[k]
-    if not w or w.charges ~= v.charges or math.abs((w.ready or 0) - (v.ready or 0)) > K.RECALL_TOLERANCE then return true end
+    if not w then return true, k .. " no longer available" end
+    if w.charges ~= v.charges then return true, k .. " charges " .. tostring(v.charges) .. " -> " .. tostring(w.charges) end
+    local sv, nv = v.ready or 0, w.ready or 0
+    -- Usable now (0) against on cooldown: a change; both on cooldown: the end time moved.
+    if (sv == 0) ~= (nv == 0) or (sv ~= 0 and math.abs(nv - sv) > K.RECALL_TOLERANCE) then
+      return true, k .. " ready " .. sv .. " -> " .. nv
+    end
   end
-  for k in pairs(b) do if not a[k] then return true end end
+  for k in pairs(b) do if not a[k] then return true, k .. " now available" end end
   return false
 end
 

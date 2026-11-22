@@ -632,7 +632,7 @@ function CP.RecallCheck(atStart)
   local route, first = fz.route, nil
   for i = 2, #route do if not CP.StepDone(route[i]) then first = i break end end
   if not first then return false end
-  local changed = Geo.RecallChanged(rec.recall, now)
+  local changed, why = Geo.RecallChanged(rec.recall, now)
   if not changed and atStart then
     local ahead = next(now.src) ~= nil
     for i = first, #route do
@@ -643,6 +643,7 @@ function CP.RecallCheck(atStart)
     changed = d ~= nil and d > K.LANDING_RADIUS
   end
   if not changed then return false end
+  Geo.Trace("recall", why or "position changed")
   return CP.Replan(L["Position or hearthstone / teleport cooldowns changed: the steps to come are updated. "])
 end
 
