@@ -1169,7 +1169,11 @@ local function RemainingTargets(q, t)
   for i, tg in ipairs(t) do
     local match = tg.sourceItem and -1 or map[i] -- source item: needed while it is not in the bags
     local count = tg.defaultCount
-    if match == -1 then
+    -- The game lists its objectives and none is this "talk" target: QuestieDB lists the turn-in NPC
+    -- as an objective ("Touring the Grounds": 3 NPCs to meet, then Danitha Morr), the game does not.
+    if not match and tg.kind == "talk" and #objs > 0 then
+      count = 0
+    elseif match == -1 then
       if Geo.ItemCount(tg.sourceItem) > 0 then count = 0 end
     elseif match then
       local o = objs[match]
