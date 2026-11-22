@@ -26,13 +26,14 @@ local function CreateRoadbookPanel(f, kind)
     Refresh()
   end)
   local function Tooltip(widget, title, text)
-    widget:SetScript("OnEnter", function(self)
+    -- Hooked: the dropdowns keep their own hover scripts.
+    widget:HookScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
       GameTooltip:AddLine(title)
       GameTooltip:AddLine(type(text) == "function" and text() or text, 0.8, 0.8, 0.8, true)
       GameTooltip:Show()
     end)
-    widget:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    widget:HookScript("OnLeave", function() GameTooltip:Hide() end)
   end
   -- Goal box (auto), the filter box of the other tabs: one row under the search box, the whole width
   -- of the window; the radio buttons, captions and "Generate" are created in it.
@@ -177,44 +178,23 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
   end
   local timeRadio, tx = Radio(gx, y, L["Session of"], function() CP.SetGoal("time", GoalTime()) end)
   Tooltip(timeRadio, L["For a play session"], L["The route earning the most XP within this time."])
-  -- Each dropdown right after its label (the template has a 16 px margin on the left, its frame is
-  -- 50 px wider than the set width and its button stops 16 px before its right edge).
-  local timeDD = CreateFrame("Frame", "ForeverQuestPlannerGoalTime", box, "UIDropDownMenuTemplate")
-  timeDD:SetPoint("LEFT", box, "TOPLEFT", tx - 8, y - 2)
-  UIDropDownMenu_SetWidth(timeDD, 44)
-  local levelRadio, lx = Radio(tx - 8 + 44 + 50 - 16 + 20, y, L["Reach level"], function() CP.SetGoal("level", GoalLevel()) end)
-  Tooltip(levelRadio, L["To reach the level"], L["The fastest route to this level (at most 10 levels above yours)."])
-  local TIMES = { { 3600, "1 h" }, { 7200, "2 h" }, { 10800, "3 h" }, { 14400, "4 h" } }
-  UIDropDownMenu_Initialize(timeDD, function(_, level)
-    for _, t in ipairs(TIMES) do
-      local info = UIDropDownMenu_CreateInfo()
-      info.text = t[2]
-      info.checked = GoalTime() == t[1]
-      info.func = function()
-        CloseDropDownMenus()
-        CP.SetGoal("time", t[1])
-      end
-      UIDropDownMenu_AddButton(info, level)
-    end
-  end)
+  -- Each dropdown right after its label.
+  local TIMES = { { key = 3600, label = "1 h" }, { key = 7200, label = "2 h" }, { key = 10800, label = "3 h" },
+    { key = 14400, label = "4 h" } }
+  local timeDD = Geo.Dropdown(box, 60, function() return TIMES end,
+    function(v) return GoalTime() == v end, function(v) CP.SetGoal("time", v) end)
+  timeDD:SetPoint("LEFT", box, "TOPLEFT", tx + 4, y)
   Tooltip(timeDD, L["For a play session"], L["The route earning the most XP within this time."])
-  local levelDD = CreateFrame("Frame", "ForeverQuestPlannerGoalLevel", box, "UIDropDownMenuTemplate")
-  levelDD:SetPoint("LEFT", box, "TOPLEFT", lx - 8, y - 2)
-  UIDropDownMenu_SetWidth(levelDD, 44)
+  local levelRadio, lx = Radio(tx + 4 + 60 + 26, y, L["Reach level"], function() CP.SetGoal("level", GoalLevel()) end)
+  Tooltip(levelRadio, L["To reach the level"], L["The fastest route to this level (at most 10 levels above yours)."])
   -- Levels from the current level + 1 to K.GOAL_LEVEL_SPAN levels above (at most max level).
-  UIDropDownMenu_Initialize(levelDD, function(_, level)
+  local levelDD = Geo.Dropdown(box, 60, function()
     local lo, hi = LevelRange()
-    for v = lo, hi do
-      local info = UIDropDownMenu_CreateInfo()
-      info.text = tostring(v)
-      info.checked = GoalLevel() == v
-      info.func = function()
-        CloseDropDownMenus()
-        CP.SetGoal("level", v)
-      end
-      UIDropDownMenu_AddButton(info, level)
-    end
-  end)
+    local list = {}
+    for v = lo, hi do list[#list + 1] = { key = v, label = tostring(v) } end
+    return list
+  end, function(v) return GoalLevel() == v end, function(v) CP.SetGoal("level", v) end)
+  levelDD:SetPoint("LEFT", box, "TOPLEFT", lx + 4, y)
   Tooltip(levelDD, L["To reach the level"], L["The fastest route to this level (at most 10 levels above yours)."])
 
   -- Update function.
@@ -227,11 +207,8 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
     end
     timeRadio:SetChecked(State.xpGoal.kind == "time")
     levelRadio:SetChecked(State.xpGoal.kind == "level")
-    local tv = GoalTime()
-    local tLabel = "-"
-    for _, t in ipairs(TIMES) do if t[1] == tv then tLabel = t[2] end end
-    UIDropDownMenu_SetText(timeDD, tLabel)
-    UIDropDownMenu_SetText(levelDD, tostring(GoalLevel()))
+    Geo.DropdownSync(timeDD)
+    Geo.DropdownSync(levelDD)
   end
 end
 

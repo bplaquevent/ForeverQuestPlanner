@@ -16,7 +16,6 @@ C_Timer
 ChatEdit_InsertLink
 ChatFontNormal
 ChatFrame_OpenChat
-CloseDropDownMenus
 CreateColor
 CreateFrame
 CreateVector2D
@@ -105,11 +104,6 @@ TaxiNodePosition
 ToggleQuestLog
 ToggleWorldMap
 TomTom
-UIDropDownMenu_AddButton
-UIDropDownMenu_CreateInfo
-UIDropDownMenu_Initialize
-UIDropDownMenu_SetText
-UIDropDownMenu_SetWidth
 UIParent
 UISpecialFrames
 UiMapPoint

@@ -499,7 +499,26 @@ local function AddStateFilters(panel, keys, selected)
 end
 
 K.SEARCH_WIDTH = 200 -- search box, centered at the top of every tab
-local filterMenus = 0 -- dropdown templates need a global name
+-- Single choice dropdown with Blizzard's menu API (UIDropDownMenu writes shared globals and so taints
+-- Blizzard's own frames: edit mode, objective tracker). choices(): list of { key, label };
+-- isSelected(key); onSelect(key). Its text is the selected choice (none: "-"), Geo.DropdownSync after a
+-- change made elsewhere.
+function Geo.Dropdown(parent, width, choices, isSelected, onSelect)
+  local dd = CreateFrame("DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+  dd:SetWidth(width)
+  dd:SetDefaultText("-")
+  dd:SetupMenu(function(_, root)
+    for _, c in ipairs(choices()) do
+      root:CreateRadio(c.label, function() return isSelected(c.key) end, function() onSelect(c.key) end)
+    end
+  end)
+  return dd
+end
+-- Text of the dropdown after a change made elsewhere; not while its menu is open (rebuilding it would
+-- close it at every refresh).
+function Geo.DropdownSync(dd)
+  if not dd:IsMenuOpen() then dd:GenerateMenu() end
+end
 -- Tab panel: search box centered at the top; single choice filter (dropdown) and option (check box) on
 -- the first row of the filter box below it.
 local function CreateFilterPanel(f, filters, getCurrent, setCurrent, onSearch, toggle, caption)
@@ -531,24 +550,11 @@ local function CreateFilterPanel(f, filters, getCurrent, setCurrent, onSearch, t
       w = math.max(w, (probe:GetStringWidth() or 80) + 16)
     end
     probe:Hide()
-    filterMenus = filterMenus + 1
-    dd = CreateFrame("Frame", "ForeverQuestPlannerFilter" .. filterMenus, box, "UIDropDownMenuTemplate")
-    dd:SetPoint("LEFT", box, "TOPLEFT", x - 12, y - 2) -- the template has a margin on the left
-    UIDropDownMenu_SetWidth(dd, w)
-    UIDropDownMenu_Initialize(dd, function(_, level)
-      for _, flt in ipairs(filters) do
-        local info = UIDropDownMenu_CreateInfo()
-        info.text = flt.label
-        info.checked = getCurrent() == flt.key
-        info.func = function()
-          CloseDropDownMenus()
-          setCurrent(flt.key)
-          Refresh()
-        end
-        UIDropDownMenu_AddButton(info, level)
-      end
-    end)
-    x = x - 12 + w + 50 - 16 + 16 -- visible right edge of the dropdown, then a gap
+    dd = Geo.Dropdown(box, w + 24, function() return filters end,
+      function(key) return getCurrent() == key end,
+      function(key) setCurrent(key); Refresh() end)
+    dd:SetPoint("LEFT", box, "TOPLEFT", x + 2, y)
+    x = x + 2 + w + 24 + 12 -- right edge of the dropdown, then a gap
   end
   if toggle then
     local cb = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
@@ -564,12 +570,7 @@ local function CreateFilterPanel(f, filters, getCurrent, setCurrent, onSearch, t
     c.toggle = cb
   end
   function c.Highlight()
-    if dd then
-      local cur = getCurrent()
-      for _, flt in ipairs(filters) do
-        if flt.key == cur then UIDropDownMenu_SetText(dd, flt.label) end
-      end
-    end
+    if dd then Geo.DropdownSync(dd) end
     -- Option shared by several tabs: its box follows the setting.
     if c.toggle then c.toggle:SetChecked(toggle.get() and true or false) end
   end
