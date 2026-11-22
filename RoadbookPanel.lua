@@ -391,19 +391,35 @@ local function Create()
   end)
   fold:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.fold = fold
-  -- Start / Pause, as the Roadbook tab's button.
-  local startB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  startB:SetSize(66, 20)
-  startB:SetPoint("TOP", 0, -5) -- centered in the title bar
-  startB:SetScript("OnClick", function()
-    if Geo.Tracking() then CP.Pause() else CP.Start() end
+  -- "Abandon" (as the Roadbook tab's button) right-aligned in the title bar, and the "Tracking" box
+  -- (turns the tracking on or off) at its left.
+  local abandonB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+  abandonB:SetSize(76, 20)
+  abandonB:SetText(L["Abandon"])
+  abandonB:SetPoint("RIGHT", fold, "LEFT", -4, 0)
+  abandonB:SetScript("OnClick", function() CP.Abandon() end)
+  abandonB:SetScript("OnEnter", function(self)
+    Tip(self, L["Abandon"], L["Abandons the Roadbook: its steps, their progress and the quest list."])
   end)
-  startB:SetScript("OnEnter", function(self)
-    Tip(self, L["Start / Pause"], L["Start: the Objective button follows the Roadbook. Pause: the tracking stops, the progress is kept."])
+  abandonB:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  panel.abandonB = abandonB
+  local track = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+  track:SetSize(20, 20)
+  track.label = track:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  track.label:SetText(L["Tracking"])
+  track.label:SetPoint("RIGHT", abandonB, "LEFT", -6, 0)
+  track:SetPoint("RIGHT", track.label, "LEFT", -2, 0)
+  track:SetHitRectInsets(0, -((track.label:GetStringWidth() or 40) + 2), 0, 0)
+  track:SetScript("OnClick", function()
+    if Geo.Tracking() then CP.TrackOff() else CP.TrackOn() end
+    Geo.MapPanelSync()
   end)
-  startB:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  panel.startB = startB
-  panel.titleText:SetPoint("RIGHT", startB, "LEFT", -4, 0)
+  track:SetScript("OnEnter", function(self)
+    Tip(self, L["Tracking"], L["On: the Objective button, the map pin and the watched quest follow the Roadbook. Off: they stop, the Roadbook stays up to date."])
+  end)
+  track:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  panel.track = track
+  panel.titleText:SetPoint("RIGHT", track, "LEFT", -4, 0)
   panel.titleText:SetJustifyH("LEFT")
   panel.titleText:SetWordWrap(false)
   -- Header: size and progress, XP, travel, what to watch.
@@ -575,8 +591,9 @@ function Geo.MapPanelSync()
   Geo.MapPanelHeaderSync()
   UpdateScrollBar(panel.scroll)
   local following = Geo.Tracking()
-  panel.startB:SetText(following and L["Pause"] or L["Start"])
-  panel.startB:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
+  panel.track:SetChecked(following)
+  panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
+  panel.abandonB:SetEnabled(not Geo.computing)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then

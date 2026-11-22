@@ -126,7 +126,7 @@ f:SetScript("OnEvent", function(_, event, ...)
         -- Profession level up: a quest waiting for it can be turned in (quick win near the route).
         local skill = f.skillChanged
         f.skillChanged = nil
-        if skill and Geo.Tracking() and Geo.frozen then
+        if skill and Geo.frozen then
           local ok, n = pcall(Geo.InjectQuickWins)
           if ok and n and n > 0 then Refresh() end
           pcall(CP.RefreshButton)

@@ -52,7 +52,7 @@ end
 -- category: the quests of the log in its order, then the others by level (a dungeon: by level).
 -- Without a Roadbook (fz nil), the list as it is; with one, the quests it does not plan show why.
 -- One line each with its state; the ones not turned in can be removed (CP.SkipQuest: out of the list,
--- the Roadbook computed again). Returns the number of quests shown and the size of the list.
+-- the Roadbook computed again). Returns the number of quests shown.
 function Geo.RoadbookQuestItems(items, fz, query)
   local D = K.DESC
   local quests, seen = {}, {}
@@ -120,7 +120,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
           tip = { L["Remove"], L["Removes the quest from the list (with the prerequisites added only for it); the steps to come of the Roadbook are computed again."] } } or nil } }
     end
   end
-  if #lines == 0 then return #quests, #list end
+  if #lines == 0 then return #quests end
 
   -- Categories of the log (Analyze), and the order of its quests.
   local a = Analyze()
@@ -185,12 +185,19 @@ function Geo.RoadbookQuestItems(items, fz, query)
       elseif c.kind == "dungeon" then label = Geo.WithLevel(L["Dungeon: "] .. c.name, c.name)
       else label = LABEL[c.kind] end
       -- Collapsed while the Roadbook is followed (the route matters more).
+      -- "Remove all" on a category (not the turned in ones: nothing left to remove).
+      local b3
+      if c.kind ~= "done" then
+        local ids = {}
+        for _, line in ipairs(c.lines) do ids[#ids + 1] = { id = line.it.id } end
+        b3 = select(2, Geo.CustomBulkButtons(ids))
+      end
       items[#items + 1] = { header = true, kind = c.kind == "done" and "info" or c.kind, key = "rbq:" .. c.key,
-        open = not following, label = label .. " - " .. Plural(#c.lines, L["quest"]) }
+        open = not following, label = label .. " - " .. Plural(#c.lines, L["quest"]), b3 = b3 }
       for _, line in ipairs(c.lines) do items[#items + 1] = line.item end
     end
   end
-  return #quests, #list
+  return #quests
 end
 
 -- Roadbook tab: the quests of the list under a fixed header; the Roadbook's steps are in the panel
@@ -221,7 +228,7 @@ local function RenderXP()
     qItems[#qItems + 1] = { text = Color("ffd100", L["No Roadbook. Fill the list with the \"Add\" button (or \"Add all\" on a category) of the Around me, Quest log and Available tabs, and/or let \"Generate\" fill it: for a play session (the most XP within that time) or a level (reached the fastest), the list is completed or trimmed; \"the whole list\" keeps it as it is. The Roadbook then does every quest of the list in the least time, and the Objective button follows it."]) }
   end
   local before = #qItems
-  local shown, listSize = Geo.RoadbookQuestItems(qItems, fz, query)
+  local shown = Geo.RoadbookQuestItems(qItems, fz, query)
   if #qItems == before and (searching or fz) then
     qItems[#qItems + 1] = { text = searching and L["No quest matches the search."]
       or L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] }
@@ -245,8 +252,7 @@ local function RenderXP()
     end
   end
   if fz and #fz.route <= 1 and not searching then qItems[#qItems + 1] = { text = L["No usable quest found around you."] } end
-  Geo.PaneHeader(qp, L["Quests"], Color("aaaaaa", L["Quests of the list: "] .. Plural(shown or 0, L["quest"])),
-    (listSize or 0) > 0 and { text = L["Remove all"], fn = function() StaticPopup_Show("FQP_CUSTOM_CLEAR") end } or nil)
+  Geo.PaneHeader(qp, L["Quests"], Color("aaaaaa", L["Quests of the list: "] .. Plural(shown or 0, L["quest"])))
   RenderList(qp, "xp", qItems, searching)
   pcall(CP.RefreshButton)
 end

@@ -1067,7 +1067,7 @@ function Geo.ShowOnMap(getPoint, title, questId)
   local owner = Geo.MapOwner and Geo.MapOwner()
   if owner and owner.mode == "preview" then Geo.MapRelease() owner = nil end
   if p and owner then
-    Print(L["A Roadbook is followed: the map shows only its steps (pause it to place a pin)."])
+    Print(L["A Roadbook is followed: the map shows only its steps (turn its tracking off to place a pin)."])
     Geo.OpenWorldMap(Geo.PointUi(p))
     Geo.MapGlide(p)
   elseif p then
