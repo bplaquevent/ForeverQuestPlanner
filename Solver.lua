@@ -178,11 +178,11 @@ function S.WalkTime(W, a, b, speed)
   return d * (way and W.k.PASS_PATH_FACTOR or W.k.PATH_FACTOR) / speed, way
 end
 
--- Walking time with the dangerous zones crossed (minimum level > plevel + margin: slower).
--- Also returns the highest zone minimum level crossed (any level), for reports.
-function S.WalkCost(W, a, b, speed, plevel)
-  local t, way = S.WalkTime(W, a, b, speed)
-  if not t then return math.huge end
+-- Shape of the walk a -> b, independent of the speed and of the player level: its length (path factor
+-- included) and the highest zone minimum level crossed; nil length when there is no way on foot.
+local function WalkShape(W, a, b)
+  local d, way = S.WalkWay(W, a, b)
+  if not d then return nil end
   local worst, p = nil, a
   for m = 1, (way and #way or 0) + 1 do
     local q = way and way[m] or b
@@ -194,6 +194,28 @@ function S.WalkCost(W, a, b, speed, plevel)
     end
     p = q
   end
+  return d * (way and W.k.PASS_PATH_FACTOR or W.k.PATH_FACTOR), worst
+end
+
+-- Walking time with the dangerous zones crossed (minimum level > plevel + margin: slower).
+-- Also returns the highest zone minimum level crossed (any level), for reports.
+-- The shape of each walk is cached by pair of points (shared objects): the same pair comes back for
+-- every network and player level, only the speed and the danger penalty change.
+function S.WalkCost(W, a, b, speed, plevel)
+  W.walkCache = W.walkCache or setmetatable({}, { __mode = "k" })
+  local row = W.walkCache[a]
+  if not row then
+    row = {}
+    W.walkCache[a] = row
+  end
+  local e = row[b]
+  if not e then
+    local len, worst = WalkShape(W, a, b)
+    e = { len or false, worst }
+    row[b] = e
+  end
+  if not e[1] then return math.huge end
+  local t, worst = e[1] / speed, e[2]
   if worst and worst > plevel + W.k.DANGER_MARGIN then t = t * W.k.DANGER_FACTOR end
   return t, worst
 end
