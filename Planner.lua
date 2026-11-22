@@ -1009,13 +1009,15 @@ function Geo.ServiceNpcs()
       if isVendor or isRepair or isTrainer or isBank then
         local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
         if type(friendly) == "string" and friendly:find(letter) then
-          local p = EntityPoints("npc", id)[1]
-          if p and not p.instance then
-            local e = { id = id, name = QGet(QDB.Npc, id, "name") or ("#" .. id), p = p }
-            if isVendor then table.insert(svc.vendor, e) end
-            if isRepair then table.insert(svc.repair, e) end
-            if isTrainer then table.insert(svc.trainer, e) end
-            if isBank then table.insert(svc.bank, e) end
+          local name = QGet(QDB.Npc, id, "name") or ("#" .. id)
+          for _, p in ipairs(EntityPoints("npc", id)) do -- one entry per place it stands
+            if not p.instance then
+              local e = { id = id, name = name, p = p }
+              if isVendor then table.insert(svc.vendor, e) end
+              if isRepair then table.insert(svc.repair, e) end
+              if isTrainer then table.insert(svc.trainer, e) end
+              if isBank then table.insert(svc.bank, e) end
+            end
           end
         end
       end
@@ -1027,8 +1029,9 @@ function Geo.ServiceNpcs()
     if type(name) == "string" then
       local low = name:lower()
       if low:find("mailbox", 1, true) or low:find("boîte aux lettres", 1, true) or low:find("boite aux lettres", 1, true) then
-        local p = EntityPoints("object", id)[1]
-        if p and not p.instance then table.insert(svc.mail, { id = id, name = name, p = p }) end
+        for _, p in ipairs(EntityPoints("object", id)) do -- the same object stands in many places
+          if not p.instance then table.insert(svc.mail, { id = id, name = name, p = p }) end
+        end
       end
     end
   end
