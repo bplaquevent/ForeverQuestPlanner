@@ -1,0 +1,25 @@
+name: Feature request
+description: An idea or an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Need
+      description: What are you trying to do, and what is missing?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Envisaged solution
+  - type: dropdown
+    id: area
+    attributes:
+      label: Part of the addon
+      options:
+        - Roadbook / solver
+        - Map (OpenMap)
+        - Quest log / Available / Nearby tabs
+        - Settings
+        - Other

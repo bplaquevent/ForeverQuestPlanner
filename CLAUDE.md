@@ -56,3 +56,10 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
 - Each user-visible change bumps the patch number of `## Version` in the `.toc`; update `README.md` when a feature
   or command changes.
 - Commit messages: English, a short title (`Area: change`), then a short paragraph explaining the why.
+  A commit that settles a GitHub issue ends its paragraph with `Fixes #n`.
+
+## Issues
+
+Work is tracked in GitHub Issues (labels: `bug`, `enhancement`, `solver`, `roadbook`, `map`, `ui`, `data`).
+Read them with `gh issue list` / `gh issue view <n>` when the user cites a number or a topic.
+Open, comment on or close an issue only when asked: it is public.

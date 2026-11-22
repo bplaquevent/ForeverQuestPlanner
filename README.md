@@ -147,6 +147,12 @@ To add a language, copy `frFR.lua`, change the locale code and translate the val
 - Times are estimates (30 s per monster by default, configurable).
 - Quests that take place inside a dungeon instance are not planned.
 
+## Reporting bugs and ideas
+
+Bugs and feature requests are tracked in the [GitHub Issues](https://github.com/bplaquevent/ForeverQuestPlanner/issues).
+Mention the addon version (`## Version` in the `.toc`). For a problem in a Roadbook plan, attach a `/fqp dump`
+capture (see [Test bench](#test-bench)).
+
 ## License
 
 [MIT](LICENSE)

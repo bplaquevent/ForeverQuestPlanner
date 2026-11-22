@@ -1,0 +1,37 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Addon version
+      description: "`## Version` in ForeverQuestPlanner.toc"
+    validations:
+      required: true
+  - type: input
+    id: deps
+    attributes:
+      label: QuestieDB and OpenMap versions
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Tab, zone, level, quest concerned.
+  - type: textarea
+    id: errors
+    attributes:
+      label: Lua errors
+      render: text
+  - type: checkboxes
+    id: dump
+    attributes:
+      label: Roadbook problem
+      options:
+        - label: "The problem is in the Roadbook plan. I can attach a `/fqp dump` capture (see the Test bench section of the README: `/fqp dump`, then `/reload`, then attach `SavedVariables/ForeverQuestPlanner.lua`)."
