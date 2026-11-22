@@ -1057,7 +1057,8 @@ function Geo.NpcInfo()
     local parts = {}
     for _, qid in ipairs(type(list) == "table" and list or {}) do
       if #parts >= 12 then parts[#parts + 1] = "…" break end
-      parts[#parts + 1] = qid .. ":classes=" .. tostring(QGet(QDB.Quest, qid, "requiredClasses"))
+      parts[#parts + 1] = qid .. ":classes=" .. tostring(QGet(QDB.Quest, qid, "requiredClasses")) .. ",sort=" .. tostring(QGet(QDB.Quest, qid, "zoneOrSort"))
+        .. ",'" .. tostring(QGet(QDB.Quest, qid, "name")) .. "'"
     end
     out[#out + 1] = field .. " (" .. (type(list) == "table" and #list or 0) .. "): " .. table.concat(parts, " ")
   end
