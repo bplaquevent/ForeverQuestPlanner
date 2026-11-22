@@ -706,12 +706,11 @@ end
 
 -- Steps to come computed again from here (CP.Replan); when it cannot be, the automatic Roadbook keeps
 -- its quests and their order (only travel, flight master, hearthstone and teleport steps change).
--- The focus stays on the same step if it is still there.
+-- The focus goes to the first step to do of the adapted plan.
 function CP.RecallReplan(kind, msg)
   if CP.Replan(kind, msg) then return true end
   if kind == "custom" or Geo.computing then return false end
   local fz = Geo.Frozen(kind)
-  local was = CP.CurrentFocus()
   local ok, route, info = pcall(Geo.Reroute, fz, false, CP.StepDone)
   if not ok then
     Print(L["Roadbook update error: "] .. tostring(route))
@@ -721,10 +720,7 @@ function CP.RecallReplan(kind, msg)
   local target
   for i = 2, #route do
     local st = route[i]
-    if not CP.StepDone(st) then
-      target = target or st
-      if was and CP.SameStep(st, was) then target = st break end
-    end
+    if not CP.StepDone(st) then target = st break end
   end
   CP.ClearFocus()
   if target then
@@ -954,17 +950,12 @@ function CP.Recompute(kind, keep, attempt, token, re)
       if refocus and Geo.ActiveKind() == kind then CP.FocusNext(false) else CP.RefreshButton() end
       return
     end
-    -- Recomputed while followed: the current objective stays if it is still there (and can be done
-    -- now), otherwise the next step that can be done.
-    for i = 2, #route do
-      local st = route[i]
-      if not CP.StepDone(st) and CP.SameStep(st, was) and CP.StepReady(st, route) then
-        CP.FocusStep(st)
-        return
-      end
-    end
+    -- Recomputed while followed: the focus goes to the first step of the new plan that can be done
+    -- (steps inserted before the current one come first); a change of step is announced.
     CP.ClearFocus()
     CP.FocusNext(true)
+    local now = CP.focused
+    if now and not CP.SameStep(now, was) then Print(L["Focus: "] .. CP.StepText(now)) end
   end, keep, re)
 end
 
