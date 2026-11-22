@@ -76,8 +76,6 @@ function Geo.MigrateRoadbooks()
   if not (active or old) then return end -- nothing to migrate
   if old then store[ck .. "|custom"] = nil end
   if active == "custom" and old then store[ck] = old end
-  local rec = store and store[ck]
-  if rec and rec.info and rec.info.custom then st.goal = { kind = "custom" } end
 end
 
 -- Versions with an automatic Roadbook (its quests chosen at each computation): it becomes the
@@ -198,7 +196,6 @@ function Geo.CustomAdd(id, title, level, quiet)
   if quiet then return true, pre end
   Print(L["Added to the Roadbook list: "] .. title ..
     (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
-  Geo.CustomHint()
   if not Geo.ForPlayer(id) then Print(L["Warning: this quest is not for your class or race."]) end
   Geo.CustomChanged()
   return true, pre
@@ -213,7 +210,6 @@ function Geo.CustomAddList(list)
   end
   Print(string.format(L["%d quest(s) added to the Roadbook list"], added) ..
     (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
-  if added > 0 then Geo.CustomHint() end
   if added > 0 then Geo.CustomChanged() end
 end
 
@@ -270,27 +266,27 @@ function Geo.CustomRemoveList(list)
   if n > 0 then Geo.CustomChanged() end
 end
 
--- No Roadbook yet: how the list becomes one.
-function Geo.CustomHint()
-  if Geo.HasRoadbook() then return end
-  Print(L["Click \"Generate\" in the Roadbook tab to make the Roadbook of the list."])
+-- The list cannot change while the Roadbook is computed (the computation would be on a list that no
+-- longer exists): the user's changes are refused with a message. Returns true when locked.
+function Geo.ListLocked()
+  if not Geo.computing then return false end
+  Print(L["The Roadbook is being computed: its list can be changed when it is ready."])
+  return true
 end
 
--- List changed while there is a Roadbook: its steps to come are computed again (grouped when several
--- quests are added in a row), its steps done and its tracking kept; empty list: the steps to come
--- are removed and its tracking stops, the steps done stay (only "Empty" empties them). No Roadbook (or one
--- being generated, which makes its own list): nothing is computed, "Generate" makes it.
+-- List changed: the Roadbook (existing or not) is computed again (grouped when several quests are
+-- added in a row), its steps done and its tracking kept; empty list: the steps to come
+-- are removed and its tracking stops, the steps done stay (only "Empty" empties them).
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1
   local token = Geo.customToken
   Geo.customCache = nil
-  local mine = Geo.IsCustom() or (Geo.computing and Geo.computingGoal == "custom")
-  if mine and #Geo.CustomList() == 0 then
+  if #Geo.CustomList() == 0 then
     Geo.customUnplanned = nil
     Geo.ServiceClear()
     if ns.CP then ns.CP.TrackOff(true) end
     if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
-  elseif mine then
+  else
     C_Timer.After(0.6, function()
       if token == Geo.customToken and ns.CP then ns.CP.Recompute("custom", true) end
     end)
@@ -532,7 +528,7 @@ function Geo.TraceService(route)
     tostring(sv.name), tostring(p.c), p.x or 0, p.y or 0, ns.TaxiCount and ns.TaxiCount() or -1, table.concat(parts, " | ")))
 end
 
--- "Generate" with a duration or level (goal): the list (if any) kept whole and completed with the
+-- "Adapt" with a duration or level (goal): the list (if any) kept whole and completed with the
 -- quests serving the goal best, or, when it alone goes beyond the goal, only its part serving it best
 -- (Solver.Optimize). The quests of the list that cannot be located stay in it, unplanned.
 function Geo.PlanGenerate(goal, opts)
@@ -541,7 +537,7 @@ function Geo.PlanGenerate(goal, opts)
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
   local plevel = UnitLevel("player")
   if plevel >= Geo.MaxLevel() then
-    return nil, L["Max level reached: no more XP to earn. Choose \"the whole list\" to do the quests of your list."]
+    return nil, L["Max level reached: no more XP to earn."]
   end
   Geo.xpScale, Geo.customCtx = nil, nil
   Geo.planSpeed = TravelSpeed()
@@ -590,7 +586,8 @@ end
 
 -- Generated Roadbook: the list becomes its quests (after a confirmation when quests of the list
 -- leave it), then it is saved. done(accepted).
-function Geo.AcceptGenerated(route, info, done)
+-- prepare(route): optional, returns the route to save (the steps done of the former Roadbook put first).
+function Geo.AcceptGenerated(route, info, done, prepare)
   local list = Geo.ListFromRoute(route, info.unplanned)
   local keep, dropped = {}, 0
   for _, e in ipairs(list) do keep[e.id] = true end
@@ -601,7 +598,7 @@ function Geo.AcceptGenerated(route, info, done)
     Geo.CustomRec().list = list
     Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute of the former list
     Geo.customCache, Geo.customUnplanned = nil, info.unplanned
-    Geo.Freeze(route, info)
+    Geo.Freeze(prepare and prepare(route) or route, info)
     if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
     done(true)
   end
