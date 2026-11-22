@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tools/check.sh)",
+      "Bash(lua5.1 tools/bench.lua *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-lua.sh",
+            "timeout": 60,
+            "statusMessage": "tools/check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
