@@ -1014,6 +1014,14 @@ function Geo.AddItemTarget(add, itemId)
     for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
   end
   local kind = (#npcs == 0 and #objs > 0) and "object" or "item"
+  if #pts == 0 then
+    -- Not dropped by anything located: sold by vendors (QuestieDB `vendors`): one purchase.
+    local vendors = QGet(QDB.Item, itemId, "vendors") or {}
+    for i = 1, math.min(#vendors, 6) do
+      for _, p in ipairs(EntityPoints("npc", vendors[i])) do pts[#pts + 1] = p end
+    end
+    if #pts > 0 then kind = "buy" end
+  end
   local ids = {}
   for i = 1, math.min(#npcs, 6) do ids[#ids + 1] = npcs[i] end
   add(kind, QGet(QDB.Item, itemId, "name"), pts, rateN > 0 and rateSum / rateN or nil, npcs[1], #ids > 0 and ids or nil)

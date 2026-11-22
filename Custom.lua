@@ -310,7 +310,11 @@ function Geo.CustomTask(e, pos, plevel, logById)
     if not q.complete then
       local unmatched
       task.remaining, unmatched = RemainingTargets(q, t)
-      if unmatched > 0 then task.warn = L["an objective is not located"] end
+      if unmatched > 0 then
+        -- Nothing left to do at known places: the quest is not done, so it is not offered for turn-in.
+        if #task.remaining == 0 then return nil, L["an objective is not located"] end
+        task.warn = L["an objective is not located"]
+      end
     end
   else
     if #t.start == 0 then return nil, L["quest giver not located"] end
