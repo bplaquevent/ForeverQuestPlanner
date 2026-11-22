@@ -117,20 +117,11 @@ f:SetScript("OnEvent", function(_, event, ...)
       end
     end)
   elseif event == "UPDATE_FACTION" or event == "SKILL_LINES_CHANGED" then
-    if event == "SKILL_LINES_CHANGED" then f.skillChanged = true end
     if not f.rescanPending then
       f.rescanPending = true
       C_Timer.After(10, function()
         f.rescanPending = nil
         scan.dirty = true
-        -- Profession level up: a quest waiting for it can be turned in (quick win near the route).
-        local skill = f.skillChanged
-        f.skillChanged = nil
-        if skill and Geo.frozen then
-          local ok, n = pcall(Geo.InjectQuickWins)
-          if ok and n and n > 0 then Refresh() end
-          pcall(CP.RefreshButton)
-        end
         if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "xp" then Refresh() end
       end)
     end
