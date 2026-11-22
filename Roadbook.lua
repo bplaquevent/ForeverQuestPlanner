@@ -565,6 +565,9 @@ function CP.Resync()
   local okR, replanned = pcall(CP.RecallCheck, true)
   if not okR then Print(L["Roadbook update error: "] .. tostring(replanned)) end
   if okR and replanned then return true end
+  local okA, started = pcall(CP.AheadCheck) -- steps done ahead while the Roadbook was paused
+  if not okA then Print(L["Roadbook update error: "] .. tostring(started)) end
+  if okA and started then return true end
   local fz = Geo.Frozen()
   local pos = PlayerPos()
   if not (fz and pos) then return false end
@@ -682,29 +685,30 @@ end
 -- Steps done ahead: a quest picked up, an objective done or a quest turned in before its place in
 -- the Roadbook. Right after the steps done, the route stays right (several quests from the same
 -- NPC…); further on, the steps to come are computed again without them (they join the history).
--- A step that comes back after a computation does not start another one. Returns true if a
--- computation started.
+-- A step that comes back after the computation it started does not start another one (it is
+-- forgotten when its quest leaves the log, CP.QuestRemoved). Returns true if a computation started.
 K.AHEAD_KINDS = { take = true, obj = true, turnin = true }
+CP.aheadSeen = {} -- key of a step done ahead (CP.AheadKey) -> quest id
+function CP.AheadKey(st)
+  return st.kind .. ":" .. st.task.id .. ":" .. tostring(st.r and st.r.tg and st.r.tg.name)
+end
 function CP.AheadCheck()
   local fz = Geo.Frozen()
   if not fz or Geo.computing or CP.autoPending then return false end
-  local route, first, ahead = fz.route, nil, nil
-  CP.aheadSeen = CP.aheadSeen or {}
+  local route, first, ahead = fz.route, nil, {}
   for i = 2, #route do
     local st = route[i]
     local done = CP.StepDone(st)
     if not first then
       if not done then first = i end
-    elseif done and not st.done and K.AHEAD_KINDS[st.kind] and not st.search and st.task and st.task.id then
-      local key = st.kind .. ":" .. st.task.id .. ":" .. tostring(st.r and st.r.tg and st.r.tg.name)
-      if not CP.aheadSeen[key] then
-        CP.aheadSeen[key] = true
-        ahead = ahead or st
-      end
+    elseif done and not st.done and K.AHEAD_KINDS[st.kind] and not st.search and st.task and st.task.id
+      and not CP.aheadSeen[CP.AheadKey(st)] then
+      ahead[#ahead + 1] = st
     end
   end
-  if not ahead then return false end
-  return CP.Replan(L["Step done ahead: "] .. CP.StepText(ahead) .. ". ")
+  if #ahead == 0 or not CP.Replan(L["Step done ahead: "] .. CP.StepText(ahead[1]) .. ". ") then return false end
+  for _, st in ipairs(ahead) do CP.aheadSeen[CP.AheadKey(st)] = st.task.id end -- only once started
+  return true
 end
 
 -- Quest gone from the log (QUEST_REMOVED, a moment later): turned in, the focused step moves on (if
@@ -712,6 +716,9 @@ end
 -- list, or keep it and pick it up again (the steps to come are computed again either way).
 function CP.QuestRemoved(id)
   if IsInLog(id) then return end
+  for key, qid in pairs(CP.aheadSeen) do -- picked up again later: its steps count again
+    if qid == id then CP.aheadSeen[key] = nil end
+  end
   local s = CP.CurrentFocus()
   if (CP.turnedIn and CP.turnedIn[id]) or IsCompleted(id) then
     if s and s.kind ~= "take" and s.task and s.task.id == id then CP.AutoUpdate(L["Quest turned in"]) end
