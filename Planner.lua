@@ -9,6 +9,7 @@ local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos
 local Refresh, RemainingTargets, Route, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Route, ns.SLOTS, ns.Settings, ns.StartPoints
 local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
+local BuildNetwork = ns.BuildNetwork
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -950,6 +951,243 @@ function Geo.ScanServices()
       end
     end
   end
+end
+
+---------------------------------------------------------------------------
+-- Service NPCs of the shortcuts under the Objective button: any vendor, repair NPC, class trainer
+---------------------------------------------------------------------------
+-- QuestieDB npcFlags (vanilla 1.12 values, like the flight master 8 and innkeeper 128 above).
+K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_BANKER, K.NPC_FLAG_REPAIR = 4, 16, 256, 16384
+K.SERVICE_TIME = 60          -- seconds spent at a service NPC (selling, repairing, training)
+K.SERVICE_NEAR = 12          -- candidates kept per continent, nearest in a straight line
+K.SERVICE_CACHE = 20         -- seconds a nearest NPC stays valid (tooltips)
+K.SERVICES = {
+  { key = "vendor", icon = "Interface\\Icons\\INV_Misc_Coin_01", label = L["Vendor"], title = L["Sell and buy: "] },
+  { key = "repair", icon = "Interface\\Icons\\Trade_BlackSmithing", label = L["Repair"], title = L["Repair: "] },
+  { key = "trainer", icon = "Interface\\Icons\\INV_Misc_Book_11", label = L["Class trainer"], title = L["Train: "] },
+  { key = "bank", icon = "Interface\\Icons\\INV_Misc_Bag_10_Blue", label = L["Bank"], title = L["Bank: "] },
+  { key = "mail", icon = "Interface\\Icons\\INV_Letter_15", label = L["Mailbox"], title = L["Mailbox: "] },
+}
+-- Game event that ends the step of each service (the window of the NPC or mailbox opens).
+K.SERVICE_EVENTS = { vendor = "MERCHANT_SHOW", repair = "MERCHANT_SHOW", trainer = "TRAINER_SHOW",
+  bank = "BANKFRAME_OPENED", mail = "MAIL_SHOW" }
+
+-- Ids of a QuestieDB table as a list (some versions give a set).
+local function AllIds(entity)
+  local okIds, ids = pcall(entity.GetAllIds)
+  if not okIds or type(ids) ~= "table" then return {} end
+  if #ids == 0 and next(ids) then
+    local list = {}
+    for k in pairs(ids) do list[#list + 1] = k end
+    ids = list
+  end
+  return ids
+end
+
+-- Class trainers learned in game, by class token: QuestieDB gives some of them no class (sub title
+-- "Niveau 10"). Shared by the characters of the same class: { [npcId] = true }.
+function Geo.LearnedTrainers()
+  local _, token = UnitClass("player")
+  local sd = ns.SharedData()
+  sd.classTrainers = sd.classTrainers or {}
+  sd.classTrainers[token or "?"] = sd.classTrainers[token or "?"] or {}
+  return sd.classTrainers[token or "?"]
+end
+
+-- Remember an NPC as a trainer of the player's class (the service lists are read again).
+function Geo.LearnTrainer(id)
+  local learned = Geo.LearnedTrainers()
+  if not id or learned[id] then return end
+  local flags = QGet(QDB.Npc, id, "npcFlags")
+  if type(flags) ~= "number" or not HasBit(flags, K.NPC_FLAG_TRAINER) then return end
+  learned[id] = true
+  Geo.svc, Geo.svcNear = nil, nil
+end
+
+local function UnitNpcId(unit)
+  local guid = UnitGUID and UnitGUID(unit)
+  local kind, _, _, _, _, id = strsplit("-", guid or "")
+  return (kind == "Creature" or kind == "Vehicle") and tonumber(id) or nil
+end
+
+-- Window of a trainer opened: a class trainer (not a profession trainer) teaches the player's class.
+function Geo.TrainerOpened()
+  if UnitNpcId("npc") and not (IsTradeskillTrainer and IsTradeskillTrainer()) then
+    Geo.LearnTrainer(UnitNpcId("npc"))
+  end
+end
+
+-- Unit targeted or hovered: its tooltip title ("<Paladin Trainer>") names the player's class.
+function Geo.TrainerSeen(unit)
+  local id = UnitNpcId(unit)
+  if not id or Geo.LearnedTrainers()[id] then return end
+  local flags = QGet(QDB.Npc, id, "npcFlags")
+  if type(flags) ~= "number" or not HasBit(flags, K.NPC_FLAG_TRAINER) then return end
+  local classLoc, token = UnitClass("player")
+  if not Geo.scanTip then
+    Geo.scanTip = CreateFrame("GameTooltip", "FQPScanTip", nil, "GameTooltipTemplate")
+  end
+  local tip = Geo.scanTip
+  tip:SetOwner(UIParent, "ANCHOR_NONE")
+  tip:SetUnit(unit)
+  for i = 2, 3 do
+    local fs = _G["FQPScanTipTextLeft" .. i]
+    local text = fs and fs:GetText()
+    if text then
+      local low = text:lower()
+      if (classLoc and low:find(classLoc:lower(), 1, true)) or (token and low:find(token:lower(), 1, true)) then
+        Geo.LearnTrainer(id)
+        break
+      end
+    end
+  end
+end
+
+-- Vendors, repair NPCs, class trainers and bankers of the player's faction, and mailboxes (objects),
+-- read once per session (QuestieDB). Each entry: { id, name, p }.
+function Geo.ServiceNpcs()
+  if Geo.svc then return Geo.svc end
+  local svc = { vendor = {}, repair = {}, trainer = {}, bank = {}, mail = {} }
+  Geo.svc = svc
+  local fac = UnitFactionGroup and UnitFactionGroup("player")
+  local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
+  local classLoc, token = UnitClass("player")
+  local classEn = token and (token:sub(1, 1) .. token:sub(2):lower()) or nil
+  local learned = Geo.LearnedTrainers()
+  for _, id in ipairs(letter and AllIds(QDB.Npc) or {}) do
+    local flags = QGet(QDB.Npc, id, "npcFlags")
+    if type(flags) == "number" and flags > 0 then
+      local isVendor = HasBit(flags, K.NPC_FLAG_VENDOR)
+      local isRepair = HasBit(flags, K.NPC_FLAG_REPAIR)
+      local isBank = HasBit(flags, K.NPC_FLAG_BANKER)
+      local isTrainer = false
+      if HasBit(flags, K.NPC_FLAG_TRAINER) then
+        local sub = QGet(QDB.Npc, id, "subName")
+        -- Case-insensitive: "Maître des paladins" must match the class "Paladin".
+        local low = type(sub) == "string" and sub:lower() or nil
+        isTrainer = (learned[id] or (low and ((classLoc and low:find(classLoc:lower(), 1, true))
+          or (classEn and low:find(classEn:lower(), 1, true))))) and true or false
+      end
+      if isVendor or isRepair or isTrainer or isBank then
+        local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
+        if type(friendly) == "string" and friendly:find(letter) then
+          local name = QGet(QDB.Npc, id, "name") or ("#" .. id)
+          for _, p in ipairs(EntityPoints("npc", id)) do -- one entry per place it stands
+            if not p.instance then
+              local e = { id = id, name = name, p = p }
+              if isVendor then table.insert(svc.vendor, e) end
+              if isRepair then table.insert(svc.repair, e) end
+              if isTrainer then table.insert(svc.trainer, e) end
+              if isBank then table.insert(svc.bank, e) end
+            end
+          end
+        end
+      end
+    end
+  end
+  -- Mailboxes: objects named "Mailbox" (no flag, neutral).
+  for _, id in ipairs(AllIds(QDB.Object)) do
+    local name = QGet(QDB.Object, id, "name")
+    if type(name) == "string" then
+      local low = name:lower()
+      if low:find("mailbox", 1, true) or low:find("boîte aux lettres", 1, true) or low:find("boite aux lettres", 1, true) then
+        for _, p in ipairs(EntityPoints("object", id)) do -- the same object stands in many places
+          if not p.instance then table.insert(svc.mail, { id = id, name = name, p = p }) end
+        end
+      end
+    end
+  end
+  return svc
+end
+
+-- Diagnostic of the targeted NPC for the service lists (/fqp npc): QuestieDB data and why it is or is not a
+-- class trainer of the player. Returns lines.
+function Geo.NpcInfo()
+  local guid = UnitGUID and UnitGUID("target")
+  local id = guid and tonumber((select(6, strsplit("-", guid))))
+  if not id then return { "no NPC targeted" } end
+  local classLoc, token = UnitClass("player")
+  local out = { string.format("npc %d '%s' (player class '%s' / '%s')", id, tostring(QGet(QDB.Npc, id, "name")),
+    tostring(classLoc), tostring(token)) }
+  out[#out + 1] = string.format("npcFlags=%s subName=%s friendlyToFaction=%s", tostring(QGet(QDB.Npc, id, "npcFlags")),
+    tostring(QGet(QDB.Npc, id, "subName")), tostring(QGet(QDB.Npc, id, "friendlyToFaction")))
+  out[#out + 1] = string.format("faction=%s points=%d", tostring(UnitFactionGroup("player")), #EntityPoints("npc", id))
+  for _, field in ipairs({ "questStarts", "questEnds" }) do
+    local list = QGet(QDB.Npc, id, field)
+    local parts = {}
+    for _, qid in ipairs(type(list) == "table" and list or {}) do
+      if #parts >= 12 then parts[#parts + 1] = "…" break end
+      parts[#parts + 1] = qid .. ":classes=" .. tostring(QGet(QDB.Quest, qid, "requiredClasses")) .. ",sort=" .. tostring(QGet(QDB.Quest, qid, "zoneOrSort"))
+        .. ",'" .. tostring(QGet(QDB.Quest, qid, "name")) .. "'"
+    end
+    out[#out + 1] = field .. " (" .. (type(list) == "table" and #list or 0) .. "): " .. table.concat(parts, " ")
+  end
+  local n = 0
+  for _, e in ipairs(Geo.ServiceNpcs().trainer) do if e.id == id then n = n + 1 end end
+  out[#out + 1] = string.format("entries in the trainer list: %d of %d", n, #Geo.ServiceNpcs().trainer)
+  return out
+end
+
+-- Nearest NPC of a service (kind: "vendor", "repair", "trainer") by travel time on the transport
+-- network: the nearest ones in a straight line on the player's continent, else on each other
+-- continent the ones nearest to a flight master. Returns { id, name, p, time } or nil.
+function Geo.NearestService(kind, pos)
+  pos = pos or PlayerPos()
+  if not pos then return nil end
+  local cache = Geo.svcNear and Geo.svcNear[kind]
+  local now = GetTime and GetTime() or 0
+  if cache and now - cache.at < K.SERVICE_CACHE and cache.pos and (Dist(pos, cache.pos) or math.huge) < 100 then
+    return cache.best
+  end
+  local list = Geo.ServiceNpcs()[kind] or {}
+  local byCont = {}
+  for _, e in ipairs(list) do
+    local c = e.p.c
+    byCont[c] = byCont[c] or {}
+    table.insert(byCont[c], e)
+  end
+  local refs = {}
+  local function nearest(entries, ref)
+    local scored = {}
+    for _, e in ipairs(entries) do
+      local d = Dist(e.p, ref)
+      if d then scored[#scored + 1] = { e = e, d = d } end
+    end
+    table.sort(scored, function(a, b) return a.d < b.d end)
+    return scored
+  end
+  local cands = {}
+  local here = byCont[pos.c]
+  if here then
+    for i, r in ipairs(nearest(here, pos)) do
+      if i > K.SERVICE_NEAR then break end
+      cands[#cands + 1] = r.e
+    end
+  end
+  if #cands == 0 then
+    for c, entries in pairs(byCont) do
+      local ref
+      for _, fm in ipairs(Geo.FlightMasters()) do if fm.p.c == c then ref = fm.p break end end
+      if ref then
+        for i, r in ipairs(nearest(entries, ref)) do
+          if i > 8 then break end
+          cands[#cands + 1] = r.e
+        end
+      end
+    end
+  end
+  local plevel = UnitLevel("player")
+  local travel = MakeTravel(BuildNetwork(TravelSpeed()), plevel)
+  local best
+  for _, e in ipairs(cands) do
+    local t = travel(pos, e.p)
+    if t and t < math.huge and (not best or t < best.time) then
+      best = { id = e.id, name = e.name, p = e.p, time = t }
+    end
+  end
+  Geo.svcNear = Geo.svcNear or {}
+  Geo.svcNear[kind] = { at = now, pos = pos, best = best }
+  return best
 end
 
 -- Flight masters the character can use: OpenMap's flight nodes (Forever's tables: faction, class),

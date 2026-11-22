@@ -22,6 +22,31 @@ function Geo.CustomRec()
   return st.custom[k]
 end
 
+-- Service shortcut (vendor, repair, class trainer) waiting to be done: the NPC chosen, first step of
+-- the Roadbook until done. Saved per character: { kind, id, name, p }.
+function Geo.ServicePending()
+  return Settings().service
+end
+
+function Geo.ServiceSet(e)
+  Settings().service = e and { kind = e.kind, id = e.id, name = e.name, p = Geo.CopyPoint(e.p) } or nil
+  Geo.customCache = nil
+end
+
+function Geo.ServiceClear()
+  Geo.ServiceSet(nil)
+end
+
+-- Game step of the pending service, or nil.
+function Geo.ServiceStep()
+  local sv = Geo.ServicePending()
+  if not (sv and sv.p) then return nil end
+  local title = sv.kind
+  for _, def in ipairs(K.SERVICES) do if def.key == sv.kind then title = def.title end end
+  return { kind = "service", p = Geo.CopyPoint(sv.p), work = K.SERVICE_TIME,
+    task = { title = title .. (sv.name or "?"), npc = sv.name, npcId = sv.id, service = sv.kind, xp = 0 } }
+end
+
 -- The Roadbook is followed (a step is focused); paused otherwise.
 function Geo.Tracking()
   return ns.CP.CurrentFocus() ~= nil
@@ -269,6 +294,7 @@ function Geo.CustomChanged()
   local mine = Geo.IsCustom() or (Geo.computing and Geo.computingGoal == "custom")
   if mine and #Geo.CustomList() == 0 then
     Geo.customUnplanned = nil
+    Geo.ServiceClear()
     if ns.CP then ns.CP.Pause(true) end
     if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
   elseif mine then
@@ -504,7 +530,24 @@ function Geo.ListRoute(P, opt)
     if st.kind == "dungeon" then dungeons = dungeons + 1 end
   end
   info.custom, info.dungeons, info.discovered, info.later = true, dungeons, discovered, {}
+  Geo.TraceService(route)
   return route, info
+end
+
+-- Trace of the plan of a service shortcut: the steps up to the service step (transports, teleports,
+-- flight paths activated on the way), each with its time since the start.
+function Geo.TraceService(route)
+  local sv = Geo.ServicePending()
+  if not sv then return end
+  local parts = {}
+  for i = 2, #route do
+    local st = route[i]
+    parts[#parts + 1] = string.format("%s %s @%ds", tostring(st.kind), tostring(st.task and st.task.title or "?"), st.at or 0)
+    if st.kind == "service" then break end
+  end
+  local p = route[1].p or {}
+  Geo.Trace("service", string.format("%s -> %s; start c%s %d,%d; known flight paths %d; steps: %s", tostring(sv.kind),
+    tostring(sv.name), tostring(p.c), p.x or 0, p.y or 0, ns.TaxiCount and ns.TaxiCount() or -1, table.concat(parts, " | ")))
 end
 
 -- "Generate" with a duration or level (goal): the list (if any) kept whole and completed with the
@@ -521,7 +564,7 @@ function Geo.PlanGenerate(goal, opts)
   Geo.xpScale, Geo.customCtx = nil, nil
   Geo.planSpeed = TravelSpeed()
   local cp, unplanned
-  if #Geo.CustomList() > 0 then
+  if #Geo.CustomList() > 0 or Geo.ServicePending() then
     local _, u
     cp, _, u = Geo.CustomPlanSteps(pos, plevel)
     unplanned = cp and cp.unplanned or u

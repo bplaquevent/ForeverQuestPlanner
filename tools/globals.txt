@@ -146,3 +146,7 @@ type
 unpack
 wipe
 xpcall
+UnitGUID
+strsplit
+CreateFrame
+IsTradeskillTrainer

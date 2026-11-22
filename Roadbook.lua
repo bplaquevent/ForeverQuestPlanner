@@ -59,7 +59,7 @@ function CP.StepPinLabel(s)
 end
 
 function CP.StepText(s)
-  if s.kind == "fm" or s.kind == "bind" then return (s.task.title or "?") .. " (" .. (s.task.npc or "?") .. ")" end
+  if s.kind == "fm" or s.kind == "bind" or s.kind == "service" then return (s.task.title or "?") .. " (" .. (s.task.npc or "?") .. ")" end
   if s.kind == "hearth" or s.kind == "travel" or s.kind == "dungeon" then return s.task.title or "?" end
   local tag = (s.escort and L["Escort"]) or (s.kind == "take" and L["Pick up"]) or (s.kind == "obj" and L["Objective"]) or L["Turn in"]
   local extra = s.kind == "obj" and s.r and (L[": "] .. (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count)
@@ -167,7 +167,7 @@ function Geo.SerializeStep(st)
     task = { id = t.id, title = t.title, level = t.level, xp = t.xp, starter = t.starter, reqLevel = t.reqLevel,
       depTitle = t.dep and t.dep.title, tags = t.tags, npc = t.npc, mode = t.mode, from = t.from, dest = t.dest,
       destP = Geo.CopyPoint(t.destP), kind = t.kind, quick = t.quick, dungeon = t.dungeon, warn = t.warn,
-      levelWarn = t.levelWarn, orderWarn = t.orderWarn, spell = t.spell } }
+      levelWarn = t.levelWarn, orderWarn = t.orderWarn, spell = t.spell, service = t.service, npcId = t.npcId } }
 end
 
 function Geo.DeserializeStep(rec, tasks)
@@ -178,7 +178,7 @@ function Geo.DeserializeStep(rec, tasks)
     task = { id = tr.id, title = tr.title, level = tr.level, xp = tr.xp, starter = tr.starter, reqLevel = tr.reqLevel,
       dep = tr.depTitle and { title = tr.depTitle } or nil, tags = tr.tags, npc = tr.npc, mode = tr.mode,
       from = tr.from, dest = tr.dest, destP = tr.destP, kind = tr.kind, quick = tr.quick, stops = {},
-      dungeon = tr.dungeon, warn = tr.warn, levelWarn = tr.levelWarn, orderWarn = tr.orderWarn, spell = tr.spell,
+      dungeon = tr.dungeon, warn = tr.warn, levelWarn = tr.levelWarn, orderWarn = tr.orderWarn, spell = tr.spell, service = tr.service, npcId = tr.npcId,
       members = Geo.DeserializeMembers(rec.members) }
     tasks[key] = task
   end
@@ -657,7 +657,7 @@ function CP.Replan(msg, opts)
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
     return false
   end
-  if not Geo.HasRoadbook() or #Geo.CustomList() == 0 then return false end
+  if not Geo.ServicePending() and (not Geo.HasRoadbook() or #Geo.CustomList() == 0) then return false end
   Print(msg .. string.format(L["Computing the Roadbook (up to %d s)…"], K.PLAN_TIME))
   Geo.Trace("replan", msg)
   CP.focusAfter = true
@@ -807,6 +807,7 @@ function CP.DoDelete()
   CP.Pause(true)
   if Geo.MapOwner() then Geo.MapRelease() end -- its preview ends
   Geo.ClearFrozen()
+  Geo.ServiceClear()
   Geo.CustomRec().list = {}
   Geo.customUnplanned = nil
   Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute
@@ -904,7 +905,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
       Print(L["Unable to convert QuestieDB positions to this client's map."])
       return
     end
-    if goal == "custom" and #Geo.CustomList() == 0 then
+    if goal == "custom" and #Geo.CustomList() == 0 and not Geo.ServicePending() then
       if not keep then Print(L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."]) end
       return
     end
@@ -1430,6 +1431,11 @@ function CP.OnGameEvent(event, a1, a2)
     end
   elseif s.kind == "fm" then
     if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
+  elseif s.kind == "service" then
+    if event == K.SERVICE_EVENTS[s.task.service or "vendor"] then
+      Geo.ServiceClear() -- done: the next computations no longer plan it
+      CP.AutoUpdate(L["Service done"])
+    end
   elseif s.kind == "dungeon" then
     if (event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED") and CP.StepDone(s) then
       CP.AutoUpdate(L["Dungeon done"])
@@ -1482,6 +1488,10 @@ function CP.StepSummary(s)
     for _, m in ipairs(task.members or {}) do if not CP.StepDone(m) then left = left + 1 end end
     return K.DUNGEON_ICON .. " " .. (task.title or "?"),
       string.format(L["%d quest step(s) inside"], left) .. " · " .. place .. " · ~" .. FormatTime(s.work or 0)
+  elseif s.kind == "service" then
+    local icon = "Interface\\Icons\\INV_Misc_Coin_01"
+    for _, def in ipairs(K.SERVICES) do if def.key == task.service then icon = def.icon end end
+    return "|T" .. icon .. ":14:14|t " .. (task.title or "?"), L["Talk to "] .. (task.npc or "?") .. " · " .. place
   elseif s.kind == "fm" then
     return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.title or L["Flight Master"]),
       L["Talk to "] .. (task.npc or "?") .. " · " .. place
@@ -1566,6 +1576,7 @@ function CP.RefreshButton()
   b.title:ClearAllPoints()
   b.title:SetPoint("TOPLEFT", b, "TOPLEFT", K.OBJECTIVE_TEXT_X, -math.floor((height - textH) / 2))
   b.compassTarget = CP.CompassTarget()
+  CP.ServiceBarSync()
 end
 
 K.OBJECTIVE_TEXT_X = 59       -- text of the Objective button, right of the compass square
@@ -1767,8 +1778,111 @@ function CP.CreateCheckpointButton()
     GameTooltip:Hide()
   end)
   CP.checkpointButton = b
+  CP.CreateServiceBar(b)
   CP.UpdateCheckpointButton()
   CP.RefreshButton()
+end
+
+---------------------------------------------------------------------------
+-- Service shortcuts under the Objective button: vendor, repair, class trainer
+---------------------------------------------------------------------------
+K.SERVICE_ICON_SIZE = 26
+
+-- Click: the nearest NPC of the service becomes the priority objective and the Roadbook is
+-- planned again (transport steps to reach it, then the rest). A second click on the pending
+-- service cancels it.
+function CP.ServiceClick(kind)
+  if Geo.computing then
+    Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
+    return
+  end
+  if not GeoReady() then
+    Print(L["Unable to convert QuestieDB positions to this client's map."])
+    return
+  end
+  local cur = Geo.ServicePending()
+  if cur and cur.kind == kind then
+    Geo.ServiceClear()
+    CP.ServiceBarSync()
+    if #Geo.CustomList() == 0 then -- nothing left in the Roadbook but the service
+      CP.Pause(true)
+      if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
+      CP.RefreshButton()
+      Refresh()
+    elseif not CP.Replan(L["Service cancelled. "]) then
+      Refresh()
+    end
+    return
+  end
+  local npc = Geo.NearestService(kind)
+  if not npc then
+    Print(L["No such place found."])
+    return
+  end
+  Geo.ServiceSet({ kind = kind, id = npc.id, name = npc.name, p = npc.p })
+  CP.ServiceBarSync()
+  if not CP.Replan(string.format(L["Going to %s first. "], npc.name or "?")) then
+    Geo.ServiceClear()
+    CP.ServiceBarSync()
+  end
+end
+
+-- Highlight of the pending service.
+function CP.ServiceBarSync()
+  local bar = CP.serviceBar
+  if not bar then return end
+  local cur = Geo.ServicePending()
+  for _, ib in ipairs(bar.buttons) do
+    ib.glow:SetShown(cur ~= nil and cur.kind == ib.key)
+  end
+end
+
+function CP.CreateServiceBar(b)
+  local n, size, gap = #K.SERVICES, K.SERVICE_ICON_SIZE, 4
+  local bar = CreateFrame("Frame", nil, b)
+  bar:SetSize(n * size + (n - 1) * gap, size)
+  bar:SetPoint("TOP", b, "BOTTOM", 0, -3)
+  bar.buttons = {}
+  for i, def in ipairs(K.SERVICES) do
+    local ib = CreateFrame("Button", nil, bar, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    ib:SetSize(size, size)
+    ib:SetPoint("LEFT", bar, "LEFT", (i - 1) * (size + gap), 0)
+    Geo.FrameStyle(ib)
+    local tex = ib:CreateTexture(nil, "ARTWORK")
+    tex:SetPoint("TOPLEFT", 3, -3)
+    tex:SetPoint("BOTTOMRIGHT", -3, 3)
+    tex:SetTexture(def.icon)
+    if tex.SetTexCoord then tex:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    local glow = ib:CreateTexture(nil, "OVERLAY")
+    glow:SetPoint("TOPLEFT", -2, 2)
+    glow:SetPoint("BOTTOMRIGHT", 2, -2)
+    glow:SetColorTexture(1, 0.82, 0, 0.35)
+    glow:Hide()
+    local hl = ib:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(tex)
+    hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+    hl:SetBlendMode("ADD")
+    ib.key, ib.glow = def.key, glow
+    ib:RegisterForClicks("LeftButtonUp")
+    ib:SetScript("OnClick", function() CP.ServiceClick(def.key) end)
+    ib:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+      GameTooltip:AddLine(def.label)
+      local ok, npc = pcall(Geo.NearestService, def.key)
+      if ok and npc then
+        GameTooltip:AddLine(string.format(L["Nearest: %s (~%s)"], npc.name or "?", FormatTime(npc.time or 0)), 1, 1, 1)
+      else
+        GameTooltip:AddLine(L["No such place found."], 1, 0.4, 0.4)
+      end
+      local cur = Geo.ServicePending()
+      GameTooltip:AddLine((cur and cur.kind == def.key) and L["Click: cancel this priority"]
+        or L["Click: go there first, then carry on with the Roadbook"], 0.75, 0.75, 0.75)
+      GameTooltip:Show()
+    end)
+    ib:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    bar.buttons[i] = ib
+  end
+  CP.serviceBar = bar
 end
 
 CP.CHECKPOINT_TOGGLE = {
