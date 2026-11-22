@@ -671,10 +671,95 @@ function CP.ScheduleRecallCheck(delay)
       CP.ScheduleRecallCheck(10)
       return
     end
+    local okA, started = pcall(CP.AheadCheck)
+    if not okA then Print(L["Roadbook update error: "] .. tostring(started)) end
+    if okA and started then return end
     local ok, err = pcall(CP.RecallCheck, false)
     if not ok then Print(L["Roadbook update error: "] .. tostring(err)) end
   end)
 end
+
+-- Steps done ahead: a quest picked up, an objective done or a quest turned in before its place in
+-- the Roadbook. Right after the steps done, the route stays right (several quests from the same
+-- NPC…); further on, the steps to come are computed again without them (they join the history).
+-- A step that comes back after a computation does not start another one. Returns true if a
+-- computation started.
+K.AHEAD_KINDS = { take = true, obj = true, turnin = true }
+function CP.AheadCheck()
+  local fz = Geo.Frozen()
+  if not fz or Geo.computing or CP.autoPending then return false end
+  local route, first, ahead = fz.route, nil, nil
+  CP.aheadSeen = CP.aheadSeen or {}
+  for i = 2, #route do
+    local st = route[i]
+    local done = CP.StepDone(st)
+    if not first then
+      if not done then first = i end
+    elseif done and not st.done and K.AHEAD_KINDS[st.kind] and not st.search and st.task and st.task.id then
+      local key = st.kind .. ":" .. st.task.id .. ":" .. tostring(st.r and st.r.tg and st.r.tg.name)
+      if not CP.aheadSeen[key] then
+        CP.aheadSeen[key] = true
+        ahead = ahead or st
+      end
+    end
+  end
+  if not ahead then return false end
+  return CP.Replan(L["Step done ahead: "] .. CP.StepText(ahead) .. ". ")
+end
+
+-- Quest gone from the log (QUEST_REMOVED, a moment later): turned in, the focused step moves on (if
+-- QUEST_TURNED_IN did not already do it); abandoned while the Roadbook plans it: remove it from the
+-- list, or keep it and pick it up again (the steps to come are computed again either way).
+function CP.QuestRemoved(id)
+  if IsInLog(id) then return end
+  local s = CP.CurrentFocus()
+  if (CP.turnedIn and CP.turnedIn[id]) or IsCompleted(id) then
+    if s and s.kind ~= "take" and s.task and s.task.id == id then CP.AutoUpdate(L["Quest turned in"]) end
+    return
+  end
+  local fz = Geo.Frozen()
+  if not fz then return end
+  local title, planned
+  for i = 2, #fz.route do
+    local st = fz.route[i]
+    if st.task and st.task.id == id then
+      title = title or st.task.title
+      if not CP.StepDone(st) then planned = true end
+    end
+  end
+  if not planned and not Geo.InCustom(id) then return end
+  if not title then
+    for _, e in ipairs(Geo.CustomList()) do if e.id == id then title = e.title end end
+  end
+  title = title or tostring(id)
+  local text = string.format(L["You abandoned \"%s\".\n\nRemove it from the list, or keep it and pick it up again? The steps to come of the Roadbook are computed again (the steps done stay)."], title)
+  StaticPopup_Show("FQP_QUEST_ABANDONED", text, nil, { id = id, title = title })
+end
+
+-- Roadbook adapted as soon as no computation is running.
+function CP.ReplanSoon(msg, tries)
+  if Geo.computing then
+    if (tries or 0) < 30 then C_Timer.After(2, function() CP.ReplanSoon(msg, (tries or 0) + 1) end) end
+    return
+  end
+  CP.Replan(msg)
+end
+
+StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
+  text = "%s",
+  button1 = L["Remove from the list"],
+  button2 = L["Pick it up again"],
+  OnAccept = function(_, data)
+    if data then CP.SkipQuest({ task = { id = data.id, title = data.title } }) end
+  end,
+  OnCancel = function(_, data) -- also Escape: the quest stays planned
+    if data then CP.ReplanSoon(L["Quest abandoned, to pick up again: "] .. data.title .. ". ") end
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
 
 -- Cast of the hearthstone or of a class teleport (key: "hearth" or the spell id).
 function CP.RecallCast(key)
@@ -1192,7 +1277,18 @@ function CP.OnGameEvent(event, a1, a2)
     if st then CP.CheckLanding(st) end
     return
   end
+  if event == "QUEST_TURNED_IN" and a1 then
+    CP.turnedIn = CP.turnedIn or {}
+    CP.turnedIn[a1] = true
+  end
+  if event == "QUEST_REMOVED" then -- turned in or abandoned: known a moment later
+    if a1 then C_Timer.After(1, function() pcall(CP.QuestRemoved, a1) end) end
+    return
+  end
   if event == "QUEST_ACCEPTED" and CP.GiverFound(a1, a2) then return end
+  if event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED" or event == "QUEST_TURNED_IN" then
+    pcall(CP.ScheduleRecallCheck, 3) -- steps done ahead (CP.AheadCheck)
+  end
   local s = CP.CurrentFocus()
   if not s then return end
   if event == "FQP_TAXI_TAKEOFF" then CP.flying, CP.flightStep = true, nil end
@@ -1223,8 +1319,8 @@ function CP.OnGameEvent(event, a1, a2)
     if (event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED") and CP.StepDone(s) then
       CP.AutoUpdate(L["Dungeon done"])
     end
-  elseif (event == "QUEST_TURNED_IN" or event == "QUEST_REMOVED") and s.kind ~= "take" then
-    if qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(event == "QUEST_TURNED_IN" and L["Quest turned in"] or L["Quest removed"]) end
+  elseif event == "QUEST_TURNED_IN" and s.kind ~= "take" then
+    if qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest turned in"]) end
   elseif s.kind == "take" then
     if event == "QUEST_ACCEPTED" and qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest picked up"]) end
   elseif s.kind == "obj" then
@@ -1233,7 +1329,13 @@ function CP.OnGameEvent(event, a1, a2)
     elseif event == "QUEST_LOG_UPDATE" and qid then
       local now = CP.Progress(qid)
       local rec = CP.FocusRecord()
-      if rec and now > (rec.progress or 0) then
+      -- Objective of the step found in the game: done when it is (another objective of the quest
+      -- done meanwhile is a step done ahead, CP.AheadCheck); otherwise any progress of the quest.
+      local known = IsInLog(qid) and Geo.TargetObjective(qid, s.r and s.r.tg, GetObjectives(qid))
+      if known then
+        if rec then rec.progress = now end
+        if CP.StepDone(s) then CP.AutoUpdate(L["Objective completed"]) end
+      elseif rec and now > (rec.progress or 0) then
         rec.progress = now
         CP.AutoUpdate(L["Objective completed"])
       elseif rec and now < (rec.progress or 0) then
