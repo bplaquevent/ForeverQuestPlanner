@@ -1,7 +1,8 @@
 # Forever Quest Planner
 
 World of Warcraft addon for the **Forever** server (client 1.60.1, Interface 16001: Classic-era API, Lua 5.1).
-QuestieDB is an optional dependency (quest data, NPC/object spawns, chains); without it only the game API is used.
+QuestieDB (quest data, NPC/object spawns, chains) and OpenMap (map, flight network) are required dependencies (`## Dependencies` in the `.toc`):
+call their data and functions directly, never copy them or write code paths that work without them.
 No way to run the game here: check with `tools/check.sh` (compiles every file, detects unknown globals).
 Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cases/*.lua>` on a problem captured by `/fqp dump`.
 
