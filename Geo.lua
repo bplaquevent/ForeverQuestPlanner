@@ -1131,6 +1131,12 @@ function Geo.MatchObjectives(objs, t)
   return map, used
 end
 
+-- Count of an item in the bags (the Forever client has C_Item.GetItemCount, not the global).
+function Geo.ItemCount(id)
+  return (C_Item and C_Item.GetItemCount and C_Item.GetItemCount(id))
+    or (GetItemCount and GetItemCount(id)) or 0
+end
+
 -- Game objective (from objs, GetObjectives) of the target tg of quest id, or nil. tg can be a copy
 -- (Roadbook saved: name and kind only).
 function Geo.TargetObjective(id, tg, objs)
@@ -1164,7 +1170,7 @@ local function RemainingTargets(q, t)
     local match = tg.sourceItem and -1 or map[i] -- source item: needed while it is not in the bags
     local count = tg.defaultCount
     if match == -1 then
-      if (GetItemCount(tg.sourceItem) or 0) > 0 then count = 0 end
+      if Geo.ItemCount(tg.sourceItem) > 0 then count = 0 end
     elseif match then
       local o = objs[match]
       if o.finished or (o.need and o.have and o.need > 0 and o.have >= o.need) then

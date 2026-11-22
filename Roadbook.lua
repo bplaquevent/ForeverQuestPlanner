@@ -379,7 +379,7 @@ function CP.StepDone(st)
     if C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) then return true end
     -- Source item (not a game objective): done once it is in the bags.
     local src = st.r and st.r.tg and st.r.tg.sourceItem
-    if src then return (GetItemCount(src) or 0) > 0 end
+    if src then return Geo.ItemCount(src) > 0 end
     local o = Geo.TargetObjective(id, st.r and st.r.tg, GetObjectives(id))
     return o and o.finished and true or false
   end

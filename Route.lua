@@ -249,9 +249,7 @@ end
 
 -- Seconds until the hearthstone is ready (0 = ready), nil if there is no hearthstone.
 function Geo.HearthReady()
-  local count = (C_Item and C_Item.GetItemCount and C_Item.GetItemCount(K.HEARTHSTONE))
-    or (GetItemCount and GetItemCount(K.HEARTHSTONE)) or 0
-  if count == 0 then return nil end
+  if Geo.ItemCount(K.HEARTHSTONE) == 0 then return nil end
   local cd = (C_Container and C_Container.GetItemCooldown) or GetItemCooldown
   if cd and GetTime then
     local start, dur = cd(K.HEARTHSTONE)
@@ -291,10 +289,6 @@ end
 function Geo.SpellKnown(spell)
   if IsPlayerSpell and IsPlayerSpell(spell) then return true end
   return (IsSpellKnown and IsSpellKnown(spell)) and true or false
-end
-
-local function ItemCount(id)
-  return (C_Item and C_Item.GetItemCount and C_Item.GetItemCount(id)) or (GetItemCount and GetItemCount(id)) or 0
 end
 
 -- Arrival of a teleport spell: the place reached after its last cast, otherwise the default one.
@@ -342,7 +336,7 @@ function Geo.RecallSources()
   if Settings().noRecallSpells then return out end
   for _, e in ipairs(K.RECALL_SPELLS) do
     if Geo.SpellKnown(e.spell) then
-      local charges = e.reagent and ItemCount(e.reagent) or nil
+      local charges = e.reagent and Geo.ItemCount(e.reagent) or nil
       local p = not e.bind and Geo.TeleportDest(e) or nil
       if (charges == nil or charges > 0) and (e.bind or p) then
         local name = Geo.SpellName(e.spell)
