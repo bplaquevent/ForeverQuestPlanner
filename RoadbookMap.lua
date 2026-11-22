@@ -25,7 +25,7 @@ K.MAP_COLOR = {
 }
 
 ---------------------------------------------------------------------------
--- Who holds the map: { mode = "track" | "preview", kind, hidden, wp, tookWp }, saved per character
+-- Who holds the map: { mode = "track" | "preview", hidden, wp, tookWp }, saved per character
 -- (a /reload in the middle gives the map back at login). hidden / wp: the map's state before.
 ---------------------------------------------------------------------------
 local function OwnerStore()
@@ -44,9 +44,9 @@ local function Orig(name)
   return Geo.mapOrig[name] or OM.worldmap[name]
 end
 
--- The Roadbook `kind` takes the map. The map's state is saved only the first time: a preview that
+-- The Roadbook takes the map. The map's state is saved only the first time: a preview that
 -- becomes the tracking keeps the state from before the preview.
-function Geo.MapClaim(mode, kind)
+function Geo.MapClaim(mode)
   local store, ck = OwnerStore(), CharKey()
   local saved = store[ck]
   if not saved then
@@ -57,7 +57,7 @@ function Geo.MapClaim(mode, kind)
     pcall(Orig("SetPinsHidden"), true)
   end
   if mode == "track" then saved.tookWp = true end -- the tracking moves the waypoint
-  saved.mode, saved.kind = mode, kind
+  saved.mode, saved.kind = mode, nil -- (kind: versions with two Roadbooks)
   Geo.MapSync()
 end
 
@@ -195,7 +195,7 @@ function Geo.MapPinEnter(self)
 end
 
 function Geo.MapPinClick(self)
-  if self.fqpKind and CP.OpenWindow then CP.OpenWindow(Geo.TabOf(self.fqpKind)) end
+  if CP.OpenWindow then CP.OpenWindow("xp") end
 end
 
 local looks = {} -- pin looks, made once: step kind (.. "!" for the current objective)
@@ -210,7 +210,7 @@ local function Look(kind, current)
 end
 
 -- A step's pin, with its number in the Roadbook (n: 1 = next step).
-local function AddStepPin(set, st, u, v, n, current, kind)
+local function AddStepPin(set, st, u, v, n, current)
   local pin = OM.stitch.AddPin(set, u, v, Look(st.kind, current), st)
   if not pin.fqpNum then -- (our set's pins are only ever ours: the label stays with the pooled pin)
     pin.fqpNum = pin:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -218,7 +218,7 @@ local function AddStepPin(set, st, u, v, n, current, kind)
   end
   pin.fqpNum:SetText(n)
   if current then pin.fqpNum:SetTextColor(0.4, 1, 0.4) else pin.fqpNum:SetTextColor(1, 1, 1) end
-  pin.fqpN, pin.fqpKind = n, kind
+  pin.fqpN = n
   pin:SetScript("OnEnter", Geo.MapPinEnter)
   pin:SetScript("OnLeave", function() GameTooltip:Hide() end)
   pin.OnClick = Geo.MapPinClick
@@ -260,7 +260,7 @@ function Geo.MapDraw()
     return
   end
   local set = Sets()
-  local fz = set and Geo.Frozen(owner.kind)
+  local fz = set and Geo.Frozen()
   if not fz then return end
   local S = OM.stitch
   local cur = owner.mode == "track" and CP.CurrentFocus() or nil
@@ -292,13 +292,13 @@ function Geo.MapDraw()
         if st == cur then
           curPin = { st, u, v, n } -- drawn last: over the others
         elseif whole then
-          AddStepPin(set.pins, st, u, v, n, false, owner.kind)
+          AddStepPin(set.pins, st, u, v, n, false)
         end
         if whole or st == cur then Fit(u, v) end
       end
     end
   end
-  if curPin then AddStepPin(set.pins, curPin[1], curPin[2], curPin[3], curPin[4], true, owner.kind) end
+  if curPin then AddStepPin(set.pins, curPin[1], curPin[2], curPin[3], curPin[4], true) end
   Geo.mapBox = box
 end
 
@@ -334,23 +334,19 @@ end
 ---------------------------------------------------------------------------
 -- Preview ("Map" button of a Roadbook tab) and the "Whole Roadbook on the map" option
 ---------------------------------------------------------------------------
--- Shows a Roadbook on the map without following it; a second click (or closing the map) ends it.
--- The followed Roadbook: the map opens on it.
-function Geo.MapPreview(kind)
+-- Shows the Roadbook on the map without following it; a second click (or closing the map) ends it.
+-- Followed: the map opens on it.
+function Geo.MapPreview()
   local owner = Geo.MapOwner()
-  if owner and owner.mode == "preview" and owner.kind == kind then
+  if owner and owner.mode == "preview" then
     Geo.MapRelease()
     return
   end
-  if owner and owner.mode == "track" and owner.kind ~= kind then
-    Print(L["Another Roadbook is followed: pause it to preview this one."])
-    return
-  end
-  if not Geo.Frozen(kind) then
+  if not Geo.Frozen() then
     Print(L["This Roadbook has no step: click \"Generate\" first."])
     return
   end
-  if not owner then Geo.MapClaim("preview", kind) end
+  if not owner then Geo.MapClaim("preview") end
   Geo.OpenWorldMap(nil, true) -- the Forever Quest Planner window stays open
   Geo.MapHookWorldMap()
   C_Timer.After(0.05, function()
@@ -368,11 +364,9 @@ end
 -- Click on a step of a Roadbook tab (done or not): the world map opens centered on it, with the
 -- Roadbook drawn (previewed when no Roadbook holds the map), and the quest log on its quest.
 -- The Forever Quest Planner window stays open.
-function Geo.ShowStep(st, kind)
+function Geo.ShowStep(st)
   if not (st and st.p) then return end
-  local owner = Geo.MapOwner()
-  local previewOther = owner and owner.mode == "preview" and owner.kind ~= kind
-  if (not owner or previewOther) and Geo.Frozen(kind) then Geo.MapClaim("preview", kind) end
+  if not Geo.MapOwner() and Geo.Frozen() then Geo.MapClaim("preview") end
   local qid = st.task and st.task.id
   if qid and IsInLog(qid) then OpenQuestDetails(qid) end
   Geo.OpenWorldMap(Geo.PointUi(st.p), true)

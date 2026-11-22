@@ -472,7 +472,7 @@ local function PlanXP(goal, opts)
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
   if UnitLevel("player") >= Geo.MaxLevel() then
-    return nil, L["Max level reached: no more XP to earn. Use the custom Roadbook to choose your quests."]
+    return nil, L["Max level reached: no more XP to earn. Choose the \"Custom list\" goal to do the quests you choose."]
   end
   Geo.xpScale = nil
   Geo.planSpeed = TravelSpeed()

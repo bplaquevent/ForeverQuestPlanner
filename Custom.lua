@@ -22,32 +22,37 @@ function Geo.CustomRec()
   return st.custom[k]
 end
 
--- Tab of a Roadbook kind (each one has its own tab).
-function Geo.TabOf(kind)
-  return kind == "custom" and "custom" or "xp"
-end
-
--- Roadbook followed by the Objective button ("auto" or "custom"), saved per character: there is
--- always one, the automatic one by default; it is chosen with the radio buttons of the Roadbook tabs.
-function Geo.ActiveKind()
-  local st = Settings()
-  return st.activeRoadbook and st.activeRoadbook[CharKey()] or "auto"
-end
-
--- The active Roadbook is followed (a step is focused); paused otherwise.
+-- The Roadbook is followed (a step is focused); paused otherwise.
 function Geo.Tracking()
   return ns.CP.CurrentFocus() ~= nil
 end
 
-function Geo.SetActive(kind)
+-- Versions with two Roadbooks (automatic and custom, each saved apart): the one that was active
+-- stays the Roadbook, its goal selected; the other one is dropped. The custom quest list stays.
+function Geo.MigrateRoadbooks()
   local st = Settings()
-  st.activeRoadbook = st.activeRoadbook or {}
-  st.activeRoadbook[CharKey()] = kind
-end
-
--- Saved Roadbook of a kind ("auto" or "custom").
-function Geo.FrozenKey(kind)
-  return kind == "custom" and (CharKey() .. "|custom") or CharKey()
+  local ck = CharKey()
+  local active = st.activeRoadbook and st.activeRoadbook[ck]
+  -- Older versions (one Roadbook per view mode): the custom mode selected.
+  if not active and not (st.roadbookMigrated and st.roadbookMigrated[ck]) and Geo.CustomRec().mode == "custom" then
+    active = "custom"
+  end
+  if st.roadbookMigrated then
+    st.roadbookMigrated[ck] = nil
+    if next(st.roadbookMigrated) == nil then st.roadbookMigrated = nil end
+  end
+  Geo.CustomRec().mode = nil
+  if st.activeRoadbook then
+    st.activeRoadbook[ck] = nil
+    if next(st.activeRoadbook) == nil then st.activeRoadbook = nil end
+  end
+  local store = st.roadbook
+  local old = store and store[ck .. "|custom"]
+  if not (active or old) then return end -- nothing to migrate
+  if old then store[ck .. "|custom"] = nil end
+  if active == "custom" and old then store[ck] = old end
+  local rec = store and store[ck]
+  if rec and rec.info and rec.info.custom then st.goal = { kind = "custom" } end
 end
 
 function Geo.CustomIndex(id)
@@ -141,8 +146,9 @@ function Geo.CustomAdd(id, title, level, quiet)
   end
   rec.list[#rec.list + 1] = { id = id, title = title, level = level or Geo.QuestLevelOf(id) }
   if quiet then return true, pre end
-  Print(L["Added to the custom Roadbook: "] .. title ..
+  Print(L["Added to the custom quest list: "] .. title ..
     (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
+  Geo.CustomHint()
   if not Geo.ForPlayer(id) then Print(L["Warning: this quest is not for your class or race."]) end
   Geo.CustomChanged()
   return true, pre
@@ -155,8 +161,9 @@ function Geo.CustomAddList(list)
     local ok, p = Geo.CustomAdd(q.id, q.title, q.level, true)
     if ok then added, pre = added + 1, pre + p end
   end
-  Print(string.format(L["%d quest(s) added to the custom Roadbook"], added) ..
+  Print(string.format(L["%d quest(s) added to the custom quest list"], added) ..
     (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
+  if added > 0 then Geo.CustomHint() end
   if added > 0 then Geo.CustomChanged() end
 end
 
@@ -195,7 +202,7 @@ function Geo.CustomRemove(id, quiet)
     end
   end
   if quiet then return true, removed end
-  Print(L["Removed from the custom Roadbook: "] .. (e.title or tostring(id)) ..
+  Print(L["Removed from the custom quest list: "] .. (e.title or tostring(id)) ..
     (removed > 0 and string.format(L[" (and %d prerequisite quest(s))"], removed) or ""))
   Geo.CustomChanged()
   return true, removed
@@ -207,7 +214,7 @@ function Geo.CustomRemoveList(list)
     local ok, r = Geo.CustomRemove(q.id, true)
     if ok then n, extra = n + 1, extra + r end
   end
-  Print(string.format(L["%d quest(s) removed from the custom Roadbook"], n) ..
+  Print(string.format(L["%d quest(s) removed from the custom quest list"], n) ..
     (extra > 0 and string.format(L[" (and %d prerequisite quest(s))"], extra) or ""))
   if n > 0 then Geo.CustomChanged() end
 end
@@ -215,21 +222,30 @@ end
 function Geo.CustomClear()
   Geo.CustomRec().list = {}
   Geo.customUnplanned = nil
-  Print(L["Quests removed from the custom Roadbook; its steps done are kept."])
+  Print(L["Quests removed from the custom quest list; the steps done of the Roadbook are kept."])
   Geo.CustomChanged()
 end
 
--- List changed: the steps to come of the custom Roadbook are computed again (grouped when several
--- quests are added in a row), its steps done and its tracking kept; empty list: the steps to come
--- are removed and it is paused, the steps done stay (only "Delete" empties them). It has no "Generate".
+-- The list is not the Roadbook's (another goal, or no Roadbook): where it is used.
+function Geo.CustomHint()
+  if Geo.IsCustom() or (Geo.computing and Geo.computingGoal == "custom") then return end
+  Print(L["The custom quest list is used by the Roadbook with the \"Custom list\" goal: choose it, then click \"Generate\"."])
+end
+
+-- List changed while the Roadbook is made of it: its steps to come are computed again (grouped
+-- when several quests are added in a row), its steps done and its tracking kept; empty list: the
+-- steps to come are removed and it is paused, the steps done stay (only "Delete" empties them).
+-- A Roadbook with another goal is not touched (the list waits for "Generate" with the Custom goal).
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1
   local token = Geo.customToken
-  if #Geo.CustomList() == 0 then
-    if ns.CP then ns.CP.Pause("custom", true) end
-    if not (Geo.KeepOnlyDone and Geo.KeepOnlyDone("custom")) then Geo.ClearFrozen("custom") end
-    if Geo.ResetActiveIfEmpty then Geo.ResetActiveIfEmpty() end
-  else
+  Geo.customCache = nil
+  local mine = Geo.IsCustom() or (Geo.computing and Geo.computingGoal == "custom")
+  if mine and #Geo.CustomList() == 0 then
+    Geo.customUnplanned = nil
+    if ns.CP then ns.CP.Pause(true) end
+    if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
+  elseif mine then
     C_Timer.After(0.6, function()
       if token == Geo.customToken and ns.CP then ns.CP.Recompute("custom", true) end
     end)
@@ -239,7 +255,7 @@ function Geo.CustomChanged()
 end
 
 StaticPopupDialogs["FQP_CUSTOM_CLEAR"] = {
-  text = L["Remove every quest from the custom Roadbook?"],
+  text = L["Remove every quest from the custom quest list?"],
   button1 = L["Remove all"],
   button2 = CANCEL or L["Cancel"],
   OnAccept = function() Geo.CustomClear() end,

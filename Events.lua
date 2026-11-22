@@ -51,19 +51,12 @@ f:SetScript("OnEvent", function(_, event, ...)
     Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
     -- Options saved from the settings window or the tabs.
     local st = Settings()
-    if type(st.goal) == "table" and st.goal.kind and st.goal.value then
+    Geo.MigrateRoadbooks() -- before the goal: a custom Roadbook kept selects the Custom goal
+    if type(st.goal) == "table" and (st.goal.kind == "custom" or (st.goal.kind and st.goal.value)) then
       State.xpGoal = { kind = st.goal.kind, value = st.goal.value }
     end
     if st.nearRadius then State.nearRadius = st.nearRadius end
     if st.availFilter then State.availFilter = st.availFilter end
-    -- Former versions (one Roadbook, always followed): the Roadbook of the selected mode stays active.
-    st.roadbookMigrated = st.roadbookMigrated or {}
-    if not st.roadbookMigrated[CharKey()] then
-      st.roadbookMigrated[CharKey()] = true
-      local kind = Geo.CustomRec().mode == "custom" and "custom" or "auto" -- former view mode
-      if Geo.HasRoadbook(kind) then Geo.SetActive(kind) end
-    end
-    Geo.ResetActiveIfEmpty()
     pcall(Geo.ApplyParams)
     local okM, errM = pcall(Geo.MapInit) -- the Roadbook on OpenMap's map (RoadbookMap.lua)
     if not okM then Print(L["Map drawing error: "] .. tostring(errM)) end
@@ -123,15 +116,14 @@ f:SetScript("OnEvent", function(_, event, ...)
         f.rescanPending = nil
         scan.dirty = true
         -- Profession level up: a quest waiting for it can be turned in (quick win near the route).
-        local kind = Geo.ActiveKind()
         local skill = f.skillChanged
         f.skillChanged = nil
-        if skill and Geo.Tracking() and Geo.frozen[kind] then
-          local ok, n = pcall(Geo.InjectQuickWins, kind)
+        if skill and Geo.Tracking() and Geo.frozen then
+          local ok, n = pcall(Geo.InjectQuickWins)
           if ok and n and n > 0 then Refresh() end
           pcall(CP.RefreshButton)
         end
-        if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "xp" and State.currentTab ~= "custom" then Refresh() end
+        if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "xp" then Refresh() end
       end)
     end
   elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_ENTERING_WORLD" then
@@ -200,7 +192,7 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
   elseif msg == "near" or msg == "around" or msg == "autour" then
     ToggleMainFrame("near")
   elseif msg == "xp" or msg == "roadbook" then
-    ToggleMainFrame(Geo.TabOf(Geo.ActiveKind()))
+    ToggleMainFrame("xp")
   elseif msg == "log" or msg == "journal" or msg == "afaire" or msg == "todo" then
     ToggleMainFrame("groups")
   elseif msg == "available" or msg == "dispo" then

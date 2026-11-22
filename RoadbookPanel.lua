@@ -19,12 +19,9 @@ K.MAP_PANEL_BOTTOM = 96 -- px kept free under the panel when it is over the map 
 
 local panel -- created at the first display
 
--- The Roadbook shown: the one holding the map, else the active one; nil without steps.
-function Geo.MapPanelKind()
-  local o = Geo.MapOwner()
-  local kind = o and o.kind or Geo.ActiveKind()
-  if kind and Geo.Frozen(kind) then return kind end
-  return nil
+-- The Roadbook shown; nil without steps.
+function Geo.MapPanelShown()
+  return Geo.Frozen() ~= nil
 end
 
 function Geo.MapPanelGet()
@@ -144,31 +141,28 @@ local function Create()
   panel.count = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   panel.count:SetPoint("TOPLEFT", panel.titleText, "BOTTOMLEFT", 0, -3)
   -- No close button: the panel is shown or hidden from OpenMap's menu only (Geo.MapInit).
-  -- Start / Pause, as the Roadbook tabs' button; on an inactive Roadbook previewed, Start makes it the
-  -- active one (CP.Start asks first if the other one is followed).
+  -- Start / Pause, as the Roadbook tab's button.
   local startB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   startB:SetSize(66, 20)
   startB:SetPoint("TOPRIGHT", -8, -5)
   startB:SetScript("OnClick", function()
-    local kind = panel.kind
-    if not kind then return end
-    if Geo.ActiveKind() == kind and Geo.Tracking() then CP.Pause(kind) else CP.Start(kind) end
+    if Geo.Tracking() then CP.Pause() else CP.Start() end
   end)
   startB:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:AddLine(L["Start / Pause"], 1, 1, 1)
-    GameTooltip:AddLine(L["Start: this Roadbook becomes the active one and the Objective button follows it. Pause: the tracking stops, the progress is kept."], 0.85, 0.85, 0.85, true)
+    GameTooltip:AddLine(L["Start: the Objective button follows the Roadbook. Pause: the tracking stops, the progress is kept."], 0.85, 0.85, 0.85, true)
     GameTooltip:Show()
   end)
   startB:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.startB = startB
-  -- Roadbook: opens the Roadbook window on this Roadbook's tab.
+  -- Roadbook: opens the Roadbook window on its tab.
   local showB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   showB:SetSize(66, 20)
   showB:SetPoint("RIGHT", startB, "LEFT", -2, 0)
   showB:SetText(L["Roadbook"])
   showB:SetScript("OnClick", function()
-    if panel.kind and CP.OpenWindow then CP.OpenWindow(Geo.TabOf(panel.kind)) end
+    if CP.OpenWindow then CP.OpenWindow("xp") end
   end)
   showB:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -222,16 +216,14 @@ end
 -- Fills the panel with the shown Roadbook (or hides it). Only while the map is open.
 function Geo.MapPanelSync()
   if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
-  local kind = Geo.MapPanelGet() and Geo.MapPanelKind() or nil
-  if not kind then
+  if not (Geo.MapPanelGet() and Geo.MapPanelShown()) then
     if panel then panel:Hide() end
     return
   end
   if not panel then Create() end
-  panel.kind = kind
   Geo.MapPanelPlace()
   panel:Show()
-  local route = Geo.Frozen(kind).route
+  local route = Geo.Frozen().route
   local cur = CP.CurrentFocus()
   local rows, width = panel.rows, K.MAP_PANEL_W - 32
   local n, done, target, total = 0, 0, nil, 0
@@ -275,13 +267,13 @@ function Geo.MapPanelSync()
   for i = total + 1, #rows do rows[i]:Hide() rows[i].step = nil end
   panel.child:SetHeight(math.max(1, total * K.MAP_PANEL_ROW))
   UpdateScrollBar(panel.scroll)
-  panel.titleText:SetText(kind == "custom" and L["Custom Roadbook"] or L["Auto Roadbook"])
+  panel.titleText:SetText(L["Roadbook"])
   panel.count:SetText(string.format(L["%d/%d steps done"], done, total))
-  local following = Geo.ActiveKind() == kind and Geo.Tracking()
+  local following = Geo.Tracking()
   panel.startB:SetText(following and L["Pause"] or L["Start"])
-  panel.startB:SetEnabled(Geo.computing ~= kind and (following or not Geo.IsFinished(kind)))
+  panel.startB:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
-  local key = kind .. ":" .. tostring(target)
+  local key = tostring(target)
   if target and panel.scrollKey ~= key then
     panel.scrollKey = key
     C_Timer.After(0, function()

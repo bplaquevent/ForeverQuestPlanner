@@ -104,7 +104,7 @@ end
 -- Returns { tasks, steps, pred, dungeons, unplanned } (game objects), or nil and the reason.
 function Geo.CustomPlanSteps(pos, plevel)
   local list = Geo.CustomList()
-  if #list == 0 then return nil, L["The custom Roadbook is empty: add quests with the \"Add\" button of the other tabs."] end
+  if #list == 0 then return nil, L["The custom quest list is empty: add quests with the \"Add\" button of the other tabs."] end
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   local logById = {}
   for _, q in ipairs(e and e.quests or {}) do logById[q.id] = q end
@@ -119,7 +119,7 @@ function Geo.CustomPlanSteps(pos, plevel)
     end
     Geo.Yield()
   end
-  if #tasks == 0 then return nil, L["No quest of the custom Roadbook can be located."], unplanned end
+  if #tasks == 0 then return nil, L["No quest of the custom list can be located."], unplanned end
   for _, task in ipairs(tasks) do
     task.pres = {}
     for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
@@ -334,7 +334,7 @@ function Pb.Player(P, pos)
     rested = GetXPExhaustion and GetXPExhaustion() or 0, maxLevel = maxLevel, xpNeeded = needed,
     speed = TravelSpeed(), pos = Pb.Point(pos), faction = UnitFactionGroup("player"),
     class = select(2, UnitClass("player")), race = select(2, UnitRace("player")),
-    goal = g and { kind = g.kind, value = g.value } or nil,
+    goal = g and g.kind ~= "custom" and { kind = g.kind, value = g.value } or nil,
     settings = { noHearth = st.noHearth, noRecallSpells = st.noRecallSpells, noFMDetour = st.noFMDetour,
       noElite = st.noElite } }
 end
@@ -404,10 +404,12 @@ function Pb.Run(P)
   step()
 end
 
--- Roadbooks of the planner on the same problem (comparison base): automatic, then custom.
+-- Roadbooks of the planner on the same problem (comparison base): the duration or level goal
+-- chosen, then the custom quest list.
 function Pb.Baselines(P, done)
   local todo = {}
-  if State.xpGoal then todo[#todo + 1] = { name = "auto", goal = State.xpGoal } end
+  local g = State.xpGoal
+  if g and g.kind ~= "custom" then todo[#todo + 1] = { name = "auto", goal = g } end
   if #Geo.CustomList() > 0 then todo[#todo + 1] = { name = "custom", goal = "custom" } end
   local function nextOne(i)
     local b = todo[i]
@@ -452,7 +454,7 @@ function Geo.BenchDump(attempt)
   end
   Print(L["Capturing the Roadbook problem for the test bench…"])
   local P = { version = K.BENCH_VERSION, char = CharKey(), date = date("%Y-%m-%d %H:%M:%S"), quests = {},
-    baseline = {}, frozen = { auto = Geo.FrozenRec("auto"), custom = Geo.FrozenRec("custom") } }
+    baseline = {}, frozen = Geo.FrozenRec() }
   Pb.Constants(P)
   Pb.Player(P, pos)
   Pb.Baselines(P, function()

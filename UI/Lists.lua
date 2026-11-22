@@ -1020,12 +1020,12 @@ function Geo.MapButton(getPoint, title, questId)
 end
 
 -- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.
-K.CUSTOM_TIP = "Custom Roadbook: your own quest list, done along the fastest route (Custom Roadbook tab)."
+K.CUSTOM_TIP = "Custom list: your own quest list; the Roadbook with the \"Custom list\" goal does them all along the fastest route."
 function Geo.CustomButton(id, title, level)
   if not id then return nil end
   local inList = Geo.InCustom(id)
   return { text = inList and L["Remove"] or L["Add"],
-    tip = { inList and L["Remove from the custom Roadbook"] or L["Add to the custom Roadbook"], L[K.CUSTOM_TIP] },
+    tip = { inList and L["Remove from the custom list"] or L["Add to the custom list"], L[K.CUSTOM_TIP] },
     fn = function()
       if Geo.InCustom(id) then Geo.CustomRemove(id) else Geo.CustomAdd(id, title, level) end
     end }
@@ -1034,9 +1034,9 @@ end
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
 function Geo.CustomBulkButtons(list)
   return { text = L["Add all"], fn = function() Geo.CustomAddList(list) end,
-      tip = { L["Add every quest of this category to the custom Roadbook"], L[K.CUSTOM_TIP] } },
+      tip = { L["Add every quest of this category to the custom list"], L[K.CUSTOM_TIP] } },
     { text = L["Remove all"], fn = function() Geo.CustomRemoveList(list) end,
-      tip = { L["Remove every quest of this category from the custom Roadbook"], L[K.CUSTOM_TIP] } }
+      tip = { L["Remove every quest of this category from the custom list"], L[K.CUSTOM_TIP] } }
 end
 
 ---------------------------------------------------------------------------
@@ -1071,7 +1071,7 @@ local function MatchWords(hay, words)
   return true
 end
 
-State.todoQuery, State.availQuery, State.nearQuery, State.xpQuery, State.customQuery = {}, {}, {}, {}, {}
+State.todoQuery, State.availQuery, State.nearQuery, State.xpQuery = {}, {}, {}, {}
 
 local function QuestHaystack(q)
   local parts = { q.title, q.zone, q.mapZone, q.instanceName, q.tag, q._turnIn, q.objectivesText, q._chain }

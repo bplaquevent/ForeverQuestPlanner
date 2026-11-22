@@ -425,7 +425,7 @@ end
 
 -- Quest to pick up (available, or a follow-up unlocked by the plan) -> plannable task.
 function Geo.TakeTask(en, plevel, pos)
-  if Geo.Excluded("auto")[en.id] then return nil end -- skipped by the player in this Roadbook
+  if Geo.Excluded()[en.id] then return nil end -- skipped by the player in this Roadbook
   local t = QuestTargets(en.id)
   if #t.finish == 0 then return nil end
   if (t.missing or 0) > 0 then return nil end -- an objective without a position: cannot be planned
@@ -831,7 +831,7 @@ local function BuildTasks(pos, plevel)
     -- Quest ready to turn in: always a candidate (even dungeon, group, gray or high level),
     -- you only need to visit the NPC: it is a quick win.
     local ready = q.complete and not q.failed
-    if Geo.Excluded("auto")[q.id] then
+    if Geo.Excluded()[q.id] then
       skipped = skipped + 1 -- skipped by the player in this Roadbook
     elseif Geo.SkillNeed(q.id, q) then
       skipped = skipped + 1 -- profession level too low to turn it in
