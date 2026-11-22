@@ -1314,23 +1314,27 @@ function CP.RefreshButton()
   if Geo.computing then
     -- Roadbook being computed (start, adapted route…): no step to show, the click does nothing.
     b.title:SetText(L["Objective"])
-    b.sub:SetText(L["Computing the Roadbook"] .. "…")
+    b.sub:SetText(L["Recomputing…"])
     b.current = nil
   elseif s then
     local t, d = CP.StepSummary(s)
     local maxW = K.OBJECTIVE_MAX_WIDTH - K.OBJECTIVE_TEXT_X - 10
-    -- White title, as in the tabs; quest step: then the same badges (colored level, elite, types);
-    -- too wide: the badges go to the next line.
+    -- White title, as in the tabs; quest step: then the same badges (colored level, elite), too wide:
+    -- on the next line; the quest types on the first line of the details (same font).
+    local types = ""
     if not (s.task and s.task.id) then
       t = Color("ffffff", t)
     else
-      local badges = Geo.QuestBadges({ id = s.task.id, level = s.task.level })
+      local badges = Geo.QuestBadges({ id = s.task.id, level = s.task.level, noTypes = true })
       local full = Color("ffffff", t) .. badges
       if CP.TextWidth(b.title, full) > maxW then full = Color("ffffff", t) .. "\n" .. badges:gsub("^%s+", "") end
+      types = Geo.QuestTypesText(s.task.id)
       t = full
     end
     b.title:SetText(t)
-    b.sub:SetText(CP.PackInfos(b.sub, d, maxW))
+    local sub = CP.PackInfos(b.sub, d, maxW)
+    if types ~= "" then sub = types .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
+    b.sub:SetText(sub)
     b.current = s
   else
     b.title:SetText(L["Objective"])

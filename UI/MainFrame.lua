@@ -115,7 +115,7 @@ local function CreateRoadbookPanel(f)
   busy:Hide()
   local busyText = busy:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   busyText:SetPoint("TOP", 0, 0)
-  busyText:SetText(L["Computing the Roadbook"])
+  busyText:SetText(L["Recomputing…"])
   -- A wave running along a row of round gold lights.
   local DOTS, GAP = 5, 18
   local dots = {}

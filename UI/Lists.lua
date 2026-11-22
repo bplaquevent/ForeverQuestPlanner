@@ -869,8 +869,15 @@ function Geo.LevelBadge(level)
   return Color(hex, "[" .. level .. "]")
 end
 
+-- Quest types of a quest, colored: "Escort · Collect" ("" if none, at most 3).
+function Geo.QuestTypesText(id)
+  local types, parts = Geo.QuestTypes(id), {}
+  for i = 1, math.min(#types, 3) do parts[#parts + 1] = Color("80c0ff", K.QUEST_TYPE_LABEL[types[i]]) end
+  return table.concat(parts, Color("80c0ff", " · "))
+end
+
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
--- isClass, isProf, dungeon }.
+-- isClass, isProf, dungeon, noTypes (types left out, shown apart with Geo.QuestTypesText) }.
 function Geo.QuestBadges(o)
   local id = o.id
   local tag = o.tag
@@ -886,7 +893,7 @@ function Geo.QuestBadges(o)
   end
   if isClass then parts[#parts + 1] = L["Class"] end
   if o.isProf then parts[#parts + 1] = L["Profession"] end
-  local types = Geo.QuestTypes(id)
+  local types = o.noTypes and {} or Geo.QuestTypes(id)
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = K.QUEST_TYPE_LABEL[types[i]] end
   local badge = Geo.LevelBadge(o.level)
   -- each part coloured on its own (colour codes do not nest; some parts carry their own colours)

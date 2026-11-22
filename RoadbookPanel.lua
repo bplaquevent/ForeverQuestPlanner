@@ -147,7 +147,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   local sep = Color("777777", " - ")
   local value = function(t) return Color("dddddd", t) end
   local lines = {}
-  if Geo.computing then lines[1] = Color("ffd100", L["Computing the Roadbook"] .. "…") end
+  if Geo.computing then lines[1] = Color("ffd100", L["Recomputing…"]) end
   -- Size and progress.
   local total = #route - 1
   local finished = total > 0 and doneCount >= total
