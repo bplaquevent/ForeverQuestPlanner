@@ -96,10 +96,8 @@ function Geo.MigrateAutoRoadbook()
     for _, m in ipairs(s.members or {}) do add(m.id, m.title, m.level) end
   end
   Geo.CustomRec().list = list
-  local g = rec.info.goal
   rec.info.custom = true
-  rec.info.generated = g and g.kind and { kind = g.kind, value = g.value, stage = rec.info.goalStage } or nil
-  rec.info.goal, rec.info.goalStage, rec.excluded = nil, nil, nil
+  rec.info.goal, rec.info.goalStage, rec.info.generated, rec.excluded = nil, nil, nil, nil
 end
 
 function Geo.CustomIndex(id)
@@ -551,10 +549,7 @@ function Geo.PlanGenerate(goal, opts)
   P.ban = opts and opts.ban
   local opt = Geo.Solve(P, goal)
   local route, info = Geo.ListRoute(P, opt)
-  local g = opt.goal
   info.later, info.unplanned = P.later, unplanned
-  info.generated = { kind = g.kind, value = g.kind == "level" and g.target or g.value, mode = opt.mode,
-    stage = (g.kind == "level" and not opt.res.reach) or nil }
   return route, nil, info
 end
 
