@@ -1177,6 +1177,68 @@ local function CreateSearchBox(parent, width, onChange)
   return eb
 end
 
+---------------------------------------------------------------------------
+-- Frame style shared by every window of the addon (the Objective button's look): thin tooltip
+-- border in gold, very dark brown background. Boxes inside a window: lighter, dimmer border.
+---------------------------------------------------------------------------
+K.FRAME_BG = { 0.09, 0.07, 0.04, 0.94 }
+K.FRAME_BORDER = { 1, 0.82, 0, 0.85 }
+K.FRAME_BORDER_HOVER = { 1, 0.95, 0.6, 1 }
+K.BOX_BG = { 0, 0, 0, 0.35 }
+K.BOX_BORDER = { 1, 0.82, 0, 0.45 }
+
+-- frame: created with the BackdropTemplate (when the client has it). box: true for a box inside a window.
+function Geo.FrameStyle(frame, box)
+  local bg, border = box and K.BOX_BG or K.FRAME_BG, box and K.BOX_BORDER or K.FRAME_BORDER
+  if frame.SetBackdrop then
+    local inset = box and 3 or 4
+    frame:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = true, tileSize = 16, edgeSize = box and 12 or 14,
+      insets = { left = inset, right = inset, top = inset, bottom = inset },
+    })
+    frame:SetBackdropColor(bg[1], bg[2], bg[3], bg[4])
+    frame:SetBackdropBorderColor(border[1], border[2], border[3], border[4])
+  else
+    local t = frame:CreateTexture(nil, "BACKGROUND")
+    t:SetAllPoints()
+    t:SetColorTexture(bg[1], bg[2], bg[3], bg[4])
+  end
+end
+
+-- Movable window of the addon (main window, settings): styled frame, golden title, golden rule
+-- under the title bar, close button, closed with Escape.
+function Geo.CreateWindow(name, title, w, h)
+  local f = CreateFrame("Frame", name, UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  Geo.FrameStyle(f)
+  f:SetSize(w, h)
+  f:SetFrameStrata("DIALOG")
+  f:SetToplevel(true)
+  f:SetMovable(true)
+  f:SetClampedToScreen(true)
+  f:EnableMouse(true)
+  f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", f.StartMoving)
+  f:SetScript("OnDragStop", f.StopMovingOrSizing)
+  f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  f.title:SetPoint("TOP", 0, -8)
+  f.title:SetText(title)
+  f.rule = f:CreateTexture(nil, "ARTWORK")
+  f.rule:SetColorTexture(1, 0.82, 0, 0.35)
+  f.rule:SetHeight(1)
+  f.rule:SetPoint("TOPLEFT", 6, -24)
+  f.rule:SetPoint("TOPRIGHT", -6, -24)
+  local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+  close:SetSize(24, 24)
+  close:SetPoint("TOPRIGHT", -2, -1)
+  close:SetScript("OnClick", function() f:Hide() end)
+  f.CloseButton = close
+  tinsert(UISpecialFrames, name)
+  f:Hide()
+  return f
+end
+
 -- Shared with the next files.
 ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSearchBox, ns.EntryHaystack = ActivePin, CONTENT_WIDTH, ClearPin, CreateScrollPanel, CreateSearchBox, EntryHaystack
 ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.Normalize, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, Normalize, OnWaypointChanged

@@ -355,20 +355,7 @@ end
 local function Create()
   panel = CreateFrame("Frame", nil, UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
   panel:SetFrameStrata("DIALOG") -- over the map when it opens
-  if panel.SetBackdrop then
-    panel:SetBackdrop({
-      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 16, edgeSize = 14,
-      insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    panel:SetBackdropColor(0.06, 0.05, 0.03, 0.94)
-    panel:SetBackdropBorderColor(1, 0.82, 0, 0.8)
-  else
-    local bg = panel:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.06, 0.05, 0.03, 0.94)
-  end
+  Geo.FrameStyle(panel) -- the Objective button's look
   panel:EnableMouse(true) -- (over the map: clicks stay on the panel)
   panel:SetClampedToScreen(true)
   -- Moved by Shift-drag (as the Objective button), resized in height by its bottom edge.

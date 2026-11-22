@@ -270,16 +270,7 @@ local function FilterBox(panel)
   local box = CreateFrame("Frame", nil, panel, BackdropTemplateMixin and "BackdropTemplate" or nil)
   box:SetPoint("TOPLEFT", 14, K.FILTER_BOX_TOP)
   box:SetPoint("TOPRIGHT", -14, K.FILTER_BOX_TOP)
-  if box.SetBackdrop then
-    box:SetBackdrop({
-      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 16, edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    box:SetBackdropColor(0, 0, 0, 0.35)
-    box:SetBackdropBorderColor(0.8, 0.65, 0.35, 0.8)
-  end
+  Geo.FrameStyle(box, true)
   box.rows = 0
   panel.box = box
   return box

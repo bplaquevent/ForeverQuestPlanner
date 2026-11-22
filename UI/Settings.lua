@@ -60,16 +60,7 @@ function Geo.SettingsBox(parent, title, x, y, w, h)
   local box = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
   box:SetPoint("TOPLEFT", x, y)
   box:SetSize(w, h)
-  if box.SetBackdrop then
-    box:SetBackdrop({
-      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 16, edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    box:SetBackdropColor(0, 0, 0, 0.35)
-    box:SetBackdropBorderColor(0.8, 0.65, 0.35, 0.8)
-  end
+  Geo.FrameStyle(box, true)
   local t = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   t:SetPoint("TOPLEFT", 10, -8)
   t:SetText(title)
@@ -305,34 +296,9 @@ StaticPopupDialogs["FQP_COPY_URL"] = {
 function Geo.ToggleSettings()
   local w = Geo.settingsWindow
   if not w then
-    w = CreateFrame("Frame", "ForeverQuestPlannerSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    w:SetSize(820, 524)
+    -- Same look as the main window and the Objective button.
+    w = Geo.CreateWindow("ForeverQuestPlannerSettingsFrame", L["Forever Quest Planner - Roadbook settings"], 820, 524)
     w:SetPoint("CENTER", 40, -20)
-    w:SetFrameStrata("DIALOG")
-    w:SetToplevel(true)
-    w:SetMovable(true)
-    w:SetClampedToScreen(true)
-    w:EnableMouse(true)
-    w:RegisterForDrag("LeftButton")
-    w:SetScript("OnDragStart", w.StartMoving)
-    w:SetScript("OnDragStop", w.StopMovingOrSizing)
-    w.title = w:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    w.title:SetPoint("TOP", 0, -5)
-    w.title:SetText(L["Forever Quest Planner - Roadbook settings"])
-    -- Same background as the main window: darkened parchment with a slight gradient.
-    w.art = w:CreateTexture(nil, "BACKGROUND", nil, 2)
-    w.art:SetPoint("TOPLEFT", 6, -24)
-    w.art:SetPoint("BOTTOMRIGHT", -6, 6)
-    w.art:SetTexture("Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal")
-    w.art:SetVertexColor(0.42, 0.34, 0.26)
-    w.shade = w:CreateTexture(nil, "BACKGROUND", nil, 3)
-    w.shade:SetAllPoints(w.art)
-    w.shade:SetColorTexture(0, 0, 0, 1)
-    if w.shade.SetGradient and CreateColor then
-      pcall(w.shade.SetGradient, w.shade, "VERTICAL", CreateColor(0, 0, 0, 0.55), CreateColor(0, 0, 0, 0.15))
-    else
-      w.shade:SetAlpha(0.35)
-    end
     w.panel = Geo.CreateSettingsPanel(w)
     Geo.AddVersionFooter(w)
     w:SetScript("OnShow", function() w.panel.Update() end)
@@ -340,9 +306,7 @@ function Geo.ToggleSettings()
       -- The values apply to the next Roadbook; the open window shows them.
       if Refresh then Refresh() end
     end)
-    tinsert(UISpecialFrames, "ForeverQuestPlannerSettingsFrame")
     Geo.settingsWindow = w
-    w:Hide()
   end
   w:SetShown(not w:IsShown())
 end

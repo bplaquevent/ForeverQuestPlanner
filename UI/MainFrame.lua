@@ -230,37 +230,10 @@ end
 local function CreateMainFrame()
   State.currentTab = Settings().lastTab or State.currentTab
   if State.currentTab == "custom" then State.currentTab = "xp" end -- versions with two Roadbook tabs
-  local f = CreateFrame("Frame", "ForeverQuestPlannerFrame", UIParent, "BasicFrameTemplateWithInset")
+  -- Same look as the Objective button: dark background, thin golden border, golden title.
+  local f = Geo.CreateWindow("ForeverQuestPlannerFrame", "Forever Quest Planner", 820, 570)
   State.mainFrame = f
-  f:SetSize(820, 570)
   f:SetPoint("CENTER")
-  f:SetFrameStrata("DIALOG")
-  f:SetMovable(true)
-  f:SetClampedToScreen(true)
-  f:EnableMouse(true)
-  f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", f.StartMoving)
-  f:SetScript("OnDragStop", f.StopMovingOrSizing)
-  f:Hide()
-
-  -- Background: darkened parchment, quest-book style, with a slight downward gradient.
-  f.art = f:CreateTexture(nil, "BACKGROUND", nil, 2)
-  f.art:SetPoint("TOPLEFT", 6, -24)
-  f.art:SetPoint("BOTTOMRIGHT", -6, 6)
-  f.art:SetTexture("Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal")
-  f.art:SetVertexColor(0.42, 0.34, 0.26)
-  f.shade = f:CreateTexture(nil, "BACKGROUND", nil, 3)
-  f.shade:SetAllPoints(f.art)
-  f.shade:SetColorTexture(0, 0, 0, 1)
-  if f.shade.SetGradient and CreateColor then
-    pcall(f.shade.SetGradient, f.shade, "VERTICAL", CreateColor(0, 0, 0, 0.55), CreateColor(0, 0, 0, 0.15))
-  else
-    f.shade:SetAlpha(0.35)
-  end
-
-  f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  f.title:SetPoint("TOP", 0, -5)
-  f.title:SetText("Forever Quest Planner")
   Geo.AddVersionFooter(f)
 
   local tabs = {
@@ -422,7 +395,6 @@ local function CreateMainFrame()
     Geo.HideRowTooltip()
     if PlaySound then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_QUEST_LOG_CLOSE) or 845) end
   end)
-  tinsert(UISpecialFrames, "ForeverQuestPlannerFrame")
 end
 
 local function ToggleMainFrame(tab)

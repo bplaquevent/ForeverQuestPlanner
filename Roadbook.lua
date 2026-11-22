@@ -1440,22 +1440,8 @@ function CP.CreateCheckpointButton()
   if CP.checkpointButton then return end
   local b = CreateFrame("Button", "ForeverQuestPlannerCheckpoint", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
   b:SetSize(230, 56)
-  -- Dark tooltip-like frame, golden border.
-  local GOLD = { 1, 0.82, 0 }
-  if b.SetBackdrop then
-    b:SetBackdrop({
-      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 16, edgeSize = 14,
-      insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    b:SetBackdropColor(0.09, 0.07, 0.04, 0.92)
-    b:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.85)
-  else
-    local bg = b:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.09, 0.07, 0.04, 0.92)
-  end
+  -- Dark tooltip-like frame, golden border (the style of every window of the addon).
+  Geo.FrameStyle(b)
   -- Framed icon (compass square), vertically centered whatever the height of the button.
   local frameTex = b:CreateTexture(nil, "ARTWORK")
   frameTex:SetSize(44, 44)
@@ -1515,10 +1501,12 @@ function CP.CreateCheckpointButton()
   b:SetScript("OnMouseDown", function() PlaceIcon(1, -1) end)
   b:SetScript("OnMouseUp", function() PlaceIcon(0, 0) end)
   b.HoverIn = function()
-    if b.SetBackdropBorderColor then b:SetBackdropBorderColor(1, 0.95, 0.6, 1) end
+    local c = K.FRAME_BORDER_HOVER
+    if b.SetBackdropBorderColor then b:SetBackdropBorderColor(c[1], c[2], c[3], c[4]) end
   end
   b.HoverOut = function()
-    if b.SetBackdropBorderColor then b:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.85) end
+    local c = K.FRAME_BORDER
+    if b.SetBackdropBorderColor then b:SetBackdropBorderColor(c[1], c[2], c[3], c[4]) end
   end
   b:SetFrameStrata("MEDIUM")
   b:SetMovable(true)
