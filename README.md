@@ -111,6 +111,7 @@ walked, places reached by the teleport spells) is shared by all your characters.
 | `/fqp teleport` | Use / ignore the class teleports in the Roadbook |
 | `/fqp export` | Export the quest log as text |
 | `/fqp save` | Save the quest log to the SavedVariables (reloads the UI) |
+| `/fqp trace` | Show the last lines of the Roadbook trace (changes of the plan, steps marked, focus, list); `/fqp trace clear` empties it. The last 300 lines are kept in the SavedVariables |
 | `/fqp icon` | Show / hide the minimap icon |
 | `/fqp passes` | Number of zone passes known (learned on foot, in all) |
 | `/fqp passes reset` | Forget the zone passes learned on foot |

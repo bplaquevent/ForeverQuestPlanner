@@ -96,6 +96,7 @@ end
 function CP.FocusStep(s)
   if s.escort then CP.escortFailNotified = nil end -- escort (re)started: a new failure is reported
   local moved = CP.focused ~= s
+  if moved then Geo.Trace("focus", Geo.StepTrace(s)) end
   CP.focused = s
   CP.focusRec = { questId = s.task.id, label = CP.StepPinLabel(s), area = s.p.area, mx = s.p.mx, my = s.p.my,
     progress = CP.Progress(s.task.id) }
@@ -220,6 +221,9 @@ function Geo.Freeze(route, info)
   Geo.FrozenStore()[CharKey()] = { saved = date and date("%H:%M") or "",
     start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, recall = Geo.RecallState() }
   Geo.frozen = { route = route, info = info }
+  Geo.Trace("freeze", string.format("plan saved: %d step(s), %d done%s", #steps,
+    (function() local n = 0 for _, s in ipairs(steps) do if s.done then n = n + 1 end end return n end)(),
+    info.custom and ", custom list" or ""))
   Geo.MapSync() -- a new or adapted plan: redrawn on the map if it is there
 end
 
@@ -242,6 +246,7 @@ end
 
 -- Empties the Roadbook (its steps and its progress).
 function Geo.ClearFrozen()
+  if Geo.frozen or Geo.FrozenRec() then Geo.Trace("clear", "plan emptied") end
   Geo.frozen = nil
   Geo.FrozenStore()[CharKey()] = nil
   Geo.planCache, Geo.customCache = nil, nil
@@ -282,6 +287,7 @@ end
 -- Marks a step as done (and saves it).
 function Geo.MarkDone(st, value)
   if value == nil then value = true end
+  Geo.Trace("mark", (value and "done: " or "not done: ") .. Geo.StepTrace(st))
   st.done = value or nil
   local fz, rec = Geo.frozen, Geo.FrozenRec()
   if fz and rec and rec.steps then
@@ -652,6 +658,7 @@ function CP.Replan(msg, opts)
   end
   if not Geo.HasRoadbook() or #Geo.CustomList() == 0 then return false end
   Print(msg .. string.format(L["Computing the Roadbook (up to %d s)…"], K.PLAN_TIME))
+  Geo.Trace("replan", msg)
   CP.focusAfter = true
   CP.Recompute("custom", true, nil, nil, { opts = opts or {} })
   return true
@@ -1083,7 +1090,12 @@ function CP.AutoUpdate(reason, step, check)
   CP.autoPending = true
   C_Timer.After(1, function()
     CP.autoPending = nil
-    if step and (CP.CurrentFocus() ~= step or (check and not check())) then return end
+    if step and (CP.CurrentFocus() ~= step or (check and not check())) then
+      Geo.Trace("auto", "refused (" .. reason .. "): " .. Geo.StepTrace(step) .. ", focus on "
+        .. (CP.CurrentFocus() and Geo.StepTrace(CP.CurrentFocus()) or "nothing"))
+      return
+    end
+    Geo.Trace("auto", reason .. ": " .. (CP.CurrentFocus() and Geo.StepTrace(CP.CurrentFocus()) or "no focus"))
     Print(reason .. L[": next Roadbook step."])
     local cur = CP.CurrentFocus()
     if cur then Geo.MarkDone(cur) end

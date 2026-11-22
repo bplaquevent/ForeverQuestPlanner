@@ -209,6 +209,17 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     Print(L["Learned zone passes forgotten."])
   elseif msg == "export" then
     ToggleMainFrame("export")
+  elseif msg == "trace" or msg == "trace clear" then
+    local t = Settings().roadbookTrace or {}
+    if msg == "trace clear" then
+      Settings().roadbookTrace = nil
+      Print(L["Roadbook trace emptied."])
+    elseif #t == 0 then
+      Print(L["Roadbook trace is empty."])
+    else
+      Print(string.format(L["Roadbook trace: %d line(s), the last 20 (all of them in the saved data)."], #t))
+      for i = math.max(1, #t - 19), #t do Print(t[i]) end
+    end
   elseif msg == "dump" then
     Geo.BenchDump()
   else

@@ -169,6 +169,7 @@ function Geo.CustomAdd(id, title, level, quiet)
     end
   end
   rec.list[#rec.list + 1] = { id = id, title = title, level = level or Geo.QuestLevelOf(id) }
+  Geo.Trace("list", "added " .. id .. " " .. title .. (pre > 0 and (" (+" .. pre .. " prerequisite)") or ""))
   if quiet then return true, pre end
   Print(L["Added to the Roadbook list: "] .. title ..
     (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
@@ -206,6 +207,7 @@ function Geo.CustomRemove(id, quiet)
   if not i then return false, 0 end
   local rec = Geo.CustomRec()
   local e = table.remove(rec.list, i)
+  Geo.Trace("list", "removed " .. tostring(id) .. " " .. tostring(e.title))
   local removed, again = 0, true
   while again do
     again = false

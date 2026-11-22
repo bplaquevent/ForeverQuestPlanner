@@ -7,6 +7,28 @@ local K, L, PlayerPos, Print, Route, Settings = ns.K, ns.L, ns.PlayerPos, ns.Pri
 local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData, ns.Solver, ns.TaxiCount, ns.TravelSpeed, ns.WorldPos, ns.scan
 
 ---------------------------------------------------------------------------
+-- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
+-- character in the saved data (the last K.TRACE_MAX lines) to find out how a step got its state.
+---------------------------------------------------------------------------
+K.TRACE_MAX = 300
+function Geo.Trace(kind, text)
+  local st = Settings()
+  st.roadbookTrace = st.roadbookTrace or {}
+  local t = st.roadbookTrace
+  t[#t + 1] = (date and date("%d/%m %H:%M:%S") or "") .. " " .. kind .. " " .. tostring(text)
+  while #t > K.TRACE_MAX do table.remove(t, 1) end
+end
+
+-- One step in a few words: kind, quest, objective and count, state.
+function Geo.StepTrace(s)
+  local t = s.task or {}
+  local r = s.r
+  return tostring(s.kind) .. " " .. tostring(t.id or "-") .. " " .. tostring(t.title or "?")
+    .. (r and r.tg and (" / " .. tostring(r.tg.name) .. " x" .. tostring(r.count)) or "")
+    .. (s.done and " [done]" or "")
+end
+
+---------------------------------------------------------------------------
 -- Transports: "take the flight / zeppelin / boat" step at the boarding point
 ---------------------------------------------------------------------------
 -- World point (c, x, y) -> displayable/pinnable point (zone map + 0-100 coordinates).
@@ -476,10 +498,14 @@ function Geo.KeepDone(fz, isDone, rest, restInfo, info)
   local oldLv = fz.info.levels or {}
   local restLv, restTotal = restInfo.levels or {}, restInfo.total or 0
   local route, levels = { old[1] }, { oldLv[1] or restLv[1] or UnitLevel("player") }
-  local t0 = 0
+  local t0, kept, dropped = 0, 0, {}
   for i = 2, #old do
     local st = old[i]
-    if isDone(st) then
+    if not isDone(st) then
+      if st.task and st.task.id then dropped[#dropped + 1] = Geo.StepTrace(st) end
+    else
+      kept = kept + 1
+      if not st.done then Geo.Trace("keepdone", "marked done for good: " .. Geo.StepTrace(st)) end
       st.done = true
       route[#route + 1] = st
       levels[#levels + 1] = oldLv[i] or levels[#levels]
@@ -495,6 +521,8 @@ function Geo.KeepDone(fz, isDone, rest, restInfo, info)
       levels[#levels + 1] = restLv[i] or levels[#levels]
     end
   end
+  Geo.Trace("keepdone", string.format("%d step(s) done kept, %d not done dropped (%s), %d new step(s)",
+    kept, #dropped, table.concat(dropped, "; "), #rest - 1))
   local xp, mobXP, ids = 0, 0, {}
   for i = 2, #route do
     local st = route[i]
