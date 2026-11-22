@@ -530,7 +530,24 @@ function Geo.ListRoute(P, opt)
     if st.kind == "dungeon" then dungeons = dungeons + 1 end
   end
   info.custom, info.dungeons, info.discovered, info.later = true, dungeons, discovered, {}
+  Geo.TraceService(route)
   return route, info
+end
+
+-- Trace of the plan of a service shortcut: the steps up to the service step (transports, teleports,
+-- flight paths activated on the way), each with its time since the start.
+function Geo.TraceService(route)
+  local sv = Geo.ServicePending()
+  if not sv then return end
+  local parts = {}
+  for i = 2, #route do
+    local st = route[i]
+    parts[#parts + 1] = string.format("%s %s @%ds", tostring(st.kind), tostring(st.task and st.task.title or "?"), st.at or 0)
+    if st.kind == "service" then break end
+  end
+  local p = route[1].p or {}
+  Geo.Trace("service", string.format("%s -> %s; start c%s %d,%d; known flight paths %d; steps: %s", tostring(sv.kind),
+    tostring(sv.name), tostring(p.c), p.x or 0, p.y or 0, ns.TaxiCount and ns.TaxiCount() or -1, table.concat(parts, " | ")))
 end
 
 -- "Generate" with a duration or level (goal): the list (if any) kept whole and completed with the
