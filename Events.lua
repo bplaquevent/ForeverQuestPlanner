@@ -232,6 +232,8 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
       Print(string.format(L["Roadbook trace: %d line(s), the last 20 (all of them in the saved data)."], #t))
       for i = math.max(1, #t - 19), #t do Print(t[i]) end
     end
+  elseif msg == "npc" then
+    for _, line in ipairs(Geo.NpcInfo()) do Print(line) end
   elseif msg == "dump" then
     Geo.BenchDump()
   else

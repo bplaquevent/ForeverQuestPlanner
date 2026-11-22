@@ -1040,6 +1040,24 @@ function Geo.ServiceNpcs()
   return svc
 end
 
+-- Diagnostic of the targeted NPC for the service lists (/fqp npc): QuestieDB data and why it is or is not a
+-- class trainer of the player. Returns lines.
+function Geo.NpcInfo()
+  local guid = UnitGUID and UnitGUID("target")
+  local id = guid and tonumber(select(6, strsplit("-", guid)))
+  if not id then return { "no NPC targeted" } end
+  local classLoc, token = UnitClass("player")
+  local out = { string.format("npc %d '%s' (player class '%s' / '%s')", id, tostring(QGet(QDB.Npc, id, "name")),
+    tostring(classLoc), tostring(token)) }
+  out[#out + 1] = string.format("npcFlags=%s subName=%s friendlyToFaction=%s", tostring(QGet(QDB.Npc, id, "npcFlags")),
+    tostring(QGet(QDB.Npc, id, "subName")), tostring(QGet(QDB.Npc, id, "friendlyToFaction")))
+  out[#out + 1] = string.format("faction=%s points=%d", tostring(UnitFactionGroup("player")), #EntityPoints("npc", id))
+  local n = 0
+  for _, e in ipairs(Geo.ServiceNpcs().trainer) do if e.id == id then n = n + 1 end end
+  out[#out + 1] = string.format("entries in the trainer list: %d of %d", n, #Geo.ServiceNpcs().trainer)
+  return out
+end
+
 -- Nearest NPC of a service (kind: "vendor", "repair", "trainer") by travel time on the transport
 -- network: the nearest ones in a straight line on the player's continent, else on each other
 -- continent the ones nearest to a flight master. Returns { id, name, p, time } or nil.

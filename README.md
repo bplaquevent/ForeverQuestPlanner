@@ -116,6 +116,7 @@ walked, places reached by the teleport spells) is shared by all your characters.
 | `/fqp icon` | Show / hide the minimap icon |
 | `/fqp passes` | Number of zone passes known (learned on foot, in all) |
 | `/fqp passes reset` | Forget the zone passes learned on foot |
+| `/fqp npc` | Diagnose the targeted NPC for the service shortcuts (class trainer data) |
 | `/fqp dump` | Capture the Roadbook problem for the test bench (then `/reload`) |
 
 The French command names (`journal`, `dispo`, `autour`, `reglages`, `foyer`) still work.
