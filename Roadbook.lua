@@ -1284,7 +1284,62 @@ function CP.GiverFound(a1, a2)
   return handled
 end
 
+-- Auto mode (Settings().autoAdd): each quest accepted is proposed for the list, one window at a time.
+function CP.SetAutoAdd(on)
+  Settings().autoAdd = on and true or nil
+  Print(on and L["Auto mode on: each quest you accept is proposed for the Roadbook list."]
+    or L["Auto mode off."])
+  if Refresh then Refresh() end
+  if Geo.MapPanelSync then pcall(Geo.MapPanelSync) end
+end
+
+function CP.AutoAskNext()
+  if CP.autoShown or not CP.autoAsk or #CP.autoAsk == 0 then return end
+  local e = table.remove(CP.autoAsk, 1)
+  CP.autoShown = true
+  if not StaticPopup_Show("FQP_AUTO_ADD", e.title, nil, e) then
+    CP.autoShown = nil
+  end
+end
+
+function CP.AutoAddAccepted(a1, a2)
+  if not Settings().autoAdd then return end
+  local id = a2 or a1
+  if type(id) ~= "number" or Geo.InCustom(id) then return end
+  CP.autoAsk = CP.autoAsk or {}
+  for _, e in ipairs(CP.autoAsk) do if e.id == id then return end end
+  CP.autoAsk[#CP.autoAsk + 1] = { id = id, title = QGet(QDB.Quest, id, "name") or ("#" .. id) }
+  CP.AutoAskNext()
+end
+
+-- Added as soon as no computation is running.
+function CP.AutoAddSoon(id, title, tries)
+  if Geo.computing then
+    if (tries or 0) < 30 then C_Timer.After(2, function() CP.AutoAddSoon(id, title, (tries or 0) + 1) end) end
+    return
+  end
+  Geo.CustomAdd(id, title)
+end
+
+StaticPopupDialogs["FQP_AUTO_ADD"] = {
+  text = L["Add \"%s\" to the Roadbook list?"],
+  button1 = L["Add"],
+  button2 = L["Ignore"],
+  OnAccept = function(_, data)
+    if data then CP.AutoAddSoon(data.id, data.title) end
+  end,
+  OnHide = function()
+    CP.autoShown = nil
+    C_Timer.After(0.2, CP.AutoAskNext)
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
 function CP.OnGameEvent(event, a1, a2)
+  if event == "QUEST_ACCEPTED" then pcall(CP.AutoAddAccepted, a1, a2) end
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
   if (event == "QUEST_LOG_UPDATE" or event == "ZONE_CHANGED_NEW_AREA") and not CP.quickPending and Geo.frozen then
     CP.quickPending = true
