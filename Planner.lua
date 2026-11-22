@@ -1044,7 +1044,7 @@ end
 -- class trainer of the player. Returns lines.
 function Geo.NpcInfo()
   local guid = UnitGUID and UnitGUID("target")
-  local id = guid and tonumber(select(6, strsplit("-", guid)))
+  local id = guid and tonumber((select(6, strsplit("-", guid))))
   if not id then return { "no NPC targeted" } end
   local classLoc, token = UnitClass("player")
   local out = { string.format("npc %d '%s' (player class '%s' / '%s')", id, tostring(QGet(QDB.Npc, id, "name")),
