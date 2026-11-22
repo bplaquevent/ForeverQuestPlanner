@@ -117,6 +117,10 @@ f:SetScript("OnEvent", function(_, event, ...)
       end
     end)
   elseif event == "UPDATE_FACTION" or event == "SKILL_LINES_CHANGED" then
+    if event == "SKILL_LINES_CHANGED" then
+      pcall(ns.PlayerSkills, true) -- read again: a "raise the skill" step may be done
+      pcall(CP.OnGameEvent, event)
+    end
     if not f.rescanPending then
       f.rescanPending = true
       C_Timer.After(10, function()

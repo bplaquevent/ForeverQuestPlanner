@@ -25,7 +25,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Cooldowns always checked**: when a Roadbook is computed again, when its tracking starts again, and while it is followed (hearthstone or spell used outside the plan, cooldown reset, runes bought or used up, spell learned, new inn), the steps to come are adapted to where you are and to the cooldowns now; the steps done stay in the history.
 - **Roadbook adapted**: when the route changes (position or cooldowns above, quest removed, transport skipped, quest giver found), the steps to come are planned again for every quest left of the list in the least time, the steps done stay in the history.
 - **Quest givers moving between places**: a quest whose giver (a single NPC) has spawns in several places gets one pick-up step per place to check, all placed in the route like any other step. **Not here** marks a place checked; once the quest is picked up, the other places leave the Roadbook and it is adapted.
-- **Profession levels**: a quest that needs a profession level to be turned in (e.g. Herbalism 20 for a profession introduction) is only turned in once that level is reached: "Adapt" leaves it out until then, a quest of the list gets its steps planned but not its turn-in (warning), the quest log tab shows the level needed; once reached, its turn-in is planned again.
+- **Profession levels**: a quest that needs a profession level to be turned in (e.g. Herbalism 20 for a profession introduction) is only turned in once that level is reached: "Adapt" leaves it out until then, a quest of the list gets a step "Raise the <profession> skill to level N" before its turn-in (time: setting "Time per skill point", pin on the nearest trainer of the profession, none when it is unknown), done automatically once the level is reached; the quest log tab shows the level needed.
 - Steps to **activate unknown flight masters** when the flights they open save time (setting) and to **take transports**.
 - Quests kept **for max level** (key, mount, epic item useless while leveling, access to an endgame dungeon).
 - **Life cycle** (the Roadbook lives on its own, tracked or not: it is computed again at each change of the list, a step done ahead, a quest giver found elsewhere; the tracking only decides whether the Objective button, the map pin and the watched quest follow it):
@@ -74,7 +74,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Map** button on every quest: sets OpenMap's waypoint on its place (quest giver, or the monsters dropping the item that starts it; nearest remaining objective; turn-in) and opens the world map on it. While a Roadbook is followed, the map only opens there (the Roadbook keeps the waypoint).
 - **Shift-click** a quest in any tab: its quest link goes into the chat (the game's link for quests of your log, the same link built from QuestieDB otherwise).
 - **Minimap icon**: click opens the window on the Roadbook tab (or closes it); right-click: settings; drag: move it.
-- **Settings** (gear icon): General (minimap icon) and Roadbook (objective button: show, compass, center; hearthstone; class teleports; activate nearby flight masters; whole Roadbook on the map; difficulty, time estimates) panels.
+- **Settings** (gear icon): General (minimap icon) and Roadbook (objective button: show, compass, center; hearthstone; class teleports; activate nearby flight masters; whole Roadbook on the map; difficulty, time estimates including the time per profession skill point) panels.
 
 ## Dependencies
 

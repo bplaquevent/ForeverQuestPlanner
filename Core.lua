@@ -470,9 +470,9 @@ local PROFESSION_SKILLS = {
 -- Professions known by the character: skillLine -> rank, localized names, and whether reading succeeded.
 -- Forever uses C_SkillInfo (like Questie); the other APIs are fallbacks.
 local skillCache, skillCacheTime = nil, 0
-local function PlayerSkills()
+local function PlayerSkills(fresh) -- fresh: read again (a skill changed)
   local now = GetTime and GetTime() or 0
-  if skillCache and now - skillCacheTime < 5 then return skillCache[1], skillCache[2], skillCache[3] end
+  if not fresh and skillCache and now - skillCacheTime < 5 then return skillCache[1], skillCache[2], skillCache[3] end
   local skills, names, known = {}, {}, false
   if C_SkillInfo and C_SkillInfo.GetNumSkillLines and C_SkillInfo.GetSkillLineInfo then
     -- Expand collapsed categories to see every line (from the end to the beginning).
