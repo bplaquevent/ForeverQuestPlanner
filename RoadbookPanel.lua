@@ -106,8 +106,7 @@ function Geo.StepDetailLines(st)
       (st.spots and st.spots > 1 and L[", the most efficient (travel + density)"] or ""))
   end
   if st.kind == "turnin" then
-    if st.quick then add(D.good, L["quick win: added on the way"])
-    elseif task.quick then add(D.good, L["ready to turn in"]) end
+    if task.quick then add(D.good, L["ready to turn in"]) end
   end
   if task.id and task.stops and st == task.stops[1] then
     if task.warn then add(D.bad, task.warn) end

@@ -156,7 +156,7 @@ end
 
 function Geo.SerializeStep(st)
   local t = st.task or {}
-  return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots, quick = st.quick,
+  return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots,
     escort = st.escort, glue = st.glue, via = st.via, bindDest = st.bindDest, search = st.search,
     fmHub = st.fmHub and { id = st.fmHub.id, node = st.fmHub.node, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil,
     members = Geo.SerializeMembers(t.members),
@@ -182,7 +182,7 @@ function Geo.DeserializeStep(rec, tasks)
       members = Geo.DeserializeMembers(rec.members) }
     tasks[key] = task
   end
-  local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots, quick = rec.quick,
+  local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots,
     escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub, via = rec.via, bindDest = rec.bindDest, search = rec.search,
     spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task, afterSource = rec.afterSource,
     r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind, sourceItem = rec.objSource }, count = rec.count } or nil }
@@ -294,70 +294,6 @@ function Geo.MarkDone(st, value)
       if fz.route[i] == st and rec.steps[i - 1] then rec.steps[i - 1].done = value or nil end
     end
   end
-end
-
--- Quick wins: a quest from the log that became ready to turn in during the Roadbook, whose NPC is
--- next to an upcoming step (or to you), is added to the saved plan right after that step, and to the list.
-function Geo.InjectQuickWins()
-  local fz = Geo.Frozen()
-  if not fz then return 0 end
-  local route = fz.route
-  local rec = Geo.FrozenRec()
-  local pending = {}
-  for i = 2, #route do
-    local st = route[i]
-    if st.kind == "turnin" and st.task and st.task.id and not CP.StepDone(st) then pending[st.task.id] = true end
-  end
-  local cur = CP.CurrentFocus()
-  local curI = 2
-  if cur then
-    for i = 2, #route do if route[i] == cur then curI = i break end end
-  else -- not tracked: the first step not done
-    for i = 2, #route do if not CP.StepDone(route[i]) then curI = i break end end
-  end
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  local pos = PlayerPos()
-  local added, focusNew = 0, nil
-  for _, q in ipairs(e and e.quests or {}) do
-    if q.complete and not q.failed and not pending[q.id] and IsInLog(q.id)
-      and not Geo.SkillNeed(q.id, q)
-      and (not C_QuestLog.IsComplete or C_QuestLog.IsComplete(q.id)) then
-      local t = QuestTargets(q.id)
-      if #t.finish > 0 and not AllInstance(t.finish) then
-        local bestI, bestD, bestP
-        if pos and not (route[curI] and route[curI].glue) then
-          local f, d = Nearest(t.finish, pos)
-          if d and d < K.QUICKWIN_RADIUS then bestI, bestD, bestP = curI - 1, d, f end
-        end
-        for i = curI, #route do
-          local st = route[i]
-          if st.p and st.p.c and not CP.StepDone(st) and not (route[i + 1] and route[i + 1].glue) then
-            local f, d = Nearest(t.finish, st.p)
-            if d and d < K.QUICKWIN_RADIUS and (not bestD or d < bestD) then bestI, bestD, bestP = i, d, f end
-          end
-        end
-        if bestI then
-          local task = { id = q.id, title = q.title, level = q.level, stops = {},
-            xp = q.xp or DBXP(q.id, UnitLevel("player")) or 0 }
-          local st = { kind = "turnin", p = bestP, work = K.OVERHEAD / 2, xp = task.xp, task = task, quick = true,
-            at = route[math.max(bestI, 2)] and route[math.max(bestI, 2)].at or 0 }
-          task.stops[1] = st
-          table.insert(route, bestI + 1, st)
-          if rec and rec.steps then table.insert(rec.steps, bestI, Geo.SerializeStep(st)) end
-          if bestI + 1 <= curI then
-            focusNew = st
-            curI = curI + 1
-          end
-          pending[q.id] = true
-          added = added + 1
-          Geo.CustomAdd(q.id, q.title, q.level, true) -- a quest of the Roadbook: in the list too
-          Print(L["Quick win added to the Roadbook: turn in \""] .. (q.title or "?") .. L["\" ("] .. PointText(bestP) .. ").")
-        end
-      end
-    end
-  end
-  if added > 0 and focusNew and cur then CP.FocusStep(focusNew) end
-  return added
 end
 
 -- Step already done: marked, or observed in the game (quest picked up, objective done, quest turned in…).
@@ -1341,14 +1277,6 @@ StaticPopupDialogs["FQP_AUTO_ADD"] = {
 function CP.OnGameEvent(event, a1, a2)
   if event == "QUEST_ACCEPTED" then pcall(CP.AutoAddAccepted, a1, a2) end
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
-  if (event == "QUEST_LOG_UPDATE" or event == "ZONE_CHANGED_NEW_AREA") and not CP.quickPending and Geo.frozen then
-    CP.quickPending = true
-    C_Timer.After(2.5, function() -- after the quest log capture (2 s)
-      CP.quickPending = nil
-      local ok, n = pcall(Geo.InjectQuickWins)
-      if ok and n and n > 0 and Refresh then Refresh() end
-    end)
-  end
   -- Landing after a flight taken during a focus.
   if event == "FQP_TAXI_LANDED" and CP.flying then
     CP.flying = nil -- the focus already moved to the next step at take-off

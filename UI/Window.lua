@@ -56,11 +56,11 @@ end
 function Geo.RoadbookQuestItems(items, fz, query)
   local D = K.DESC
   local quests, seen = {}, {}
-  local function add(task, quick)
+  local function add(task)
     local id = task and task.id
     if not id or seen[id] then return end
     seen[id] = true
-    quests[#quests + 1] = { id = id, title = task.title, level = task.level, quick = quick }
+    quests[#quests + 1] = { id = id, title = task.title, level = task.level }
   end
   local route = fz and fz.route or {}
   for i = 2, #route do
@@ -68,7 +68,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
     if st.kind == "dungeon" then
       for _, m in ipairs(st.task.members or {}) do add(m.task) end
     else
-      add(st.task, st.quick)
+      add(st.task)
     end
   end
   local list, entry, why = Geo.CustomList(), {}, {}
@@ -94,7 +94,6 @@ function Geo.RoadbookQuestItems(items, fz, query)
     elseif q then status = Color(D.action, L["in the quest log"])
     else status = Color(D.action, L["to pick up"]) end
     local notes = {}
-    if it.quick then notes[#notes + 1] = Color(D.good, L["quick win: added on the way"]) end
     local req = not q and not done and QGet(QDB.Quest, it.id, "requiredLevel")
     if type(req) == "number" and req > plevel then notes[#notes + 1] = Color(D.warn, string.format(L["level %d required"], req)) end
     local en = entry[it.id]
@@ -217,7 +216,6 @@ local function RenderXP()
 
   -- Saved Roadbook: it changes with the list (and when it is adapted), or with "Adapt".
   local fz = Geo.Frozen()
-  if fz then pcall(Geo.InjectQuickWins) end
 
   local qItems = {}
   -- No Roadbook: how to make one (and why the last computation failed).

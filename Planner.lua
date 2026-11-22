@@ -511,7 +511,6 @@ function Geo.Followers(task, ctx, plevel)
   return task.followers
 end
 
-K.QUICKWIN_RADIUS = 250    -- m: turn-in added to the saved Roadbook if it is next to a step
 
 -- Armor (subclasses) and weapons usable per class (Classic). Mail / plate from level 40.
 K.ARMOR = {
@@ -829,7 +828,7 @@ local function BuildTasks(pos, plevel)
     local group = q.suggestedGroup and q.suggestedGroup > 1
     local atMax = plevel >= Geo.MaxLevel()
     -- Quest ready to turn in: always a candidate (even dungeon, group, gray or high level),
-    -- you only need to visit the NPC: it is a quick win.
+    -- you only need to visit the NPC: it is cheap.
     local ready = q.complete and not q.failed
     if Geo.SkillNeed(q.id, q) then
       skipped = skipped + 1 -- profession level too low to turn it in
