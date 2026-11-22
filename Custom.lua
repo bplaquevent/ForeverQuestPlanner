@@ -278,6 +278,12 @@ function Geo.CustomTask(e, pos, plevel, logById)
     if req > plevel then task.reqLevel = req end
     task.starter = GiverText(QGet(QDB.Quest, e.id, "startedBy"))
   end
+  -- Profession level too low: the turn-in waits for it (the steps before it stay planned).
+  local need = Geo.SkillNeed(e.id, q)
+  if need then
+    if q and q.complete then return nil, Geo.SkillNeedText(need) end
+    task.warn = Geo.SkillNeedText(need)
+  end
   task.stops = MakeStops(task, pos, plevel)
   if not task.stops then return nil, L["not located"] end
   return task
@@ -389,19 +395,31 @@ function Geo.CustomConstraints(tasks)
     table.insert(succ[a], b)
   end
   for _, task in ipairs(tasks) do
-    local take = task.kind == "take" and task.stops[1]
+    -- Pick-up: one step, or one per place where the quest giver may stand (all before the rest).
+    local takes, isTake = {}, {}
+    if task.kind == "take" then
+      for _, s in ipairs(task.stops) do
+        local c = s.kind == "take" and (s.inside or s)
+        if c and not isTake[c] then
+          isTake[c] = true
+          takes[#takes + 1] = c
+        end
+      end
+    end
     local turnin = task.stops[#task.stops]
-    task.firstC = take and (take.inside or take) or nil
+    task.takesC = takes
+    task.firstC = takes[1]
     task.lastC = turnin.inside or turnin
-    local both = task.firstC == task.lastC
     for _, x in ipairs(task.order) do
-      if task.firstC then before(task.firstC, x) end
-      if not both then before(x, task.lastC) end
+      if not isTake[x] then
+        for _, c in ipairs(takes) do before(c, x) end
+      end
+      if not isTake[task.lastC] then before(x, task.lastC) end -- (pick-up and turn-in in one dungeon visit: none)
     end
   end
   for _, b in ipairs(tasks) do
-    if b.firstC then
-      for _, a in ipairs(b.pres) do before(a.lastC, b.firstC) end
+    for _, c in ipairs(b.takesC) do
+      for _, a in ipairs(b.pres) do before(a.lastC, c) end
     end
   end
   return pred, succ
@@ -410,7 +428,7 @@ end
 -- Fastest route doing every quest of the list (solver): dungeon visits, order rules (pick-up first,
 -- turn-in last, prerequisites before), required levels (a quest picked up below it gets a warning,
 -- an order rule that cannot be kept too), teleports, binds and flight paths activated on the way.
-function Geo.PlanCustom()
+function Geo.PlanCustom(opts)
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
   Geo.xpScale, Geo.customCtx = nil, nil
@@ -420,6 +438,7 @@ function Geo.PlanCustom()
   Geo.customUnplanned = cp and cp.unplanned or unplanned or {}
   if not cp then return nil, err end
   local P = Geo.Problem("custom", pos, cp)
+  P.ban = opts and opts.ban
   local opt = Geo.Solve(P, "custom")
   for _, v in ipairs(opt.res.violations) do
     local s = v.kind == "level" and opt.route[v.i].src

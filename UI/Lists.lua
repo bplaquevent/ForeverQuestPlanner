@@ -580,13 +580,14 @@ OpenQuestDetails = function(questID)
   if ToggleQuestLog then pcall(ToggleQuestLog) end
 end
 
--- Tracks a single quest: removes every other one from tracking.
+-- Tracks a single quest: removes every other one from tracking. Only when the tracking really changes:
+-- each change made by the addon taints Blizzard's objective tracker (blocked aura reads afterwards).
 local function WatchOnly(questID)
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   for _, q in ipairs(e and e.quests or {}) do
     if q.id ~= questID and IsWatched(q.id) then SetWatched(q.id, false) end
   end
-  SetWatched(questID, true)
+  if not IsWatched(questID) then SetWatched(questID, true) end
 end
 
 -- Most useful point of a quest: nearest remaining objective, otherwise the turn-in NPC.

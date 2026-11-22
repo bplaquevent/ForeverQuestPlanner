@@ -11,6 +11,72 @@ local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.Trav
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
 
 ---------------------------------------------------------------------------
+-- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
+-- Herbalism"): QuestieDB's requiredSkill, else the quest texts (QuestieDB's English ones, the
+-- log's localized objectives and description) naming a profession next to a number.
+---------------------------------------------------------------------------
+K.SKILL_NAMES_EN = {
+  [164] = "blacksmithing", [165] = "leatherworking", [171] = "alchemy", [182] = "herbalism", [185] = "cooking",
+  [186] = "mining", [197] = "tailoring", [202] = "engineering", [333] = "enchanting", [356] = "fishing",
+  [393] = "skinning", [129] = "first aid",
+}
+K.SKILL_TEXT_GAP = 30 -- characters: a number this close to a profession name is its level
+
+function Geo.SkillFromText(text)
+  text = text:lower()
+  for skill, en in pairs(K.SKILL_NAMES_EN) do
+    for _, name in ipairs({ en, (K.SKILL_NAMES[skill] or en):lower() }) do
+      local a, b = text:find(name, 1, true)
+      if a then
+        local around = text:sub(math.max(1, a - K.SKILL_TEXT_GAP), b + K.SKILL_TEXT_GAP)
+        for n in around:gmatch("(%d+)") do
+          local v = tonumber(n)
+          if v and v >= 2 and v <= 300 then return skill, v end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- { skill, need, have, name } when the character's profession level is below the one needed, nil
+-- otherwise (or when it cannot be read). q: the quest log entry, if any.
+function Geo.SkillNeed(id, q)
+  local skills, _, known = PlayerSkills()
+  if not known then return nil end
+  local skill, need
+  local req = QGet(QDB.Quest, id, "requiredSkill")
+  if type(req) == "table" and req[1] and (req[2] or 0) > 0 then skill, need = req[1], req[2] end
+  if not skill then
+    local parts = {}
+    local Q = QDB.Quest
+    local okR, raw = false, nil
+    if Q and Q.GetRaw then okR, raw = pcall(Q.GetRaw, id, "objectivesText") end
+    for _, list in ipairs({ okR and raw or QGet(Q, id, "objectivesText"), q and q.objectivesText }) do
+      if type(list) == "table" then
+        for _, t in ipairs(list) do parts[#parts + 1] = tostring(t) end
+      elseif type(list) == "string" then
+        parts[#parts + 1] = list
+      end
+    end
+    if q and type(q.description) == "string" then parts[#parts + 1] = q.description end
+    for _, t in ipairs(parts) do
+      skill, need = Geo.SkillFromText(t)
+      if skill then break end
+    end
+  end
+  if not skill then return nil end
+  local have = skills[skill] or 0
+  if have >= need then return nil end
+  return { skill = skill, need = need, have = have, name = K.SKILL_NAMES[skill] or (L["profession"] .. " " .. skill) }
+end
+
+-- Warning line of a quest whose turn-in waits for a profession level.
+function Geo.SkillNeedText(n)
+  return string.format(L["%s %d required to turn in (you: %d)"], n.name, n.need, n.have)
+end
+
+---------------------------------------------------------------------------
 -- Around me
 ---------------------------------------------------------------------------
 State.nearRadius = 500
@@ -57,7 +123,7 @@ local function NearItems(radius)
     local t = QuestTargets(q.id)
     if q.complete then
       local p, d = Nearest(t.finish, pos)
-      if d then
+      if d and not Geo.SkillNeed(q.id, q) then
         local finisher = TurnInText(q.id)
         add({ kind = "turnin", id = q.id, label = q.title, d = d, p = p, level = q.level,
           giver = finisher and (finisher:match("^(.-) %- ") or finisher) })
@@ -95,9 +161,7 @@ end
 ---------------------------------------------------------------------------
 -- Goal of the automatic Roadbook: { kind = "time", value = s } or { kind = "level", value = level }.
 State.xpGoal = { kind = "time", value = 7200 }
-K.MAX_TAKE_CANDIDATES = 80
-K.TAKE_PER_LEVEL = 20               -- goal "reach level": candidates per unlock level, at least
-K.MAX_TAKE_CANDIDATES_LEVEL = 600   -- goal "reach level": most candidates
+K.MAX_TAKE_CANDIDATES = 1500      -- safety: quests to pick up considered by the Roadbook, at most
 K.MAX_FOLLOW_DEPTH = 12  -- safety: maximum length of an evaluated quest chain
 K.SLICE_MS = 15          -- maximum computation time per frame (the computation is spread over several frames)
 K.REPLAN_DISTANCE = 150  -- beyond this distance (m), the Roadbook is recomputed from the new position
@@ -278,24 +342,38 @@ local function MakeStops(task, pos, plevel)
   local t = task.targets
   local stops, from, mob = {}, pos, 0
   if task.kind == "take" then
-    local p = Nearest(t.start, pos)
-    if not p then return nil end
-    stops[#stops + 1] = { task = task, kind = "take", p = p, work = K.OVERHEAD / 2 }
-    from = p
+    local places = task.id and Geo.StartPlaces(task.id, pos)
+    if places then
+      -- Quest giver moving between places: one step per place to check (search = { i, n }), all
+      -- before the objectives; those left go once the quest is picked up (Roadbook.lua).
+      for i, p in ipairs(places) do
+        stops[#stops + 1] = { task = task, kind = "take", p = p, work = K.OVERHEAD / 2, search = { i = i, n = #places } }
+      end
+      from = places[1]
+    else
+      local p = Nearest(t.start, pos)
+      if not p then return nil end
+      stops[#stops + 1] = { task = task, kind = "take", p = p, work = K.OVERHEAD / 2 }
+      from = p
+    end
   end
+  local takes = #stops
   if task.kind ~= "turnin" then
     local todo = {}
     for _, r in ipairs(task.remaining) do todo[#todo + 1] = r end
     -- Escort: it starts at the quest giver, so it comes first, before the other objectives.
     local escortFirst = task.kind == "take" and Geo.IsEscort(task.id)
+    -- Source item (QuestieDB requiredSourceItems): the objectives that use it wait for it.
+    local sourced = false
     while #todo > 0 do
       local bi, bp, bd, bspot
-      local onlyExplore = false
+      local onlyExplore, sourceLeft = false, false
       if escortFirst then
         for _, r in ipairs(todo) do if r.tg.kind == "explore" then onlyExplore = true end end
       end
+      for _, r in ipairs(todo) do if r.tg.sourceItem then sourceLeft = true end end
       for i, r in ipairs(todo) do
-        if not (onlyExplore and r.tg.kind ~= "explore") then
+        if not (onlyExplore and r.tg.kind ~= "explore") and not (sourceLeft and r.tg.needsSource) then
           local spot = Geo.BestSpot(r, from)
           local p, d
           if spot then p, d = spot.p, Dist(from, spot.p) else p, d = Nearest(r.tg.points, from) end
@@ -315,13 +393,16 @@ local function MakeStops(task, pos, plevel)
       end
       local st = { task = task, kind = "obj", p = bp, work = work, r = r, xp = xp,
         spot = bspot, spots = nSpots }
+      if r.tg.sourceItem then sourced = true end
+      -- After the source item: fixed place in the quest's order (not a free objective).
+      if sourced and r.tg.needsSource then st.afterSource = true end
       if r.tg.kind == "explore" and Geo.IsEscort(task.id) then
         -- Escort: the NPC walks (slower than you) and ambushes happen on the way.
         local d = Dist(from, bp) or 0
         st.escort = true
         st.work = math.max(0, d / K.ESCORT_SPEED - d / TravelSpeed()) + K.ESCORT_MARGIN
         -- Right after the pick-up: nothing may come between them (glued to the previous stop).
-        if task.kind == "take" and #stops == 1 then st.glue = true end
+        if task.kind == "take" and #stops == 1 and takes == 1 then st.glue = true end
       end
       stops[#stops + 1] = st
       from = bp
@@ -331,7 +412,7 @@ local function MakeStops(task, pos, plevel)
   if not f then return nil end
   local turnin = { task = task, kind = "turnin", p = f, work = K.OVERHEAD / 2, xp = task.xp }
   -- Escort without a known destination (no completion trigger): it ends at the turn-in NPC.
-  if task.kind == "take" and #stops == 1 and Geo.IsEscort(task.id) then
+  if task.kind == "take" and #stops == 1 and takes == 1 and Geo.IsEscort(task.id) then
     local d = Dist(from, f) or 0
     turnin.escort, turnin.glue = true, true
     turnin.work = turnin.work + math.max(0, d / K.ESCORT_SPEED - d / TravelSpeed()) + K.ESCORT_MARGIN
@@ -752,6 +833,8 @@ local function BuildTasks(pos, plevel)
     local ready = q.complete and not q.failed
     if Geo.Excluded("auto")[q.id] then
       skipped = skipped + 1 -- skipped by the player in this Roadbook
+    elseif Geo.SkillNeed(q.id, q) then
+      skipped = skipped + 1 -- profession level too low to turn it in
     elseif not ready and (q.isInstance or q.instanceName) and Geo.DungeonCombat(q.id) then
       skipped = skipped + 1 -- dungeon / raid quest (game tag): only turned in when it is ready
     elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel, nil, q.tag or "") + 1) then
@@ -783,8 +866,8 @@ local function BuildTasks(pos, plevel)
     end
   end
 
-  -- Quests to pick up, including the ones unlocked later by the expected level: the nearest ones,
-  -- plus (goal "reach level") the nearest ones of each unlock level up to the target.
+  -- Quests to pick up: every one available up to the level the Roadbook may reach (the solver takes
+  -- one on from the step where the expected level allows it), nearest first.
   local near = {}
   local ceiling = Geo.PlanCeiling(plevel)
   for _, en in ipairs(scan.entries or {}) do
@@ -792,21 +875,17 @@ local function BuildTasks(pos, plevel)
     if not en.lowLevel and not en.repMissing and not en.missing and not en.repeatable
       and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel()) and unlock and unlock <= ceiling then
       local p, d = Nearest(StartPoints(en.id), pos)
-      if p then near[#near + 1] = { en = en, d = d or math.huge, band = math.max(plevel, unlock) } end
+      if p then near[#near + 1] = { en = en, d = d or math.huge } end
     end
   end
   table.sort(near, function(a, b) return a.d < b.d end)
-  local byLevel = State.xpGoal and State.xpGoal.kind == "level"
-  local perBand, taken = {}, 0
+  local taken = 0
   for i, n in ipairs(near) do
-    local inBand = perBand[n.band] or 0
-    if taken < K.MAX_TAKE_CANDIDATES
-      or (byLevel and inBand < K.TAKE_PER_LEVEL and taken < K.MAX_TAKE_CANDIDATES_LEVEL) then
-      local task = Geo.TakeTask(n.en, plevel, pos)
-      if task then
-        tasks[#tasks + 1] = task
-        taken, perBand[n.band] = taken + 1, inBand + 1
-      end
+    if taken >= K.MAX_TAKE_CANDIDATES then break end
+    local task = Geo.TakeTask(n.en, plevel, pos)
+    if task then
+      tasks[#tasks + 1] = task
+      taken = taken + 1
     end
     if i % 10 == 0 then Geo.Yield() end
   end

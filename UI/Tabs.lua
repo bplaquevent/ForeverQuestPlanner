@@ -98,7 +98,9 @@ local function RenderTodo(a)
 
   if #a.turnIn > 0 then
     category("turnin", "turnin", L["To turn in"], a.turnIn, function(q)
-      return Geo.DescLine(Color(K.DESC.action, L["Turn in to: "] .. (q._turnIn or q.zone or "?")))
+      local need = Geo.SkillNeed(q.id, q) -- profession level not reached yet: not to turn in yet
+      return Geo.DescLine(Color(K.DESC.action, L["Turn in to: "] .. (q._turnIn or q.zone or "?")),
+        need and Color(K.DESC.bad, Geo.SkillNeedText(need)) or nil)
     end)
   end
 

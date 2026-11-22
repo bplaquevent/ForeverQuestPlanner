@@ -167,6 +167,7 @@ local follow = 0
 for _, t in ipairs(P.tasks) do if t.dep then follow = follow + 1 end end
 print(string.format("Candidate quests: %d (%d follow-ups), %d skipped; custom list: %d quests",
   #P.tasks, follow, P.skipped or 0, P.custom and #(P.custom.tasks or P.custom.list or {}) or 0))
+if P.buildSeconds then print(string.format("  quests prepared in game in %.1f s", P.buildSeconds)) end
 
 -- A Roadbook of the current planner, evaluated by the solver: legacy accounting (must match the
 -- game's times), then the full model.
@@ -218,8 +219,8 @@ end
 ---------------------------------------------------------------------------
 -- Optimizer, compared with the automatic Roadbook of the current planner (same goal).
 ---------------------------------------------------------------------------
--- Custom list made of captured quests: their steps in order (pick-up first, turn-in last), a follow-up
--- after the quest it follows when both are in the list.
+-- Custom list made of captured quests: their steps with the auto Roadbook's order rules (pick-up first,
+-- free objectives in any order, fixed ones at their place, turn-in last).
 local function CustomFrom(n)
   local out, byN, ci = { tasks = {}, steps = {}, pred = {} }, {}, 0
   for _, t in ipairs(P.tasks) do
@@ -236,11 +237,11 @@ local function CustomFrom(n)
         out.steps[ci] = st
         list[k] = st
       end
+      S.Ranks(list)
       for k, st in ipairs(list) do
         local pred = {}
-        if t.kind == "take" and k > 1 then pred[#pred + 1] = list[1].ci end
-        if k == #list then
-          for j = 1, #list - 1 do pred[#pred + 1] = list[j].ci end
+        for _, o in ipairs(list) do
+          if o.rank < st.rank then pred[#pred + 1] = o.ci end
         end
         if st.glue and k > 1 then st.glueTo = list[k - 1].ci end
         out.pred[st.ci] = pred

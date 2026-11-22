@@ -227,10 +227,25 @@ function S.KnownKey(known)
   return table.concat(ids, ",")
 end
 
+-- Transport skipped by the player (P.ban = { mode, from = departure point, to = arrival point }):
+-- a flight ("vol") bans every flight leaving the flight master at `from`, a boat or zeppelin its
+-- line from the dock at `from` to the dock at `to`.
+S.BAN_RADIUS = 200 -- yards
+function S.Near(a, b, r)
+  local d = S.Dist(a, b)
+  return d ~= nil and d < r
+end
+
+function S.BanKey(ban)
+  if not ban then return "" end
+  local function pt(p) return p and string.format("%s:%.0f:%.0f", tostring(p.c), p.x or 0, p.y or 0) or "-" end
+  return "#" .. tostring(ban.mode) .. pt(ban.from) .. pt(ban.to)
+end
+
 -- Transport network with the flight nodes `known`: hubs (flight masters, docks) and shortest
--- paths between them (Floyd-Warshall). Cached by set of known nodes and speed.
-function S.Network(W, known, speed)
-  local key = S.KnownKey(known) .. "@" .. speed
+-- paths between them (Floyd-Warshall). Cached by set of known nodes, speed and banned transport.
+function S.Network(W, known, speed, ban)
+  local key = S.KnownKey(known) .. "@" .. speed .. S.BanKey(ban)
   local net = W.nets[key]
   if net then return net end
   local k = W.k
@@ -251,7 +266,8 @@ function S.Network(W, known, speed)
   for i = 1, n do
     D[i], nxt[i], via[i] = {}, {}, {}
     local a = hubs[i]
-    local fd = a.node and S.FlightDists(W, a.node, known) or nil
+    local banned = ban and ban.mode == "vol" and a.node and S.Near(a.p, ban.from, S.BAN_RADIUS)
+    local fd = a.node and not banned and S.FlightDists(W, a.node, known) or nil
     for j = 1, n do
       nxt[i][j] = j
       if i == j then
@@ -272,7 +288,9 @@ function S.Network(W, known, speed)
   end
   for _, l in ipairs(W.links) do
     local i, j = dockIndex[l[1]], dockIndex[l[2]]
-    if i and j and k.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = k.TRANSPORT_TIME, l[3] end
+    local banned = ban and ban.mode ~= "vol" and i and j and S.Near(hubs[i].p, ban.from, S.BAN_RADIUS)
+      and S.Near(hubs[j].p, ban.to, S.BAN_RADIUS)
+    if i and j and not banned and k.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = k.TRANSPORT_TIME, l[3] end
   end
   for m = 1, n do
     local Dm = D[m]
@@ -426,6 +444,8 @@ function S.Evaluate(P, route, opts)
   local pl = P.player
   local known = S.KnownStart(P)
   local net = S.Network(W, known, pl.speed)
+  -- Transport skipped by the player: not usable on the first leg only (P.ban).
+  local banNet = P.ban and S.Network(W, known, pl.speed, P.ban)
   local level, xp, rested = pl.level, pl.xp or 0, pl.rested or 0
   local need = pl.xpMax or Needed(P, level)
   local bind = P.world.bind
@@ -467,7 +487,7 @@ function S.Evaluate(P, route, opts)
         end
       end
     else
-      move = S.Travel(W, net, lvNow, pos, st.p)
+      move = S.Travel(W, (i == 2 and banNet) or net, lvNow, pos, st.p)
     end
     t = t + move + (st.work or 0)
     pos = dest
@@ -628,6 +648,7 @@ S.clock = nil            -- set by the caller: function returning seconds (time 
 
 S.OPT = {
   TOP_K = 25,         -- chains of quests fully evaluated at each addition (the best by the quick estimate)
+  ADD_POOL = 100,     -- quests inserted (quick estimate) at each addition, after a sort by distance
   CHAIN_DEPTH = 2,    -- follow-ups added with a quest at once
   MAX_SEGMENT = 6,    -- longest block of steps moved at once
   OVERSHOOT = 1.15,   -- time goal: the construction may go this far beyond the time
@@ -640,24 +661,92 @@ S.OPT = {
   BUILD_SHARE = 0.5,  -- share of the budget the first construction may use
 }
 
--- Indexes of the problem: tasks by number, follow-ups, steps (task number, index, required level).
+-- Objective that can be done in any order with the other ones of its quest: monsters to kill, items to
+-- loot, objects to use. Talking to an NPC, an event or a place to reach (often "use the item there"),
+-- an escort: kept at their place among the objectives (S.Ranks).
+function S.FreeObjective(st)
+  return st.kind == "obj" and not st.escort and st.obj ~= nil and not st.obj.fixed
+    and (st.obj.kind == "kill" or st.obj.kind == "item" or st.obj.kind == "object")
+end
+
+-- Order rank of the steps of a quest (in their planned order): pick-up 0; free objectives share the
+-- rank of their group, a fixed objective starts a new rank; turn-in last. A step needs every step
+-- of a lower rank done before it. Sets st.rank and st.below (steps of a lower rank).
+function S.Ranks(stops)
+  local r = 0
+  for _, st in ipairs(stops) do
+    if st.kind == "take" then
+      st.rank = 0
+    elseif st.kind == "turnin" then
+      st.rank = r + 1
+    elseif S.FreeObjective(st) then
+      if r % 2 == 0 then r = r + 1 end
+      st.rank = r
+    else
+      r = r + (r % 2 == 0 and 2 or 1)
+      st.rank = r
+    end
+  end
+  for _, st in ipairs(stops) do
+    local below = 0
+    for _, o in ipairs(stops) do
+      if o.rank < st.rank then below = below + 1 end
+    end
+    st.below = below
+  end
+end
+
+-- Hunting spots of an objective step (st.spots: the densest ones, with their hunting time): one variant
+-- of the step per spot, sharing st.variants. The original step (spot chosen when the problem was
+-- built) is the first one; the "spots" move swaps them.
+function S.Variants(st)
+  if not st.spots or st.variants then return end
+  st.variants = { st }
+  for _, alt in ipairs(st.spots) do
+    local d = S.Dist(alt.p, st.p)
+    if not (d and d < 30) then
+      local v = {}
+      for key, x in pairs(st) do v[key] = x end
+      v.p, v.work, v.alt = alt.p, alt.work, alt
+      table.insert(st.variants, v)
+    end
+  end
+end
+
+-- Indexes of the problem: tasks by number, follow-ups, steps (task number, index, order rank,
+-- required level, hunting spot variants), estimated value of each quest with its best follow-ups.
 function S.PrepareTasks(P)
   if P.byN then return end
   P.byN, P.followers = {}, {}
   for _, t in ipairs(P.tasks or {}) do
     P.byN[t.n] = t
-    local value = (t.xp or 0)
+    local value, work = (t.xp or 0), 0
     for k, st in ipairs(t.stops) do
       st.tn, st.k = t.n, k
-      if k == 1 and t.kind == "take" then st.reqLevel = t.reqLevel end
+      if st.kind == "take" and t.kind == "take" then st.reqLevel = t.reqLevel end -- every place to check
       if st.kind == "obj" then value = value + (st.xp or 0) end
+      work = work + (st.work or 0)
     end
-    t.estValue = value
+    S.Ranks(t.stops)
+    for _, st in ipairs(t.stops) do S.Variants(st) end
+    t.estValue, t.work = value, work
     if t.dep then
       P.followers[t.dep] = P.followers[t.dep] or {}
       table.insert(P.followers[t.dep], t.n)
     end
   end
+  -- Value with the best chain of follow-ups (CHAIN_DEPTH): a quest leading to good ones is considered.
+  local function chain(t, depth)
+    local best = 0
+    if depth < S.OPT.CHAIN_DEPTH then
+      for _, fn in ipairs(P.followers[t.n] or {}) do
+        local v = chain(P.byN[fn], depth + 1)
+        if v > best then best = v end
+      end
+    end
+    return (t.estValue or 0) + best
+  end
+  for _, t in ipairs(P.tasks or {}) do t.chainValue = chain(t, 0) end
 end
 
 -- Quick travel estimate (network and level at the start), for ranking only.
@@ -701,23 +790,24 @@ function S.InsertTask(P, core, t)
   return r, delta
 end
 
--- Order rules: a quest's steps in their order (escort steps right after the previous one), a follow-up
--- picked up after the turn-in of the quest it follows.
+-- Order rules: each step of a quest after the steps of a lower rank (S.Ranks: pick-up first, free
+-- objectives in any order, fixed ones at their place, turn-in last), escort steps right after the
+-- previous step, a follow-up started after the turn-in of the quest it follows.
 function S.Valid(P, core)
-  local nextK, done = {}, {}
+  local seen, done = {}, {}
   for i = 2, #core do
     local s = core[i]
     if s.tn then
-      local k = nextK[s.tn] or 1
-      if s.k ~= k then return false end
+      local c = seen[s.tn] or 0
+      if c < s.below then return false end
       local t = P.byN[s.tn]
-      if k == 1 and t.dep and not done[t.dep] then return false end
-      if s.glue and k > 1 then
+      if c == 0 and t.dep and not done[t.dep] then return false end
+      if s.glue and s.k > 1 then
         local prev = core[i - 1]
-        if prev.tn ~= s.tn or prev.k ~= k - 1 then return false end
+        if prev.tn ~= s.tn or prev.k ~= s.k - 1 then return false end
       end
-      nextK[s.tn] = k + 1
-      if k == #t.stops then done[s.tn] = true end
+      seen[s.tn] = c + 1
+      if c + 1 == #t.stops then done[s.tn] = true end
     end
   end
   return true
@@ -739,9 +829,31 @@ end
 -- by the quick estimate and sorted by estimated XP per second.
 function S.Additions(P, core)
   local tasks, ids = Contents(core)
-  local out = {}
+  -- Quick sort of every quest that can be added: value with its follow-ups per second of its work plus
+  -- a round trip from the nearest step of the route; only the best ADD_POOL ones are inserted.
+  local pts = {}
+  for _, st in ipairs(core) do pts[#pts + 1] = st.p end
+  local k, speed = P.k, P.player.speed
+  local pool = {}
   for _, t in ipairs(P.tasks) do
     if not tasks[t.n] and not (t.id and ids[t.id]) and (not t.dep or tasks[t.dep]) then
+      local d
+      for _, s in ipairs(t.stops) do
+        for _, q in ipairs(pts) do
+          local x = S.Dist(s.p, q)
+          if x and (not d or x < d) then d = x end
+        end
+      end
+      local cost = (t.work or 0) + (d and 2 * d * (k.PATH_FACTOR or 1.35) / speed or 2 * (k.CROSS_CONTINENT or 480))
+      pool[#pool + 1] = { t = t, score = (t.chainValue or 0) / math.max(cost, 30) }
+    end
+  end
+  table.sort(pool, function(a, b) return a.score > b.score end)
+  for i = #pool, S.OPT.ADD_POOL + 1, -1 do pool[i] = nil end
+  local out = {}
+  for _, e in ipairs(pool) do
+    local t = e.t
+    do
       local c, delta, value = core, 0, 0
       local chainIds, cur = {}, t
       for depth = 0, S.OPT.CHAIN_DEPTH do
@@ -901,6 +1013,9 @@ function S.Optimize(P, goal, opts)
   P.net0 = P.net0 or S.Network(W, S.KnownStart(P), P.player.speed)
   goal = S.Goal(P, goal)
   local custom = goal == "custom"
+  if custom then
+    for _, st in ipairs(P.custom.steps) do S.Variants(st) end
+  end
   local valid = custom and S.ValidCustom or S.Valid
   local t0 = S.clock and S.clock() or 0
   local evals = 0
@@ -1044,6 +1159,25 @@ function S.Optimize(P, goal, opts)
     return any
   end
 
+  -- Hunting spots: each objective step tried at its other dense spots; kept when the route gets better
+  -- (the detour from the route against the hunting time there).
+  local function spots()
+    local any = false
+    for i = 2, #core do
+      if out() then break end
+      local st = core[i]
+      for _, v in ipairs(st and st.variants or {}) do
+        if v ~= core[i] then
+          local c = {}
+          for k, x in ipairs(core) do c[k] = x end
+          c[i] = v
+          if try(c) then any = true end
+        end
+      end
+    end
+    return any
+  end
+
   -- Flight paths activated on the way: an unknown flight master near a step, visited after it.
   local function flightMasters()
     if P.player.settings and P.player.settings.noFMDetour then return false end
@@ -1090,7 +1224,8 @@ function S.Optimize(P, goal, opts)
     repeat
       rounds = rounds + 1
       local improved = false
-      local moves = custom and { relocate, flightMasters, binds } or { relocate, remove, add, swap, flightMasters, binds }
+      local moves = custom and { relocate, spots, flightMasters, binds }
+        or { relocate, spots, remove, add, swap, flightMasters, binds }
       for _, move in ipairs(moves) do
         if out() then break end
         if move() then improved = true end

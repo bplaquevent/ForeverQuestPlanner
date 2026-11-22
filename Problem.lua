@@ -8,17 +8,36 @@
 local ADDON_NAME, ns = ...
 local BuildScanContext, BuildTasks, CharKey, Geo, K, L = ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.Geo, ns.K, ns.L
 local OM, PlayerPos, Print, QDB, QGet, Settings = ns.OM, ns.PlayerPos, ns.Print, ns.QDB, ns.QGet, ns.Settings
-local StartScan, State, TravelSpeed, scan = ns.StartScan, ns.State, ns.TravelSpeed, ns.scan
+local StartScan, State, TravelSpeed, UnitTime, scan = ns.StartScan, ns.State, ns.TravelSpeed, ns.UnitTime, ns.scan
 
 local Pb = {}
 K.BENCH_VERSION = 2
 K.BENCH_MAX_TASKS = 2000 -- safety: candidate quests and follow-ups, at most
 K.BENCH_MARGIN = 2       -- capture: map cells added around the points
+K.SPOT_ALTS = 8          -- hunting spots offered to the solver for an objective (the densest ones)
 
 function Pb.Point(p)
   if not p then return nil end
   return { c = p.c, x = p.x, y = p.y, area = p.area, ui = p.ui, mx = p.mx, my = p.my, zoneName = p.zoneName,
     instance = p.instance, teleport = p.teleport, cast = p.cast }
+end
+
+-- Hunting spots of an objective step (monsters to kill or to loot): the densest ones, each with the
+-- time it takes there (density: less walking between fights). The solver picks the one costing the
+-- least with the route around it (detour + hunting). nil: one place only.
+function Pb.Spots(st, live)
+  local r = st.r
+  if st.kind ~= "obj" or st.escort or not (r and r.tg and r.tg.mobIds) then return nil end
+  local spots = Geo.Spots(r.tg)
+  if not spots or #spots < 2 then return nil end
+  local kills = r.tg.kind == "item" and r.count * Geo.KillsPerItem(r.tg) or r.count
+  local out = {}
+  for i = 1, math.min(#spots, K.SPOT_ALTS) do
+    local sp = spots[i]
+    out[i] = { p = Pb.Point(sp.p), n = sp.n, work = r.count * UnitTime(r.tg) * Geo.SpotFactor(sp, kills),
+      spot = live and sp or nil }
+  end
+  return out
 end
 
 -- A route step or a quest step: what the solver needs to evaluate it. live: keeps the game step (src).
@@ -29,7 +48,7 @@ function Pb.Step(st, live)
     local tg = st.r.tg
     local kills = (tg.kind == "item" and st.r.count * Geo.KillsPerItem(tg)) or (tg.kind == "kill" and st.r.count) or nil
     o = { kind = tg.kind, name = tg.name, count = st.r.count, kills = kills, mobLevel = tg.mobLevel,
-      elite = tg.elite or nil, rate = tg.rate }
+      elite = tg.elite or nil, rate = tg.rate, fixed = st.afterSource or nil }
   end
   local members
   if st.kind == "dungeon" and t.members then
@@ -39,8 +58,9 @@ function Pb.Step(st, live)
   return { kind = st.kind, p = Pb.Point(st.p), work = st.work, xp = st.xp, id = t.id, title = t.title, obj = o,
     glue = st.glue or nil, escort = st.escort or nil, via = st.via, bindDest = st.bindDest,
     fmNode = st.fmNode or (st.fmHub and st.fmHub.node) or nil, legacyFM = st.fmHub and true or nil,
-    spotN = st.spot and st.spot.n, at = st.at, mode = t.mode, members = members, inside = st.inside and true or nil,
-    reqLevel = st.kind == "take" and not t.levelWarn and t.reqLevel or nil, src = live and st or nil }
+    spotN = st.spot and st.spot.n, at = st.at, search = st.search, mode = t.mode, members = members, inside = st.inside and true or nil,
+    reqLevel = st.kind == "take" and not t.levelWarn and t.reqLevel or nil, src = live and st or nil,
+    spots = Pb.Spots(st, live) }
 end
 
 function Pb.Task(task, n, dep, live)
@@ -62,6 +82,7 @@ end
 -- Candidate quests of the automatic Roadbook (quest log, available ones) and, depth first, every
 -- follow-up they unlock (dep = number of the quest it follows).
 function Pb.Tasks(P, pos, plevel, live)
+  local t0 = debugprofilestop()
   Geo.laterList, Geo.laterCache = {}, {}
   local tasks, skipped = BuildTasks(pos, plevel)
   local ctx = BuildScanContext()
@@ -76,6 +97,7 @@ function Pb.Tasks(P, pos, plevel, live)
   end
   for _, task in ipairs(tasks) do add(task, nil) end
   P.tasks, P.skipped, P.later = list, skipped, Geo.laterList
+  P.buildSeconds = (debugprofilestop() - t0) / 1000 -- wall time, frames included
 end
 
 -- Custom list as the game plans it: its quests, dungeon visits and order rules.
@@ -153,6 +175,23 @@ function Pb.Custom(P, cp, live)
         if ci[p] then l[#l + 1] = ci[p] end
       end
       out.pred[ci[s]] = l
+    end
+  end
+  -- Objectives of a quest (outside dungeons): talking, events, places, escorts keep their place among
+  -- them; the others in any order (Solver.Ranks).
+  for _, task in ipairs(cp.tasks) do
+    local objs = {}
+    for _, s in ipairs(task.stops or {}) do
+      if s.kind == "obj" and ci[s] then objs[#objs + 1] = out.steps[ci[s]] end
+    end
+    ns.Solver.Ranks(objs)
+    for _, a in ipairs(objs) do
+      for _, b in ipairs(objs) do
+        if b.rank < a.rank then
+          out.pred[a.ci] = out.pred[a.ci] or {}
+          table.insert(out.pred[a.ci], b.ci)
+        end
+      end
     end
   end
   P.custom = out

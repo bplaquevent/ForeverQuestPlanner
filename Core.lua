@@ -539,8 +539,12 @@ local function GetObjectives(questID)
   return out
 end
 
--- Quest description text (requires "selecting" it in the quest log).
+-- Quest description text (requires "selecting" it in the quest log). Kept per quest: selecting quests
+-- of the game's quest log from the addon taints Blizzard's quest UI, so it is done once per quest.
+local questTexts = {} -- questID -> { desc, objText }
 local function GetQuestTexts(questID)
+  local cached = questTexts[questID]
+  if cached then return cached[1], cached[2] end
   if not (C_QuestLog.SetSelectedQuest and GetQuestLogQuestText) then return nil, nil end
   local previous = C_QuestLog.GetSelectedQuest and C_QuestLog.GetSelectedQuest()
   local ok, desc, objText = pcall(function()
@@ -548,7 +552,10 @@ local function GetQuestTexts(questID)
     return GetQuestLogQuestText()
   end)
   if previous and previous ~= 0 then pcall(C_QuestLog.SetSelectedQuest, previous) end
-  if ok then return desc, objText end
+  if ok then
+    if desc and desc ~= "" then questTexts[questID] = { desc, objText } end
+    return desc, objText
+  end
   return nil, nil
 end
 

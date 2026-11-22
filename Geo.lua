@@ -213,6 +213,51 @@ local function StartPoints(id)
   return pts
 end
 
+-- Places where the quest giver may stand: one NPC (the only giver) whose spawns are in several places
+-- far apart (it moves between them). Each place is one step to check in the Roadbook. Several NPCs
+-- or objects can each start it: the nearest one is enough (nil then, as for a single place).
+K.START_MERGE = 150     -- yards: spawns this close are the same place
+K.START_PLACES_MAX = 5  -- places checked, at most (the nearest to `from`)
+function Geo.StartPlaces(id, from)
+  local by = QGet(QDB.Quest, id, "startedBy")
+  if type(by) ~= "table" or #(by[2] or {}) > 0 or #(by[1] or {}) ~= 1 then return nil end
+  Geo.startPlaces = Geo.startPlaces or {}
+  local places = Geo.startPlaces[id]
+  if places == nil then
+    places = {}
+    local spawns = QGet(QDB.Npc, by[1][1], "spawns")
+    for zone, list in pairs(type(spawns) == "table" and spawns or {}) do
+      for _, sp in ipairs(type(list) == "table" and list or {}) do
+        local w = type(sp) == "table" and sp[1] and sp[1] >= 0 and WorldPos(zone, sp[1], sp[2])
+        if w then
+          local merged = false
+          for _, pl in ipairs(places) do
+            if pl.c == w.c and math.abs(pl.x - w.x) < K.START_MERGE and math.abs(pl.y - w.y) < K.START_MERGE then
+              merged = true
+              break
+            end
+          end
+          if not merged then places[#places + 1] = w end
+        end
+      end
+    end
+    if #places < 2 then places = false end
+    Geo.startPlaces[id] = places
+  end
+  if not places then return nil end
+  local list = {}
+  for i, pl in ipairs(places) do list[i] = pl end
+  if from then
+    local function d(p)
+      local dx, dy = p.x - from.x, p.y - from.y
+      return (p.c == from.c) and math.sqrt(dx * dx + dy * dy) or math.huge
+    end
+    table.sort(list, function(a, b) return d(a) < d(b) end)
+  end
+  for i = #list, K.START_PLACES_MAX + 1, -1 do list[i] = nil end
+  return list
+end
+
 local function Dist(a, b)
   if not a or not b or a.c ~= b.c then return nil end
   local dx, dy = a.x - b.x, a.y - b.y
@@ -425,6 +470,27 @@ function Geo.IsShip(mode)
 end
 
 -- Docks of the character's faction and the lines between them (directed), built once.
+-- Name of a dock: the town it serves (nearest flight node of any faction, "Orgrimmar, Durotar" ->
+-- "Orgrimmar"), else its zone, else the line's name.
+K.DOCK_TOWN = 1200 -- yards: a flight node this close names the dock
+function Geo.DockName(c, x, y, route)
+  local best, bd
+  for id, n in pairs(OM.flights.nodes) do
+    if n[2] == c then
+      local dx, dy = n[3] - x, n[4] - y
+      local d = math.sqrt(dx * dx + dy * dy)
+      if d < K.DOCK_TOWN and (not bd or d < bd) then best, bd = id, d end
+    end
+  end
+  if best then
+    local name = Geo.NodeName(best)
+    if name and name ~= "?" then return (name:match("^(.-),") or name) end
+  end
+  local ok, ui = pcall(C_Map.GetMapPosFromWorldPos, c, CreateVector2D(x, y))
+  local info = ok and ui and C_Map.GetMapInfo(ui)
+  return info and info.name or route
+end
+
 function Geo.Docks()
   if Geo.docks then return Geo.docks end
   local faction = UnitFactionGroup and UnitFactionGroup("player")
@@ -433,11 +499,7 @@ function Geo.Docks()
     for i, d in ipairs(docks) do
       if d.p.c == c and math.abs(d.p.x - x) < K.DOCK_MERGE and math.abs(d.p.y - y) < K.DOCK_MERGE then return i end
     end
-    local zone
-    local ok, ui = pcall(C_Map.GetMapPosFromWorldPos, c, CreateVector2D(x, y))
-    local info = ok and ui and C_Map.GetMapInfo(ui)
-    zone = info and info.name or route
-    docks[#docks + 1] = { name = (K.MODE_NAME[mode] or mode) .. " (" .. zone .. ")", p = { c = c, x = x, y = y } }
+    docks[#docks + 1] = { name = Geo.DockName(c, x, y, route), p = { c = c, x = x, y = y } }
     return #docks
   end
   for _, t in ipairs(OM.places.transports) do
@@ -449,8 +511,9 @@ function Geo.Docks()
       links[#links + 1] = { a, b, mode }
     end
   end
-  Geo.docks = { docks = docks, links = links }
-  return Geo.docks
+  local dk = { docks = docks, links = links }
+  if Geo.taxiNames then Geo.docks = dk end -- the game's town names known: kept for the session
+  return dk
 end
 
 ---------------------------------------------------------------------------
@@ -743,7 +806,8 @@ end
 -- Transport point graph + shortest paths (Floyd-Warshall, about fifty nodes).
 -- extra: flight masters not learned yet, used as if their flight path were activated
 -- ({ name, p, node }, custom Roadbook: flight paths activated on the way).
-local function BuildNetwork(speed, extra)
+-- ban: transport skipped by the player, left out (Solver.Network: same rule).
+local function BuildNetwork(speed, extra, ban)
   local hubs = {}
   local learned = {}
   for id in pairs((Geo.KnownNodes())) do learned[id] = true end
@@ -769,7 +833,8 @@ local function BuildNetwork(speed, extra)
   for i = 1, n do
     D[i], nxt[i], via[i] = {}, {}, {}
     local a = hubs[i]
-    local fd = (a.kind == "taxi" and a.node) and Geo.FlightDists(a.node, learned) or nil
+    local banned = ban and ban.mode == "vol" and a.kind == "taxi" and ns.Solver.Near(a.p, ban.from, ns.Solver.BAN_RADIUS)
+    local fd = (a.kind == "taxi" and a.node and not banned) and Geo.FlightDists(a.node, learned) or nil
     for j = 1, n do
       nxt[i][j] = j
       if i == j then
@@ -790,7 +855,9 @@ local function BuildNetwork(speed, extra)
   end
   for _, l in ipairs(dk.links) do
     local i, j = dockIndex[l[1]], dockIndex[l[2]]
-    if i and j and K.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = K.TRANSPORT_TIME, l[3] end
+    local banned = ban and ban.mode ~= "vol" and i and j and ns.Solver.Near(hubs[i].p, ban.from, ns.Solver.BAN_RADIUS)
+      and ns.Solver.Near(hubs[j].p, ban.to, ns.Solver.BAN_RADIUS)
+    if i and j and not banned and K.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = K.TRANSPORT_TIME, l[3] end
   end
   for k = 1, n do
     local Dk = D[k]
@@ -931,6 +998,27 @@ function Geo.IsEscort(id)
   return v
 end
 
+-- Target of an item to collect: where it drops (monsters, objects), with the average drop rate.
+function Geo.AddItemTarget(add, itemId)
+  -- Drop rate: average over the monsters, each weighted by its number of spawns (the ones met).
+  local pts, rateSum, rateN = {}, 0, 0
+  local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
+  for i = 1, math.min(#npcs, 6) do
+    local spawns = EntityPoints("npc", npcs[i])
+    for _, p in ipairs(spawns) do pts[#pts + 1] = p end
+    local r = DropRate(itemId, npcs[i])
+    if r and #spawns > 0 then rateSum, rateN = rateSum + r * #spawns, rateN + #spawns end
+  end
+  local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
+  for i = 1, math.min(#objs, 6) do
+    for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
+  end
+  local kind = (#npcs == 0 and #objs > 0) and "object" or "item"
+  local ids = {}
+  for i = 1, math.min(#npcs, 6) do ids[#ids + 1] = npcs[i] end
+  add(kind, QGet(QDB.Item, itemId, "name"), pts, rateN > 0 and rateSum / rateN or nil, npcs[1], #ids > 0 and ids or nil)
+end
+
 -- Static quest targets: located objectives, start, end.
 local function QuestTargets(id)
   local t = Geo.targets[id]
@@ -967,31 +1055,20 @@ local function QuestTargets(id)
     for _, o in ipairs(obj[2] or {}) do
       add("object", QGet(QDB.Object, o[1], "name"), EntityPoints("object", o[1]))
     end
-    for _, o in ipairs(obj[3] or {}) do
-      local itemId = o[1]
-      -- Drop rate: average over the monsters, each weighted by its number of spawns (the ones met).
-      local pts, rateSum, rateN = {}, 0, 0
-      local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
-      for i = 1, math.min(#npcs, 6) do
-        local spawns = EntityPoints("npc", npcs[i])
-        for _, p in ipairs(spawns) do pts[#pts + 1] = p end
-        local r = DropRate(itemId, npcs[i])
-        if r and #spawns > 0 then rateSum, rateN = rateSum + r * #spawns, rateN + #spawns end
-      end
-      local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
-      for i = 1, math.min(#objs, 6) do
-        for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
-      end
-      local kind = (#npcs == 0 and #objs > 0) and "object" or "item"
-      local ids = {}
-      for i = 1, math.min(#npcs, 6) do ids[#ids + 1] = npcs[i] end
-      add(kind, QGet(QDB.Item, itemId, "name"), pts, rateN > 0 and rateSum / rateN or nil, npcs[1], #ids > 0 and ids or nil)
-    end
+    for _, o in ipairs(obj[3] or {}) do Geo.AddItemTarget(add, o[1]) end
     for _, o in ipairs(obj[5] or {}) do
       if type(o) == "table" and o[2] then
         add("kill", o[3] or QGet(QDB.Npc, o[2], "name"), EntityPoints("npc", o[2]), nil, o[2])
       end
     end
+  end
+  -- Items needed but not counted by the quest (QuestieDB requiredSourceItems: "bring the remains
+  -- to the grave"): one target where each drops, done before the objectives that use it.
+  local srcIds = {}
+  local given, objItems = QGet(QDB.Quest, id, "sourceItemId"), {}
+  for _, o in ipairs(type(obj) == "table" and obj[3] or {}) do objItems[o[1]] = true end
+  for _, itemId in ipairs(QGet(QDB.Quest, id, "requiredSourceItems") or {}) do
+    if itemId ~= given and not objItems[itemId] then srcIds[#srcIds + 1] = itemId end
   end
   local trig = QGet(QDB.Quest, id, "triggerEnd")
   if type(trig) == "table" and type(trig[2]) == "table" then
@@ -1004,6 +1081,13 @@ local function QuestTargets(id)
     end
     add("explore", trig[1], pts)
   end
+  local nPlaced, nCalls = #t, calls -- objectives (without the source items)
+  for _, itemId in ipairs(srcIds) do
+    local before = #t
+    Geo.AddItemTarget(add, itemId)
+    if #t > before then t[#t].sourceItem = itemId end
+  end
+  local hasSource = #t > nPlaced
   -- Quantities read from the objective text ("Kill 8 ogres…"), default values otherwise.
   local texts, nums = QGet(QDB.Quest, id, "objectivesText"), {}
   if type(texts) == "table" then
@@ -1015,9 +1099,11 @@ local function QuestTargets(id)
     end
   end
   for i, tg in ipairs(t) do
-    tg.defaultCount = nums[i] or ((tg.kind == "kill" or tg.kind == "item") and 6 or 1)
+    tg.defaultCount = tg.sourceItem and 1 or nums[i] or ((tg.kind == "kill" or tg.kind == "item") and 6 or 1)
+    -- Objective done at a place with the source item (object, NPC, area): after the item.
+    if hasSource and not tg.sourceItem and tg.kind ~= "kill" and tg.kind ~= "item" then tg.needsSource = true end
   end
-  t.missing = calls - #t -- objectives without a known position in QuestieDB
+  t.missing = nCalls - nPlaced -- objectives without a known position in QuestieDB (source items apart)
   t.start = StartPoints(id)
   t.finish = GiverPoints(QGet(QDB.Quest, id, "finishedBy"))
   Geo.targets[id] = t
@@ -1030,14 +1116,18 @@ local function RemainingTargets(q, t)
   local objs = (q and q.objectives) or {}
   for i, tg in ipairs(t) do
     local match
-    if tg.name then
+    if tg.sourceItem then
+      match = -1 -- not a game objective: needed while it is not in the bags
+    elseif tg.name then
       for j, o in ipairs(objs) do
         if not used[j] and o.text and o.text:find(tg.name, 1, true) then match = j break end
       end
     end
     if not match and objs[i] and not used[i] then match = i end
     local count = tg.defaultCount
-    if match then
+    if match == -1 then
+      if (GetItemCount(tg.sourceItem) or 0) > 0 then count = 0 end
+    elseif match then
       used[match] = true
       local o = objs[match]
       if o.finished or (o.need and o.have and o.need > 0 and o.have >= o.need) then
@@ -1047,6 +1137,13 @@ local function RemainingTargets(q, t)
       end
     end
     if count > 0 then out[#out + 1] = { tg = tg, count = count } end
+  end
+  -- Objectives that used the source items all done (items given away): they are no longer needed.
+  local needs, users = false, false
+  for _, tg in ipairs(t) do if tg.needsSource then users = true end end
+  for _, r in ipairs(out) do if r.tg.needsSource then needs = true end end
+  if users and not needs then
+    for i = #out, 1, -1 do if out[i].tg.sourceItem then table.remove(out, i) end end
   end
   -- Unfinished game objectives that no QuestieDB target locates: the quest cannot be
   -- planned correctly (otherwise it would show as "to turn in" while still in progress).

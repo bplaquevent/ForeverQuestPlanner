@@ -77,6 +77,7 @@ f:SetScript("OnEvent", function(_, event, ...)
     or event == "SPELLS_CHANGED" then
     Geo.recallDest = nil
     pcall(CP.ScheduleRecallCheck, 3)
+    if event == "BAG_UPDATE_DELAYED" then pcall(CP.OnGameEvent, event) end -- source item looted
   elseif event == "HEARTHSTONE_BOUND" then
     -- New inn: position of the innkeeper targeted by the Roadbook, otherwise ours.
     local s = CP.focused
@@ -115,11 +116,21 @@ f:SetScript("OnEvent", function(_, event, ...)
       end
     end)
   elseif event == "UPDATE_FACTION" or event == "SKILL_LINES_CHANGED" then
+    if event == "SKILL_LINES_CHANGED" then f.skillChanged = true end
     if not f.rescanPending then
       f.rescanPending = true
       C_Timer.After(10, function()
         f.rescanPending = nil
         scan.dirty = true
+        -- Profession level up: a quest waiting for it can be turned in (quick win near the route).
+        local kind = Geo.ActiveKind()
+        local skill = f.skillChanged
+        f.skillChanged = nil
+        if skill and Geo.Tracking() and Geo.frozen[kind] then
+          local ok, n = pcall(Geo.InjectQuickWins, kind)
+          if ok and n and n > 0 then Refresh() end
+          pcall(CP.RefreshButton)
+        end
         if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "xp" and State.currentTab ~= "custom" then Refresh() end
       end)
     end

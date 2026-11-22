@@ -371,7 +371,7 @@ end
 -- A far level is reached in stages: one computation plans at most this much, then "Generate"
 -- at the end of the Roadbook computes the next stage (with the real XP and flight paths).
 K.LEVEL_PLAN_MAX_TIME = 40 * 3600 -- level goal: longest Roadbook computed
-K.PLAN_TIME = 12                  -- seconds of computation for a Roadbook, at most (solver budget)
+K.PLAN_TIME = 30                  -- seconds of computation for a Roadbook, at most (solver budget, shown in the waiting messages)
 
 -- Runs the solver (Solver.lua) on a problem (Geo.Problem), inside the computation coroutine.
 function Geo.Solve(P, goal)
@@ -393,6 +393,9 @@ function Geo.FromSolver(P, sroute, res)
     local st = s.src
     if st then
       if st.kind == "obj" or st.kind == "turnin" then st.xp = res.rawXP[i] end
+      if s.alt and s.alt.spot then -- another hunting spot chosen by the solver
+        st.p, st.spot, st.work = s.alt.spot.p, s.alt.spot, s.work
+      end
     elseif s.kind == "hearth" and srcByKey[tostring(s.via)] then
       st = Geo.RecallStep(srcByKey[tostring(s.via)], s.p, s.gain)
     elseif s.kind == "bind" then
@@ -408,7 +411,12 @@ function Geo.FromSolver(P, sroute, res)
   end
   local cache = {}
   local nets = Geo.RouteNets(route, pl.speed, pl.level, cache)
-  local okT, withT = pcall(Geo.AddTransportStops, route, function(k) return nets[k].net end, pl.level)
+  -- Transport skipped by the player (P.ban): left out of the first leg only.
+  local banNet = P.ban and BuildNetwork(pl.speed, nil, P.ban)
+  local okT, withT = pcall(Geo.AddTransportStops, route, function(k)
+    if k == 2 and banNet then return banNet end
+    return nets[k].net
+  end, pl.level)
   if not okT then Print(L["Transport steps error: "] .. tostring(withT)) end
   if okT and withT then route = withT end
   for i = 2, #route do route[i].at = route[i].at or route[i - 1].at or 0 end -- boardings: on the way
@@ -423,7 +431,8 @@ function Geo.FromSolver(P, sroute, res)
   return route, info
 end
 
-local function PlanXP(goal)
+-- opts (adapting a Roadbook): ban = transport not usable on the first leg (Solver: P.ban).
+local function PlanXP(goal, opts)
   Geo.PreloadRewardItems()
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
@@ -433,6 +442,7 @@ local function PlanXP(goal)
   Geo.xpScale = nil
   Geo.planSpeed = TravelSpeed()
   local P = Geo.Problem("auto", pos)
+  P.ban = opts and opts.ban
   local opt = Geo.Solve(P, goal)
   local route, info = Geo.FromSolver(P, opt.route, opt.res)
   local g = opt.goal
@@ -526,6 +536,15 @@ function Geo.GoalKey(goal)
   return goal.kind .. goal.value
 end
 
+-- Profession levels (a quest waiting for one can be turned in once it is reached).
+function Geo.SkillsKey()
+  local skills = ns.PlayerSkills()
+  local ids = {}
+  for id, v in pairs(skills) do ids[#ids + 1] = id .. ":" .. v end
+  table.sort(ids)
+  return table.concat(ids, ",")
+end
+
 function Geo.PlanKey(goal)
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   local b = Geo.BindStore()[CharKey()]
@@ -536,13 +555,14 @@ function Geo.PlanKey(goal)
   return table.concat({ Geo.GoalKey(goal), table.concat(list, ","), tostring(Settings().noHearth),
     tostring(Settings().noRecallSpells), tostring(Settings().noFMDetour), UnitLevel("player"),
     UnitXP and UnitXP("player") or 0, e and e.updated or "", tostring(scan.entries), TaxiCount(),
-    tostring(b and b.name), tostring(Settings().mountSpeed), Geo.paramsVersion or 0 }, "|")
+    tostring(b and b.name), tostring(Settings().mountSpeed), Geo.paramsVersion or 0, Geo.SkillsKey() }, "|")
 end
 
 -- Returns true if the cached plan is up to date; otherwise starts (or continues) the computation and
 -- calls cb(route, err, info) when done. force = recompute even if the cache is valid.
-function Geo.RequestPlan(goal, cb, force)
-  local key = Geo.PlanKey(goal)
+-- opts: a Roadbook adapted (PlanXP / Geo.PlanCustom), computed apart from the plans of the tabs.
+function Geo.RequestPlan(goal, cb, force, opts)
+  local key = Geo.PlanKey(goal) .. (opts and "|adapt" or "")
   local pos = PlayerPos()
   local cacheField = goal == "custom" and "customCache" or "planCache"
   local c = Geo[cacheField]
@@ -558,8 +578,8 @@ function Geo.RequestPlan(goal, cb, force)
   if Geo.co and Geo.runningKey == key then return false end
   Geo.runningKey = key
   local co = coroutine.create(function()
-    if goal == "custom" then return Geo.PlanCustom() end
-    return PlanXP(goal)
+    if goal == "custom" then return Geo.PlanCustom(opts) end
+    return PlanXP(goal, opts)
   end)
   Geo.co = co
   local function finish(result)

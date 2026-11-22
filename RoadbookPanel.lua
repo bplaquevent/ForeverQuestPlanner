@@ -144,7 +144,8 @@ local function Create()
   panel.count = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   panel.count:SetPoint("TOPLEFT", panel.titleText, "BOTTOMLEFT", 0, -3)
   -- No close button: the panel is shown or hidden from OpenMap's menu only (Geo.MapInit).
-  -- Start / Pause, as the Roadbook tabs' button (hidden while an inactive Roadbook is previewed).
+  -- Start / Pause, as the Roadbook tabs' button; on an inactive Roadbook previewed, Start makes it the
+  -- active one (CP.Start asks first if the other one is followed).
   local startB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   startB:SetSize(66, 20)
   startB:SetPoint("TOPRIGHT", -8, -5)
@@ -276,9 +277,7 @@ function Geo.MapPanelSync()
   UpdateScrollBar(panel.scroll)
   panel.titleText:SetText(kind == "custom" and L["Custom Roadbook"] or L["Auto Roadbook"])
   panel.count:SetText(string.format(L["%d/%d steps done"], done, total))
-  local o, active = Geo.MapOwner(), Geo.ActiveKind()
-  local following = active == kind and Geo.Tracking()
-  panel.startB:SetShown(not (o and o.mode == "preview" and o.kind ~= active))
+  local following = Geo.ActiveKind() == kind and Geo.Tracking()
   panel.startB:SetText(following and L["Pause"] or L["Start"])
   panel.startB:SetEnabled(Geo.computing ~= kind and (following or not Geo.IsFinished(kind)))
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).

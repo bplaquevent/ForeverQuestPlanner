@@ -188,6 +188,9 @@ function Geo.RouteStepItems(items, route, info, remove, query, kind)
       elseif s.kind == "take" then
         kindLabel = Color("80c0ff", L["[Pick up]"])
         action = L["Pick up from "] .. (nameOnly(task.starter) or "?") .. K.DESC_SEP .. PointText(s.p)
+        if s.search then
+          add(D.warn, string.format(L["possible place %d/%d of the quest giver"], s.search.i, s.search.n))
+        end
         if Geo.IsEscort(task.id) then add(D.warn, L["escort: starts right after"]) end
         if task.reqLevel then
           add(D.warn, string.format(task.levelWarn and L["level %d required: not reached by this route"] or L["level %d required"], task.reqLevel))
@@ -243,12 +246,18 @@ function Geo.RouteStepItems(items, route, info, remove, query, kind)
         if CP.StepDone(step) then
           -- step done: checked, no button
           text = text:gsub("^  (%d+%. )", "  %1|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t" .. Color("40ff40", L["[Done] "]), 1)
+        elseif step.search and qid then
+          -- a place where the quest giver may stand: not there, the next place
+          button = { text = L["Not here"], fn = function() CP.SkipStep(step) end,
+            tip = { L["Not here"], L["The quest giver is not at this place: the step is marked done and the Objective button moves to the next place to check."] } }
         elseif qid then
           button = remove(step)
         elseif (step.kind == "hearth" or step.kind == "travel") and step == CP.CurrentFocus() then
           -- only the followed transport step: skipping a later one makes no sense
           button = { text = L["Skip"], fn = function() CP.SkipStep(step) end,
-            tip = { L["Skip"], L["Marks this step as done (already there, other way of travel…); the Objective button moves to the next step."] } }
+            tip = { L["Skip"], step.kind == "travel"
+              and L["Marks this step as done; the steps to come are planned again without this transport for the way to the next step."]
+              or L["Marks this step as done (already there, other way of travel…); the Objective button moves to the next step."] } }
         end
         segItems[#segItems + 1] = { text = text, b3 = button, questID = task.id,
           onClick = function() Geo.ShowStep(step, kind) end }

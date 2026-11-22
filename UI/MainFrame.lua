@@ -135,7 +135,7 @@ local function CreateRoadbookPanel(f, kind)
     if tick < 0.5 then return end
     tick = 0
     local sec = math.floor(t - (Geo.computeStart or t))
-    busySub:SetText(string.format(L["%d s · you can keep playing meanwhile"], sec))
+    busySub:SetText(string.format(L["%d s (up to %d s) · you can keep playing meanwhile"], sec, K.PLAN_TIME))
   end)
   busy:SetScript("OnShow", function() tick = 1 end) -- elapsed time set at once
   xp.busy = busy

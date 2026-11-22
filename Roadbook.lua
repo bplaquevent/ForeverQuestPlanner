@@ -62,7 +62,8 @@ function CP.StepText(s)
   if s.kind == "fm" or s.kind == "bind" then return (s.task.title or "?") .. " (" .. (s.task.npc or "?") .. ")" end
   if s.kind == "hearth" or s.kind == "travel" or s.kind == "dungeon" then return s.task.title or "?" end
   local tag = (s.escort and L["Escort"]) or (s.kind == "take" and L["Pick up"]) or (s.kind == "obj" and L["Objective"]) or L["Turn in"]
-  local extra = s.kind == "obj" and s.r and (L[": "] .. (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count) or ""
+  local extra = s.kind == "obj" and s.r and (L[": "] .. (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count)
+    or (s.search and string.format(L[" (possible place %d/%d)"], s.search.i, s.search.n)) or ""
   return tag .. " - " .. (s.task.title or "?") .. extra
 end
 
@@ -94,11 +95,18 @@ end
 
 function CP.FocusStep(s)
   if s.escort then CP.escortFailNotified = nil end -- escort (re)started: a new failure is reported
+  local moved = CP.focused ~= s
   CP.focused = s
   CP.focusRec = { questId = s.task.id, label = CP.StepPinLabel(s), area = s.p.area, mx = s.p.mx, my = s.p.my,
     progress = CP.Progress(s.task.id) }
   local qid = s.task.id
   if qid and IsInLog(qid) then WatchOnly(qid) end
+  local fz = moved and s.kind == "turnin" and Geo.Frozen(Geo.ActiveKind())
+  if fz and not CP.StepReady(s, fz.route) then
+    local need = s.task.id and Geo.SkillNeed(s.task.id, CP.LogEntry(s.task.id))
+    Print(Color(K.DESC.warn, need and (Geo.SkillNeedText(need) .. L[": "]) or L["Objectives not completed yet: "])
+      .. (s.task.title or "?"))
+  end
   Geo.MapClaim("track", Geo.ActiveKind()) -- the followed Roadbook holds the map (RoadbookMap.lua)
   PinPoint(s.p, s.task.title, CP.StepPinLabel(s), qid)
   CP.RefreshButton()
@@ -129,7 +137,8 @@ function Geo.SerializeMembers(members)
   for _, m in ipairs(members) do
     local t = m.task or {}
     out[#out + 1] = { kind = m.kind, id = t.id, title = t.title, level = t.level, xp = m.xp,
-      objName = m.r and m.r.tg and m.r.tg.name, objKind = m.r and m.r.tg and m.r.tg.kind, count = m.r and m.r.count }
+      objName = m.r and m.r.tg and m.r.tg.name, objKind = m.r and m.r.tg and m.r.tg.kind, count = m.r and m.r.count,
+      objSource = m.r and m.r.tg and m.r.tg.sourceItem }
   end
   return out
 end
@@ -139,7 +148,7 @@ function Geo.DeserializeMembers(list)
   local out = {}
   for _, m in ipairs(list) do
     out[#out + 1] = { kind = m.kind, xp = m.xp, task = { id = m.id, title = m.title, level = m.level },
-      r = m.objName and { tg = { name = m.objName, kind = m.objKind }, count = m.count } or nil }
+      r = m.objName and { tg = { name = m.objName, kind = m.objKind, sourceItem = m.objSource }, count = m.count } or nil }
   end
   return out
 end
@@ -147,11 +156,12 @@ end
 function Geo.SerializeStep(st)
   local t = st.task or {}
   return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots, quick = st.quick,
-    escort = st.escort, glue = st.glue, via = st.via, bindDest = st.bindDest,
+    escort = st.escort, glue = st.glue, via = st.via, bindDest = st.bindDest, search = st.search,
     fmHub = st.fmHub and { id = st.fmHub.id, node = st.fmHub.node, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil,
     members = Geo.SerializeMembers(t.members),
     spotN = st.spot and st.spot.n, done = st.done, p = Geo.CopyPoint(st.p),
     objName = st.r and st.r.tg and st.r.tg.name, objKind = st.r and st.r.tg and st.r.tg.kind, count = st.r and st.r.count,
+    objSource = st.r and st.r.tg and st.r.tg.sourceItem, afterSource = st.afterSource,
     first = t.stops and t.stops[1] == st or nil,
     task = { id = t.id, title = t.title, level = t.level, xp = t.xp, starter = t.starter, reqLevel = t.reqLevel,
       depTitle = t.dep and t.dep.title, tags = t.tags, npc = t.npc, mode = t.mode, from = t.from, dest = t.dest,
@@ -172,9 +182,9 @@ function Geo.DeserializeStep(rec, tasks)
     tasks[key] = task
   end
   local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots, quick = rec.quick,
-    escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub, via = rec.via, bindDest = rec.bindDest,
-    spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task,
-    r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind }, count = rec.count } or nil }
+    escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub, via = rec.via, bindDest = rec.bindDest, search = rec.search,
+    spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task, afterSource = rec.afterSource,
+    r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind, sourceItem = rec.objSource }, count = rec.count } or nil }
   if rec.first then task.stops[1] = st end
   return st
 end
@@ -311,6 +321,7 @@ function Geo.InjectQuickWins(kind)
   local added, focusNew = 0, nil
   for _, q in ipairs(e and e.quests or {}) do
     if q.complete and not q.failed and not pending[q.id] and not Geo.Excluded(kind)[q.id] and IsInLog(q.id)
+      and not Geo.SkillNeed(q.id, q)
       and (not C_QuestLog.IsComplete or C_QuestLog.IsComplete(q.id)) then
       local t = QuestTargets(q.id)
       if #t.finish > 0 and not AllInstance(t.finish) then
@@ -369,6 +380,9 @@ function CP.StepDone(st)
     if IsCompleted(id) then return true end
     if not IsInLog(id) then return false end
     if C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) then return true end
+    -- Source item (not a game objective): done once it is in the bags.
+    local src = st.r and st.r.tg and st.r.tg.sourceItem
+    if src then return (GetItemCount(src) or 0) > 0 end
     local name = st.r and st.r.tg and st.r.tg.name
     if name then
       local lname = name:lower()
@@ -385,24 +399,75 @@ function CP.StepDone(st)
   return false
 end
 
+-- Quest log entry of a quest (last capture), or nil.
+function CP.LogEntry(id)
+  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
+  for _, q in ipairs(e and e.quests or {}) do
+    if q.id == id then return q end
+  end
+  return nil
+end
+
+-- Step that can be done now (order of its quest): a turn-in once the other steps of its quest in
+-- the Roadbook are done (or the quest complete in the log), an objective once its pick-up is done
+-- (and the source item it uses is in the bags).
+function CP.StepReady(st, route)
+  if st.kind == "travel" or st.kind == "hearth" then -- on the way to the next real step: ready with it
+    local after
+    for i = 2, #route do
+      if route[i] == st then after = i break end
+    end
+    for i = (after or #route) + 1, #route do
+      local o = route[i]
+      if o.kind ~= "travel" and o.kind ~= "hearth" then return CP.StepReady(o, route) end
+    end
+    return true
+  end
+  local id = st.task and st.task.id
+  if not id or (st.kind ~= "turnin" and st.kind ~= "obj") then return true end
+  if st.kind == "turnin" and Geo.SkillNeed(id, CP.LogEntry(id)) then return false end -- profession level
+  if st.kind == "turnin" and IsInLog(id) and C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) then return true end
+  for i = 2, #route do
+    local o = route[i]
+    if o ~= st and o.task and o.task.id == id and not CP.StepDone(o)
+      and (o.kind == "take" or (st.kind == "turnin" and o.kind == "obj")
+        or (st.afterSource and o.r and o.r.tg and o.r.tg.sourceItem)) then
+      return false
+    end
+  end
+  return true
+end
+
 -- Computes a Roadbook of a kind and saves it; cb(route, err, info) when done.
 -- keepDone: the steps done of the saved Roadbook stay first (history), only the steps to come are
 -- computed again; otherwise the Roadbook is emptied first.
-function Geo.Recompute(kind, cb, keepDone)
+-- re (Roadbook adapted, CP.Replan): { goal = goal of this computation, goalInfo = goal shown (the
+-- Roadbook's own), opts = Geo.RequestPlan options }.
+function Geo.Recompute(kind, cb, keepDone, re)
   if not keepDone then Geo.ClearFrozen(kind) end
   Snapshot()
-  if CP.checkpointButton and CP.checkpointButton.sub then CP.checkpointButton.sub:SetText(L["Computing the Roadbook…"]) end
-  Geo.RequestPlan(kind == "custom" and "custom" or State.xpGoal, function(route, err, info)
+  if CP.checkpointButton and CP.checkpointButton.sub then CP.checkpointButton.sub:SetText(string.format(L["Computing the Roadbook (up to %d s)…"], K.PLAN_TIME)) end
+  local goal = (re and re.goal) or (kind == "custom" and "custom") or State.xpGoal
+  Geo.RequestPlan(goal, function(route, err, info)
     if Geo.computing ~= kind then return end -- deleted meanwhile
     Geo.computing = nil
     if route and #route >= 2 then
       local old = keepDone and Geo.Frozen(kind)
+      local rec = keepDone and Geo.FrozenRec(kind)
       if old then route = Geo.KeepDone(old, CP.StepDone, route, info, info) end
-      Geo.Freeze(route, info, nil, kind)
+      if re and re.goalInfo then
+        info.goal = re.goalInfo -- the Roadbook keeps its goal (a duration: the whole session)
+        if info.goal.kind == "level" then
+          info.goalStage = (info.levels[#info.levels] or 0) < info.goal.value or nil
+        else
+          info.goalStage = nil
+        end
+      end
+      Geo.Freeze(route, info, rec and rec.excluded or nil, kind) -- quests skipped in it stay out
     end
     if cb then cb(route, err, info) end
     if Refresh then C_Timer.After(0.1, Refresh) end
-  end, true)
+  end, true, re and re.opts)
 end
 
 -- Name of a Roadbook kind, for the messages.
@@ -424,14 +489,24 @@ function CP.FocusNext(silent, after)
     local order = {}
     for i = start, #fz.route do order[#order + 1] = i end
     for i = 2, math.min(start - 1, #fz.route) do order[#order + 1] = i end
+    -- Only a step that can be done now: a turn-in after the objectives of its quest, an objective
+    -- after its pick-up (a step done ahead must not lead to the turn-in of an unfinished quest).
+    -- None: the first step not done of the plan.
+    local pick
     for _, i in ipairs(order) do
       local st = fz.route[i]
-      if not CP.StepDone(st) then
-        CP.FocusStep(st)
-        if not silent then Print(L["Focus: "] .. CP.StepText(st)) end
-        if Refresh then C_Timer.After(0.2, Refresh) end
-        return
+      if not CP.StepDone(st) and CP.StepReady(st, fz.route) then pick = st break end
+    end
+    if not pick then
+      for i = 2, #fz.route do
+        if not CP.StepDone(fz.route[i]) then pick = fz.route[i] break end
       end
+    end
+    if pick then
+      CP.FocusStep(pick)
+      if not silent then Print(L["Focus: "] .. CP.StepText(pick)) end
+      if Refresh then C_Timer.After(0.2, Refresh) end
+      return
     end
     local g = kind == "auto" and fz.info.goal
     if kind == "custom" then
@@ -474,7 +549,7 @@ end
 -- it); if the other one was followed, it is paused first, after confirmation.
 function CP.Start(kind)
   if Geo.computing == kind then
-    Print(L["Computing the Roadbook, please wait…"])
+    Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
     return
   end
   if not Geo.Frozen(kind) then
@@ -588,17 +663,53 @@ function CP.RecallCheck(kind, atStart)
   return CP.RecallReplan(kind, L["Position or hearthstone / teleport cooldowns changed: the steps to come are updated. "])
 end
 
--- Steps to come computed again from here: the automatic Roadbook keeps its quests and their order
--- (only travel, flight master, hearthstone and teleport steps change); the custom one is planned
--- again from its list. The focus stays on the same step if it is still there.
-function CP.RecallReplan(kind, msg)
-  if kind == "custom" then
-    if #Geo.CustomList() == 0 or not GeoReady() then return false end
-    Print(msg)
-    CP.focusAfter = kind
-    CP.Recompute(kind, true)
-    return true
+-- Roadbook adapted (position or cooldowns changed, quest or transport skipped, quest giver found):
+-- the steps to come are planned again from here, the steps done stay (history). Custom Roadbook:
+-- every quest left of its list in the least time. Automatic one: its goal again, a duration being
+-- what was left of it (planned time of the last step done), a level the same level.
+-- opts: { ban = transport not usable on the first leg }. Returns true if a computation started.
+K.REPLAN_MIN_TIME = 600 -- seconds: less left of a duration goal: only the route is adapted
+function CP.Replan(kind, msg, opts)
+  if not GeoReady() then return false end
+  if Geo.computing then
+    Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
+    return false
   end
+  local re = { opts = opts or {} }
+  if kind == "custom" then
+    if #Geo.CustomList() == 0 then return false end
+    re.goal = "custom"
+  else
+    local fz = Geo.Frozen(kind)
+    local g = fz and fz.info.goal
+    if not (g and g.kind and g.value) or UnitLevel("player") >= Geo.MaxLevel() then return false end
+    if g.kind == "time" then
+      local t0 = 0
+      for i = 2, #fz.route do
+        local st = fz.route[i]
+        if CP.StepDone(st) then t0 = math.max(t0, st.at or 0) end
+      end
+      local left = g.value - t0
+      if left < K.REPLAN_MIN_TIME then return false end
+      re.goal = { kind = "time", value = left }
+    else
+      if UnitLevel("player") >= g.value then return false end
+      re.goal = { kind = "level", value = g.value }
+    end
+    re.goalInfo = { kind = g.kind, value = g.value }
+  end
+  Print(msg .. string.format(L["Computing the Roadbook (up to %d s)…"], K.PLAN_TIME))
+  if Geo.ActiveKind() == kind then CP.focusAfter = kind end
+  CP.Recompute(kind, true, nil, nil, re)
+  return true
+end
+
+-- Steps to come computed again from here (CP.Replan); when it cannot be, the automatic Roadbook keeps
+-- its quests and their order (only travel, flight master, hearthstone and teleport steps change).
+-- The focus stays on the same step if it is still there.
+function CP.RecallReplan(kind, msg)
+  if CP.Replan(kind, msg) then return true end
+  if kind == "custom" or Geo.computing then return false end
   local fz = Geo.Frozen(kind)
   local was = CP.CurrentFocus()
   local ok, route, info = pcall(Geo.Reroute, fz, false, CP.StepDone)
@@ -727,6 +838,10 @@ function CP.SameStep(a, b)
     if a.kind == "obj" then
       return (a.r and a.r.tg and a.r.tg.name) == (b.r and b.r.tg and b.r.tg.name)
     end
+    if a.search or b.search then -- a place to check for the quest giver: the same place
+      local d = Dist(a.p, b.p)
+      return d ~= nil and d < K.START_MERGE
+    end
     return true
   end
   return ta.title == tb.title
@@ -781,7 +896,8 @@ StaticPopupDialogs["FQP_REGENERATE"] = {
 
 -- Empties the Roadbook of this kind and computes it again; it is not started.
 -- keep: recompute after a change of the custom list, the tracking goes on.
-function CP.Recompute(kind, keep, attempt, token)
+-- re: the Roadbook adapted (CP.Replan), see Geo.Recompute.
+function CP.Recompute(kind, keep, attempt, token, re)
   if not attempt then
     if not GeoReady() then
       Print(L["Unable to convert QuestieDB positions to this client's map."])
@@ -794,9 +910,9 @@ function CP.Recompute(kind, keep, attempt, token)
     if Geo.computing then -- one computation at a time
       if keep then
         local t = Geo.customToken
-        C_Timer.After(1, function() if t == Geo.customToken then CP.Recompute(kind, keep) end end)
+        C_Timer.After(1, function() if t == Geo.customToken then CP.Recompute(kind, keep, nil, nil, re) end end)
       else
-        Print(L["Computing the Roadbook, please wait…"])
+        Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
       end
       return
     end
@@ -817,7 +933,7 @@ function CP.Recompute(kind, keep, attempt, token)
       if Refresh then Refresh() end
       return
     end
-    C_Timer.After(0.5, function() CP.Recompute(kind, keep, attempt, token) end)
+    C_Timer.After(0.5, function() CP.Recompute(kind, keep, attempt, token, re) end)
     return
   end
   local was = Geo.ActiveKind() == kind and CP.CurrentFocus() or nil
@@ -838,17 +954,18 @@ function CP.Recompute(kind, keep, attempt, token)
       if refocus and Geo.ActiveKind() == kind then CP.FocusNext(false) else CP.RefreshButton() end
       return
     end
-    -- Custom Roadbook recomputed while followed: the current objective stays if it is still there.
-    local first
-    for i = 2, #route do
-      if not CP.StepDone(route[i]) then first = route[i] break end
-    end
+    -- Recomputed while followed: the current objective stays if it is still there (and can be done
+    -- now), otherwise the next step that can be done.
     for i = 2, #route do
       local st = route[i]
-      if not CP.StepDone(st) and CP.SameStep(st, was) then first = st break end
+      if not CP.StepDone(st) and CP.SameStep(st, was) and CP.StepReady(st, route) then
+        CP.FocusStep(st)
+        return
+      end
     end
-    if first then CP.FocusStep(first) else CP.StopFocus() end
-  end, keep)
+    CP.ClearFocus()
+    CP.FocusNext(true)
+  end, keep, re)
 end
 
 -- Click on the button. Active Roadbook not followed: it starts (empty: the window opens on its tab,
@@ -857,7 +974,7 @@ end
 function CP.ObjectiveClickUnsafe()
   local kind = Geo.ActiveKind()
   if not Geo.Frozen(kind) then
-    if Geo.computing == kind then Print(L["Computing the Roadbook, please wait…"]) else CP.ShowActive() end
+    if Geo.computing == kind then Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME)) else CP.ShowActive() end
     return
   end
   if not Geo.Tracking() then
@@ -885,6 +1002,18 @@ function CP.SkipStep(s)
   local followed = CP.CurrentFocus() == s
   Print(L["Step skipped: "] .. CP.StepText(s))
   Geo.MarkDone(s)
+  -- Transport skipped: the steps to come are planned again without it for the way to the next step
+  -- (only this time: it can be proposed again later).
+  if s.kind == "travel" then
+    local kind
+    for k, fz in pairs(Geo.frozen) do
+      for i = 2, #fz.route do if fz.route[i] == s then kind = k end end
+    end
+    local ban = { mode = s.task.mode, from = s.p, to = s.task.destP }
+    if kind and CP.Replan(kind, L["Transport skipped: the Roadbook is adapted without it. "], { ban = ban }) then
+      return -- the focus moves when the computation ends
+    end
+  end
   if followed then
     CP.FocusNext(false, s)
   else
@@ -926,13 +1055,16 @@ function CP.SkipQuest(s, kind)
   local fz = Geo.Frozen("auto")
   if not fz then return end
   if Geo.computing then
-    Print(L["Computing the Roadbook, please wait…"])
+    Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
     return
   end
   local title = s.task.title
   local excluded = {}
   for k, v in pairs(Geo.Excluded("auto")) do excluded[k] = v end
   excluded[id] = title or true
+  local rec = Geo.FrozenRec("auto")
+  if rec then rec.excluded = excluded end -- read by the computation (Geo.TakeTask, BuildTasks)
+  if CP.Replan("auto", L["Quest skipped: "] .. (title or tostring(id)) .. ". ") then return end
   local wasFocus = CP.CurrentFocus()
   local ok, route, info = pcall(Geo.Reroute, fz, id, CP.StepDone)
   if not ok then
@@ -1125,6 +1257,54 @@ function CP.Reroute(st, pos, msg)
   return true
 end
 
+-- Quest picked up while its giver had several places to check (search steps): the place nearest to
+-- you is where it was found (done), the other ones leave the Roadbook, and the followed Roadbook is
+-- adapted (CP.Replan). Returns true if the followed Roadbook was changed.
+function CP.GiverFound(a1, a2)
+  local pos = PlayerPos()
+  local handled = false
+  for kind, fz in pairs(Geo.frozen) do
+    local route, rec = fz.route, Geo.FrozenRec(kind)
+    local list = {}
+    for i = 2, #route do
+      local st = route[i]
+      local id = st.search and not st.done and st.task and st.task.id
+      if id and (id == a1 or id == a2) then list[#list + 1] = i end
+    end
+    if #list > 0 then
+      local best, bd = list[1], nil
+      for _, i in ipairs(list) do
+        local d = pos and Dist(pos, route[i].p)
+        if d and (not bd or d < bd) then best, bd = i, d end
+      end
+      local title = route[best].task.title
+      Geo.MarkDone(route[best])
+      for k = #list, 1, -1 do
+        local i = list[k]
+        if i ~= best then
+          table.remove(route, i)
+          if rec and rec.steps then table.remove(rec.steps, i - 1) end
+        end
+      end
+      if kind == Geo.ActiveKind() and Geo.Tracking() then
+        handled = true
+        local msg = L["Quest giver found: "] .. (title or "?") .. ". "
+        scan.dirty = true -- the quest left the available ones: scanned again before the computation
+        if not CP.Replan(kind, msg) then
+          Print(msg)
+          CP.ClearFocus()
+          CP.FocusNext(false)
+        end
+      end
+    end
+  end
+  if handled then
+    Geo.MapSync()
+    if Refresh then C_Timer.After(0.2, Refresh) end
+  end
+  return handled
+end
+
 function CP.OnGameEvent(event, a1, a2)
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
   if (event == "QUEST_LOG_UPDATE" or event == "ZONE_CHANGED_NEW_AREA") and not CP.quickPending and Geo.Tracking() and Geo.frozen[Geo.ActiveKind()] then
@@ -1143,6 +1323,7 @@ function CP.OnGameEvent(event, a1, a2)
     if st then CP.CheckLanding(st) end
     return
   end
+  if event == "QUEST_ACCEPTED" and CP.GiverFound(a1, a2) then return end
   local s = CP.CurrentFocus()
   if not s then return end
   if event == "FQP_TAXI_TAKEOFF" then CP.flying, CP.flightStep = true, nil end
@@ -1178,7 +1359,9 @@ function CP.OnGameEvent(event, a1, a2)
   elseif s.kind == "take" then
     if event == "QUEST_ACCEPTED" and qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest picked up"]) end
   elseif s.kind == "obj" then
-    if event == "QUEST_LOG_UPDATE" and qid then
+    if event == "BAG_UPDATE_DELAYED" then
+      if s.r and s.r.tg and s.r.tg.sourceItem and CP.StepDone(s) then CP.AutoUpdate(L["Item obtained"]) end
+    elseif event == "QUEST_LOG_UPDATE" and qid then
       local now = CP.Progress(qid)
       local rec = CP.FocusRecord()
       if rec and now > (rec.progress or 0) then
@@ -1225,8 +1408,11 @@ function CP.StepSummary(s)
     local esc = Geo.IsEscort(task.id) and (" · " .. Color(K.DESC.warn, L["escort"])) or ""
     if CP.IsFailed(task.id) then esc = " · " .. Color(K.DESC.bad, L["failed: abandon it first"]) end
     if task.reqLevel then esc = esc .. " · " .. Color(K.DESC.warn, string.format(L["level %d required"], task.reqLevel)) end
+    if s.search then
+      esc = " · " .. Color(K.DESC.warn, string.format(L["possible place %d/%d"], s.search.i, s.search.n)) .. esc
+    end
     return ICON.available .. " " .. (task.title or "?"),
-      L["Pick up from "] .. (nameOnly(task.starter) or "?") .. " · " .. place .. esc
+      (s.search and L["Look for "] or L["Pick up from "]) .. (nameOnly(task.starter) or "?") .. " · " .. place .. esc
   elseif s.kind == "obj" then
     local name = s.r and s.r.tg.name or L["objective"]
     local prog = "x" .. (s.r and s.r.count or "?")
