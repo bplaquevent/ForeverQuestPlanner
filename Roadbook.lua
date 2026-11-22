@@ -8,6 +8,7 @@ local ICON, IsCompleted, IsInLog, K, L, Nearest = ns.ICON, ns.IsCompleted, ns.Is
 local PinPoint, PlayerPos, PointText, Print, QDB, QGet = ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet
 local QuestTargets, Refresh, Route, Settings, Snapshot, StartScan = ns.QuestTargets, ns.Refresh, ns.Route, ns.Settings, ns.Snapshot, ns.StartScan
 local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.KnownFlights, ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
+local IsWatched, SetWatched = ns.IsWatched, ns.SetWatched
 local OpenQuestDetails, scan = ns.OpenQuestDetails, ns.scan
 
 ---------------------------------------------------------------------------
@@ -167,6 +168,7 @@ function Geo.SerializeStep(st)
     spotN = st.spot and st.spot.n, done = st.done, p = Geo.CopyPoint(st.p),
     objName = st.r and st.r.tg and st.r.tg.name, objKind = st.r and st.r.tg and st.r.tg.kind, count = st.r and st.r.count,
     objSource = st.r and st.r.tg and st.r.tg.sourceItem, afterSource = st.afterSource,
+    skill = st.skill, npc = st.npc, nopin = st.nopin,
     first = t.stops and t.stops[1] == st or nil,
     task = { id = t.id, title = t.title, level = t.level, xp = t.xp, starter = t.starter, reqLevel = t.reqLevel,
       depTitle = t.dep and t.dep.title, tags = t.tags, npc = t.npc, mode = t.mode, from = t.from, dest = t.dest,
@@ -189,6 +191,7 @@ function Geo.DeserializeStep(rec, tasks)
   local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots,
     escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub, via = rec.via, bindDest = rec.bindDest, search = rec.search,
     spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task, afterSource = rec.afterSource,
+    skill = rec.skill, npc = rec.npc, nopin = rec.nopin,
     r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind, sourceItem = rec.objSource }, count = rec.count } or nil }
   if rec.first then task.stops[1] = st end
   return st
@@ -1245,10 +1248,21 @@ function CP.AutoAskNext()
   end
 end
 
+-- Auto mode: the game tracks a quest as it is accepted; it is untracked, except the active step's quest.
+function CP.AutoUnwatch(id)
+  C_Timer.After(0.5, function()
+    local f = CP.focused
+    if f and f.task and f.task.id == id then return end
+    if IsInLog(id) and IsWatched(id) then SetWatched(id, false) end
+  end)
+end
+
 function CP.AutoAddAccepted(a1, a2)
   if not Settings().autoAdd then return end
   local id = a2 or a1
-  if type(id) ~= "number" or Geo.InCustom(id) then return end
+  if type(id) ~= "number" then return end
+  CP.AutoUnwatch(id)
+  if Geo.InCustom(id) then return end
   CP.autoAsk = CP.autoAsk or {}
   for _, e in ipairs(CP.autoAsk) do if e.id == id then return end end
   CP.autoAsk[#CP.autoAsk + 1] = { id = id, title = QGet(QDB.Quest, id, "name") or ("#" .. id) }

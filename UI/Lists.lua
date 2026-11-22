@@ -1255,5 +1255,5 @@ ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSear
 ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.Normalize, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, Normalize, OnWaypointChanged
 ns.ParseQuery, ns.PassStates, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinIcon, PinPoint, Plural
 ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetWatched = QuestHaystack, RenderExport, RenderList, SetWatched
-ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, expandedCategories, journalStates
+ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.IsWatched, ns.SetWatched, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, IsWatched, SetWatched, expandedCategories, journalStates
 ns.nearStates, ns.OpenQuestDetails, ns.panels, ns.tabButtons = nearStates, OpenQuestDetails, panels, tabButtons
