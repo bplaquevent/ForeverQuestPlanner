@@ -1056,6 +1056,15 @@ function CP.ObjectiveClick(button)
 end
 
 -- Progress of a quest from the log: finished objectives (+1 if the quest is complete).
+-- Every objective of the quest done (or the quest complete).
+function CP.QuestObjectivesDone(qid)
+  if not (qid and IsInLog(qid)) then return false end
+  if C_QuestLog.IsComplete and C_QuestLog.IsComplete(qid) then return true end
+  local objs = GetObjectives(qid)
+  for _, o in ipairs(objs) do if not o.finished then return false end end
+  return #objs > 0
+end
+
 function CP.Progress(qid)
   if not (qid and IsInLog(qid)) then return 0 end
   local n = 0
@@ -1067,11 +1076,14 @@ end
 -- Automatic update: when the focused Roadbook step is done
 -- (quest picked up, objective done, quest turned in, flight master activated), the step is
 -- marked as done and the focus moves to the next step of the saved Roadbook.
-function CP.AutoUpdate(reason)
+-- step (optional): the step that triggered the update; it is only marked if it still has the focus and
+-- check() (optional) still holds a second later (an objective step is never marked for another's progress).
+function CP.AutoUpdate(reason, step, check)
   if CP.autoPending then return end
   CP.autoPending = true
   C_Timer.After(1, function()
     CP.autoPending = nil
+    if step and (CP.CurrentFocus() ~= step or (check and not check())) then return end
     Print(reason .. L[": next Roadbook step."])
     local cur = CP.CurrentFocus()
     if cur then Geo.MarkDone(cur) end
@@ -1415,7 +1427,9 @@ function CP.OnGameEvent(event, a1, a2)
     if event == "QUEST_ACCEPTED" and qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest picked up"]) end
   elseif s.kind == "obj" then
     if event == "BAG_UPDATE_DELAYED" then
-      if s.r and s.r.tg and s.r.tg.sourceItem and CP.StepDone(s) then CP.AutoUpdate(L["Item obtained"]) end
+      if s.r and s.r.tg and s.r.tg.sourceItem and CP.StepDone(s) then
+        CP.AutoUpdate(L["Item obtained"], s, function() return CP.StepDone(s) end)
+      end
     elseif event == "QUEST_LOG_UPDATE" and qid then
       local now = CP.Progress(qid)
       local rec = CP.FocusRecord()
@@ -1424,10 +1438,11 @@ function CP.OnGameEvent(event, a1, a2)
       local known = IsInLog(qid) and Geo.TargetObjective(qid, s.r and s.r.tg, GetObjectives(qid))
       if known then
         if rec then rec.progress = now end
-        if CP.StepDone(s) then CP.AutoUpdate(L["Objective completed"]) end
+        if CP.StepDone(s) then CP.AutoUpdate(L["Objective completed"], s, function() return CP.StepDone(s) end) end
       elseif rec and now > (rec.progress or 0) then
         rec.progress = now
-        CP.AutoUpdate(L["Objective completed"])
+        -- Objective not identified: only the whole quest done (every objective) ends the step.
+        CP.AutoUpdate(L["Objective completed"], s, function() return CP.QuestObjectivesDone(qid) end)
       elseif rec and now < (rec.progress or 0) then
         rec.progress = now -- item destroyed / given back: follow the new value
       end
