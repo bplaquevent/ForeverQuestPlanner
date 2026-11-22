@@ -3,6 +3,9 @@
     "allow": [
       "Bash(tools/check.sh)",
       "Bash(lua5.1 tools/bench.lua *)"
+    ],
+    "deny": [
+      "Read(tools/cases/shaman-*.lua)"
     ]
   },
   "hooks": {
