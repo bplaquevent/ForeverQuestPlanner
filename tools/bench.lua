@@ -2,7 +2,7 @@
 -- Loads a Roadbook problem captured in game by /fqp dump (then /reload) and runs the solver
 -- (Solver.lua, the same file as in the game) on it.
 --
--- Usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N]
+-- Usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N] [--list N]
 --   <file>       the SavedVariables file (WTF/Account/<ACCOUNT>/SavedVariables/ForeverQuestPlanner.lua)
 --                or a saved case (tools/cases/<name>.lua)
 --   --char NAME  character to use ("Name-Realm"; default: the most recent capture)
@@ -11,6 +11,8 @@
 --   --evals N    evaluation budget of the optimizer
 --   --custom N   custom Roadbook test: a list made of the first N captured quests (no follow-up), planned
 --                by the solver (the capture's own custom list, if any, otherwise)
+--   --list N     "Generate" with a duration or level goal (--goal) on a list made of the first N captured
+--                quests (0: empty list): kept whole and completed, or only its best part kept
 --   --steps      print every step of the Roadbooks
 
 local root = ((arg[0]:match("^(.*)/[^/]*$")) or ".") .. "/.."
@@ -25,7 +27,7 @@ local file, opts = nil, {}
 local i = 1
 while arg[i] do
   local a = arg[i]
-  if a == "--char" or a == "--save" or a == "--goal" or a == "--evals" or a == "--custom" then
+  if a == "--char" or a == "--save" or a == "--goal" or a == "--evals" or a == "--custom" or a == "--list" then
     opts[a:sub(3)] = arg[i + 1]
     i = i + 1
   elseif a == "--steps" then
@@ -37,7 +39,7 @@ while arg[i] do
   end
   i = i + 1
 end
-if not file then fail("usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N]") end
+if not file then fail("usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N] [--list N]") end
 
 -- Solver (an addon file: called with the addon name and namespace).
 local chunk, err = loadfile(root .. "/Solver.lua")
@@ -251,7 +253,7 @@ local function CustomFrom(n)
   end
   return out
 end
-if opts.custom or (P.custom and P.custom.steps) then
+if not opts.list and (opts.custom or (P.custom and P.custom.steps)) then
   if opts.custom then P.custom = CustomFrom(tonumber(opts.custom)) end
   print("")
   print(string.format("== Custom Roadbook, %d quests, %d steps", #P.custom.tasks, #P.custom.steps))
@@ -282,6 +284,21 @@ if opts.goal then
   goal = { kind = kind, value = tonumber(value) }
 end
 local g = S.Goal(P, goal)
+local listCase = opts.list and tonumber(opts.list)
+if listCase then
+  P.custom = listCase > 0 and CustomFrom(listCase) or nil
+  if P.custom then
+    local total = 0
+    S.clock = os.clock
+    local whole = S.Optimize(P, "custom", { maxEvals = 3000 })
+    total = whole.res.time
+    print("")
+    print(string.format("== List of %d quests: whole list %s, %d XP, level %d -> %d", #P.custom.tasks, Time(total),
+      whole.res.xp, pl.level, whole.res.level))
+  end
+else
+  P.custom = nil -- the candidates alone
+end
 
 -- Value of an evaluation for the goal: XP within the time, or time to reach the level.
 local function GoalText(res)
@@ -314,9 +331,15 @@ S.clock = os.clock
 local opt = S.Optimize(P, goal, { maxEvals = opts.evals and tonumber(opts.evals) or nil })
 Line("optimized", opt.res)
 local nT, nH = 0, 0
+local listIds = {}
 for _, st in ipairs(opt.route) do
   if st.tn and st.k == 1 then nT = nT + 1 end
   if st.kind == "hearth" then nH = nH + 1 end
+  if st.ci and st.id then listIds[st.id] = true end
+end
+if opt.mode then
+  print(string.format("  list %s: %d of its %d quests kept, %d candidate quests added", opt.mode, Count(listIds),
+    #P.custom.tasks, nT))
 end
 print(string.format("  %d quests, %d steps, %d teleports; %d evaluations, %d rounds, %d rebuilds kept, %.1f s", nT,
   #opt.route - 1, nH, opt.evals, opt.rounds, opt.rebuilt or 0, opt.seconds or 0))

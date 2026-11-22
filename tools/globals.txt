@@ -78,6 +78,7 @@ IsPlayerSpell
 IsQuestWatched
 IsShiftKeyDown
 IsSpellKnown
+MenuUtil
 Minimap
 NumTaxiNodes
 OKAY

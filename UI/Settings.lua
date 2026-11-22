@@ -16,7 +16,7 @@ K.PARAMS = {
   { key = "MOB_TIME", label = L["Time per monster"], unit = L[" s"], min = 10, max = 90, step = 5 },
   { key = "ELITE_MOB_TIME", label = L["Time per elite monster"], unit = L[" s"], min = 20, max = 240, step = 5 },
   { key = "KILLS_NO_RATE", label = L["Monsters per item (unknown drop rate)"], unit = "", min = 1, max = 20, step = 1 },
-  { key = "DUNGEON_TIME", label = L["Time in a dungeon (custom list)"], unit = L[" min"], min = 15, max = 180, step = 5 },
+  { key = "DUNGEON_TIME", label = L["Time in a dungeon (Roadbook list)"], unit = L[" min"], min = 15, max = 180, step = 5 },
 }
 for _, d in ipairs(K.PARAMS) do
   if d.key then d.default = K[d.key] end

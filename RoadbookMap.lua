@@ -172,21 +172,16 @@ function Geo.MapUV(p)
   return nil
 end
 
--- A step's tooltip (pins on the map, lines of the steps panel): n = its number (nil: done), hint:
--- the last line (what a click does).
+-- A step's tooltip (pins on the map, lines of the steps panel): its title and details
+-- (Geo.StepDetailLines); n = its number (nil: done), hint: the last lines (what a click does).
 function Geo.StepTooltip(owner, st, n, hint, anchor)
   GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
   GameTooltip:AddLine(n and string.format(L["Roadbook step %d"], n) or L["Roadbook step done"], 0.6, 0.8, 1)
-  local ok, title, desc = pcall(CP.StepSummary, st)
-  if ok and title then
-    GameTooltip:AddLine(title, 1, 1, 1)
-    for info in ((desc or "") .. " · "):gmatch("(.-) · ") do
-      if info ~= "" then GameTooltip:AddLine(CP.Capitalize(info), 0.85, 0.85, 0.85, true) end
-    end
-  else
-    GameTooltip:AddLine(CP.StepText(st), 1, 1, 1)
-  end
-  GameTooltip:AddLine(hint, 0.6, 0.6, 0.6)
+  local ok, title = pcall(CP.StepSummary, st)
+  GameTooltip:AddLine(ok and title or CP.StepText(st), 1, 1, 1)
+  local okD, lines = pcall(Geo.StepDetailLines, st)
+  for _, line in ipairs(okD and lines or {}) do GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true) end
+  for line in (hint .. "\n"):gmatch("(.-)\n") do GameTooltip:AddLine(line, 0.6, 0.6, 0.6) end
   GameTooltip:Show()
 end
 
@@ -303,14 +298,15 @@ function Geo.MapDraw()
 end
 
 -- Redraws when the map is open (otherwise at its next opening), with the steps panel beside it.
+-- The steps panel (its own window) follows too, even with the map closed.
 function Geo.MapSync()
+  if Geo.MapPanelSync then
+    local ok, err = pcall(Geo.MapPanelSync)
+    if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
+  end
   if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
   if OM.stitch then
     local ok, err = pcall(Geo.MapDraw)
-    if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
-  end
-  if Geo.MapPanelSync then
-    local ok, err = pcall(Geo.MapPanelSync)
     if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
   end
 end
@@ -414,8 +410,5 @@ function Geo.MapInit()
   pcall(OM.api.RegisterCallback, ADDON_NAME, "OpenMap_StitchedChanged", function() Geo.MapSync() end)
   pcall(OM.api.RegisterMenuToggle, ADDON_NAME, { id = "roadbook", label = L["Whole Roadbook on the map"],
     get = Geo.MapWholeGet, set = Geo.MapWholeSet, icon = "Interface\\Icons\\INV_Misc_Book_09",
-    section = "Forever Quest Planner" })
-  pcall(OM.api.RegisterMenuToggle, ADDON_NAME, { id = "roadbookpanel", label = L["Roadbook steps beside the map"],
-    get = Geo.MapPanelGet, set = Geo.MapPanelSet, icon = "Interface\\Icons\\INV_Misc_Note_01",
     section = "Forever Quest Planner" })
 end

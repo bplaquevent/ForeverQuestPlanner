@@ -104,7 +104,7 @@ end
 -- Returns { tasks, steps, pred, dungeons, unplanned } (game objects), or nil and the reason.
 function Geo.CustomPlanSteps(pos, plevel)
   local list = Geo.CustomList()
-  if #list == 0 then return nil, L["The custom quest list is empty: add quests with the \"Add\" button of the other tabs."] end
+  if #list == 0 then return nil, L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] end
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   local logById = {}
   for _, q in ipairs(e and e.quests or {}) do logById[q.id] = q end
@@ -119,7 +119,7 @@ function Geo.CustomPlanSteps(pos, plevel)
     end
     Geo.Yield()
   end
-  if #tasks == 0 then return nil, L["No quest of the custom list can be located."], unplanned end
+  if #tasks == 0 then return nil, L["No quest of the list can be located."], unplanned end
   for _, task in ipairs(tasks) do
     task.pres = {}
     for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
@@ -351,7 +351,8 @@ function Pb.Constants(P)
 end
 
 -- Roadbook problem from the game, for the solver (inside a computation spread over frames: Geo.Yield).
--- kind: "auto" (candidate quests), "custom" (cp = Geo.CustomPlanSteps), "none" (world and character).
+-- kind: "auto" (candidate quests, with the list cp = Geo.CustomPlanSteps if any), "custom" (the list cp),
+-- "none" (world and character).
 function Geo.Problem(kind, pos, cp)
   local P = { quests = {} }
   Pb.Constants(P)
@@ -359,7 +360,7 @@ function Geo.Problem(kind, pos, cp)
   P.player.posSrc = pos
   Pb.World(P, true)
   if kind == "auto" then Pb.Tasks(P, pos, P.player.level, true) end
-  if kind == "custom" and cp then Pb.Custom(P, cp, true) end
+  if cp then Pb.Custom(P, cp, true) end -- the list (custom; auto: kept or trimmed for the goal)
   return P
 end
 

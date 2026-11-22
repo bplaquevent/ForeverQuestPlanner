@@ -1,21 +1,22 @@
--- Forever Quest Planner: the Roadbook's steps in a panel beside the world map.
+-- Forever Quest Planner: the Roadbook's steps in a window of their own.
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 --
--- The Roadbook holding the map (followed or previewed), else the active one, listed step by step:
--- steps done greyed and checked, the others numbered as their pins on the map (1 = next), the
--- current objective highlighted and scrolled to. The panel sits against the map window's right
--- side, outside it; when there is no room there (full-screen map), over the map's right side.
--- Click: the map glides to the step; Shift-click: the Roadbook's tab.
+-- The saved Roadbook, step by step: a short header (size and progress, XP, travel, what to watch),
+-- then its steps: done ones greyed and checked, the others numbered as their pins on the map (1 =
+-- next), the current objective highlighted and scrolled to. Hover: the step's details; click: the
+-- map opens or glides to the step; right-click: its actions (remove the quest, not here, skip).
+-- The panel lives on its own, independent of the map: moved with Shift-drag, resized by its bottom
+-- edge, shown or hidden by the Objective button and the Steps button.
 
 local ADDON_NAME, ns = ...
-local AreaName, CP, Color, FormatTime, Geo, K, L = ns.AreaName, ns.CP, ns.Color, ns.FormatTime, ns.Geo, ns.K, ns.L
-local IsInLog, OM, OpenQuestDetails, Settings = ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Settings
+local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K, L = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K, ns.L
+local IsInLog, OM, OpenQuestDetails, Plural, RouteText, Settings = ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Plural, ns.RouteText, ns.Settings
 local UpdateScrollBar = ns.UpdateScrollBar
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line
-K.MAP_PANEL_HEAD = 42 -- px: title bar (title, count under it, Show and Start / Pause buttons)
-K.MAP_PANEL_BOTTOM = 96 -- px kept free under the panel when it is over the map (OpenMap's tabs)
+K.MAP_PANEL_TITLE = 30 -- px: title bar (title, buttons); the header text is under it
+K.MAP_PANEL_MIN_H, K.MAP_PANEL_MAX_H = 220, 1000 -- px: height of the panel
 
 local panel -- created at the first display
 
@@ -24,51 +25,261 @@ function Geo.MapPanelShown()
   return Geo.Frozen() ~= nil
 end
 
-function Geo.MapPanelGet()
-  return Settings().mapPanel ~= false
+-- Panel shown or hidden (the Objective button, the Steps button).
+function Geo.MapPanelShow(v)
+  Settings().stepsHidden = (not v) or nil
+  Geo.MapPanelSync()
 end
 
-function Geo.MapPanelSet(v)
-  if v then Settings().mapPanel = nil else Settings().mapPanel = false end -- on by default
-  Geo.MapPanelSync()
+-- Steps button of the Roadbook tab and Objective button: the panel shown (toggle: or hidden when
+-- it is shown).
+function Geo.MapPanelOpen(toggle)
+  local shown = panel and panel:IsShown()
+  Geo.MapPanelShow(not (toggle and shown))
+end
+
+---------------------------------------------------------------------------
+-- Details of a step (tooltips of the panel and of the map pins)
+---------------------------------------------------------------------------
+-- Quest steps done during a dungeon visit, one line each.
+function Geo.DungeonMemberLines(task)
+  local lines = {}
+  for _, m in ipairs(task.members or {}) do
+    local what
+    if m.kind == "take" then what = L["pick up"]
+    elseif m.kind == "turnin" then what = L["turn in"]
+    else what = ((m.r and m.r.tg.name) or L["objective"]) .. L[" x"] .. ((m.r and m.r.count) or "?") end
+    local line = "- " .. ((m.task and m.task.title) or "?") .. L[": "] .. what
+    lines[#lines + 1] = CP.StepDone(m) and Color("40ff40", line .. L[" (done)"]) or Color(K.DESC.action, line)
+  end
+  return lines
+end
+
+-- Duration of a step alone (way from the previous step and what is done there), from the times
+-- of the saved Roadbook (st.at: time since its start); nil if the step is not in it.
+function Geo.StepDuration(st)
+  local fz = Geo.Frozen()
+  local route = fz and fz.route
+  for i = 2, route and #route or 0 do
+    if route[i] == st then return math.max(0, (st.at or 0) - (route[i - 1].at or 0)) end
+  end
+end
+
+-- XP of a step: a quest turned in, monsters of an objective (estimate), a dungeon visit.
+function Geo.StepXP(s)
+  if s.kind == "turnin" then return Geo.XPText(s.task and s.task.xp) end
+  if s.kind == "obj" then return Geo.XPText(s.xp, true) end
+  if s.kind == "dungeon" then return Geo.XPText(s.xp) end
+end
+
+-- Lines of a step's details after its title, coloured: what to do and where (one line per piece),
+-- XP · duration of the step, notes, quests of a dungeon, the way from the previous step, level reached.
+function Geo.StepDetailLines(st)
+  local D = K.DESC
+  local lines = {}
+  local ok, _, desc = pcall(CP.StepSummary, st)
+  local xp = Geo.StepXP(st)
+  if ok and desc and desc ~= "" then
+    if xp then -- the XP comes on its own line
+      local a, b = desc:find(K.DESC_SEP .. xp, 1, true)
+      if a then desc = desc:sub(1, a - 1) .. desc:sub(b + 1) end
+    end
+    for piece in (desc .. K.DESC_SEP):gmatch("(.-)" .. K.DESC_SEP:gsub("%p", "%%%0")) do
+      if piece ~= "" then lines[#lines + 1] = Color(D.action, CP.Capitalize(piece)) end
+    end
+  end
+  local dur = Geo.StepDuration(st)
+  local figures = Geo.DescLine(xp, dur and Color(D.meta, "~" .. FormatTime(dur)))
+  if figures ~= "" then lines[#lines + 1] = (figures:gsub("^" .. K.DESC_LINE:gsub("%p", "%%%0"), "")) end
+  local task = st.task or {}
+  local function add(hex, t) lines[#lines + 1] = Color(hex, t) end
+  if st.kind == "fm" and st.fmHub then add(D.good, L["used afterwards by the route"]) end
+  if st.escort then add(D.warn, "~" .. FormatTime(st.work or 0) .. L[", do not interrupt"]) end
+  if st.kind == "take" then
+    if task.levelWarn and task.reqLevel then
+      add(D.warn, string.format(L["level %d required: not reached by this route"], task.reqLevel))
+    end
+    if task.dep then add(D.chain, string.format(L["follow-up of \"%s\""], task.dep.title or "?")) end
+  end
+  if st.kind == "obj" and st.spot then
+    add(st.spots and st.spots > 1 and D.warn or D.meta, string.format(L["spot of %d monsters"], st.spot.n) ..
+      (st.spots and st.spots > 1 and L[", the most efficient (travel + density)"] or ""))
+  end
+  if st.kind == "turnin" then
+    if st.quick then add(D.good, L["quick win: added on the way"])
+    elseif task.quick then add(D.good, L["ready to turn in"]) end
+  end
+  if task.id and task.stops and st == task.stops[1] then
+    if task.warn then add(D.bad, task.warn) end
+    if task.orderWarn then add(D.warn, L["order of the prerequisites not respected"]) end
+  end
+  if st.kind == "dungeon" then
+    for _, l in ipairs(Geo.DungeonMemberLines(task)) do lines[#lines + 1] = l end
+  end
+  -- The way from the previous step and the level reached: the step's place in the saved Roadbook.
+  local fz = Geo.Frozen()
+  local route, info = fz and fz.route, fz and fz.info
+  local i
+  for k = 2, route and #route or 0 do if route[k] == st then i = k break end end
+  if i then
+    if st.kind ~= "hearth" then
+      info.netCache = info.netCache or { [""] = { net = info.net } }
+      local okN, nets = pcall(Geo.RouteNets, route, info.speed or 7, info.plevel, info.netCache)
+      local net = okN and nets and (nets[i] or nets[1])
+      local okW, way = false, nil
+      if net then okW, way = pcall(RouteText, route[i - 1].p, st.p, net.net, info.plevel) end
+      if okW and way and way ~= L["right here"] then lines[#lines + 1] = Color("ffffff", L["Route: "]) .. way end
+    end
+    local lvs = info.levels
+    if lvs and lvs[i] and lvs[i - 1] and lvs[i] > lvs[i - 1] then
+      add(D.good, string.format(L["level %d reached"], lvs[i]))
+    end
+  end
+  return lines
+end
+
+---------------------------------------------------------------------------
+-- Header
+---------------------------------------------------------------------------
+-- Header text: size and progress, XP, travel (hearthstone, class teleports), then what to watch,
+-- one line each (only when there is something).
+function Geo.MapPanelHeader(route, info, doneCount)
+  local sep = Color("777777", " - ")
+  local value = function(t) return Color("dddddd", t) end
+  local lines = {}
+  if Geo.computing then lines[1] = Color("ffd100", L["Computing the Roadbook"] .. "…") end
+  -- Size and progress.
+  local total = #route - 1
+  local finished = total > 0 and doneCount >= total
+  lines[#lines + 1] = value(Plural(info.count or 0, L["quest"])) .. sep ..
+    Color(finished and K.DESC.good or "ffd100", string.format(L["%d/%d steps finished"], doneCount, total)) .. sep ..
+    value("~" .. FormatTime(info.total or 0))
+  -- XP.
+  if (info.xp or 0) > 0 then
+    lines[#lines + 1] = Color(K.DESC.xp, FormatNumber(info.xp) .. " XP") .. sep ..
+      value("~" .. ((info.total or 0) > 0 and FormatNumber(info.xp / info.total * 3600) or "0") .. " XP/h")
+  end
+  -- Travel: hearthstone, class teleports (cooldown each, runes of the mage teleports).
+  local travel = {}
+  local ready = Geo.HearthReady()
+  local bindP, bindName = Geo.CurrentBind()
+  if Settings().noHearth then
+    travel[1] = value(L["Hearthstone ignored"])
+  elseif ready then
+    local where = bindName or "?"
+    if not bindP then where = where .. Color("ff8040", " (?)")
+    elseif bindP.approx then where = where .. Color("ffd100", " (~)") end
+    travel[1] = value(L["Hearth: "] .. where .. " (" .. (ready > 0 and FormatTime(ready) or L["ready"]) .. ")")
+  end
+  local runes
+  for _, src in ipairs(Geo.RecallSources()) do
+    if src.spell then
+      if src.charges then
+        runes = src.charges
+      elseif (src.cd or 0) > 0 then
+        travel[#travel + 1] = value(src.name .. " (" .. (src.ready > 0 and FormatTime(src.ready) or L["ready to cast"]) .. ")")
+      else
+        travel[#travel + 1] = value(src.name)
+      end
+    end
+  end
+  if runes then travel[#travel + 1] = value(string.format(L["teleports: %d rune(s)"], runes)) end
+  if #travel > 0 then lines[#lines + 1] = table.concat(travel, Color("777777", K.DESC_SEP)) end
+  -- To watch: one line each.
+  local unplanned = #(info.unplanned or {})
+  if unplanned > 0 then
+    lines[#lines + 1] = Color("ff6060", Plural(unplanned, L["quest"]) .. L[" cannot be planned"])
+  end
+  if info.net and info.net.taxi == 0 then
+    lines[#lines + 1] = Color("ff8040", CP.Capitalize(L["no flight master recorded (open a flight map)"]))
+  end
+  if (info.discovered or 0) > 0 then
+    lines[#lines + 1] = Color("c890ff", Plural(info.discovered, L["flight path to activate"]))
+  end
+  return table.concat(lines, "\n")
 end
 
 ---------------------------------------------------------------------------
 -- Frame
 ---------------------------------------------------------------------------
--- Beside the map window if the screen has room on its right, over the map's right side otherwise.
+-- Where the player left it (default: right of the screen).
 function Geo.MapPanelPlace()
   if not panel then return end
-  local wm = WorldMapFrame
-  local scale = wm:GetEffectiveScale()
-  local right = (wm:GetRight() or 0) * scale
-  local screen = (UIParent:GetRight() or 0) * UIParent:GetEffectiveScale()
-  local inside = screen - right < K.MAP_PANEL_W * scale
   panel:ClearAllPoints()
-  if inside then
-    local sc = wm.ScrollContainer or wm
-    panel:SetPoint("TOPRIGHT", sc, "TOPRIGHT", -4, -4)
-    panel:SetPoint("BOTTOMRIGHT", sc, "BOTTOMRIGHT", -4, K.MAP_PANEL_BOTTOM)
-    panel:SetFrameLevel(math.min(sc:GetFrameLevel() + 9000, 9800)) -- over OpenMap's art and pins
-  else
-    panel:SetPoint("TOPLEFT", wm, "TOPRIGHT", -2, 0)
-    panel:SetPoint("BOTTOMLEFT", wm, "BOTTOMRIGHT", -2, 0)
-    panel:SetFrameLevel(wm:GetFrameLevel() + 5)
-  end
   panel:SetWidth(K.MAP_PANEL_W)
-  panel.inside = inside
+  local pos = Settings().stepsPos
+  if pos then
+    panel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos[1], pos[2])
+  else
+    panel:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -80, -160)
+  end
+  panel:SetHeight(Settings().stepsHeight or 480)
+end
+
+local function Tip(self, title, text)
+  GameTooltip:SetOwner(self, "ANCHOR_TOP")
+  GameTooltip:AddLine(title, 1, 1, 1)
+  GameTooltip:AddLine(text, 0.85, 0.85, 0.85, true)
+  GameTooltip:Show()
 end
 
 local function RowEnter(self)
   if self.step then
-    Geo.StepTooltip(self, self.step, self.n, L["Click: center the map and select the quest in the quest log"],
-      panel.inside and "ANCHOR_LEFT" or "ANCHOR_RIGHT")
+    Geo.StepTooltip(self, self.step, self.n,
+      L["Click: center the map and select the quest in the quest log"] .. "\n" .. L["Right-click: actions of the step"],
+      "ANCHOR_LEFT")
   end
 end
 
-local function RowClick(self)
+-- Actions of a step not done ({ label, fn, tooltip }): remove its quest, "Not here" (a possible
+-- place of the quest giver), skip the followed hearthstone / transport step.
+local function StepActions(st)
+  local acts = {}
+  if CP.StepDone(st) then return acts end
+  local qid = st.task and st.task.id
+  if st.search and qid then
+    acts[#acts + 1] = { L["Not here"], function() CP.SkipStep(st) end,
+      L["The quest giver is not at this place: the step is marked done and the Objective button moves to the next place to check."] }
+  end
+  if qid then
+    acts[#acts + 1] = { L["Remove the quest"], function() CP.ConfirmSkipQuest(st) end,
+      L["Removes the quest from the list (with the prerequisites added only for it); the steps to come of the Roadbook are computed again."] }
+  elseif (st.kind == "hearth" or st.kind == "travel") and st == CP.CurrentFocus() then
+    acts[#acts + 1] = { L["Skip"], function() CP.SkipStep(st) end, st.kind == "travel"
+      and L["Marks this step as done; the steps to come are planned again without this transport for the way to the next step."]
+      or L["Marks this step as done (already there, other way of travel…); the Objective button moves to the next step."] }
+  end
+  return acts
+end
+
+local DragStart, DragStop -- Shift-drag moves the panel (defined with SavePlace)
+
+local function RowClick(self, button)
   local st = self.step
   if not st then return end
+  if panel.dragEnd and GetTime() - panel.dragEnd < 0.3 then return end -- release of a Shift-drag
+  if button == "RightButton" then
+    local acts = StepActions(st)
+    if #acts == 0 or not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+    GameTooltip:Hide()
+    MenuUtil.CreateContextMenu(self, function(_, root)
+      root:CreateTitle(st.task and st.task.title or L["Roadbook step"])
+      for _, a in ipairs(acts) do
+        local d = root:CreateButton(a[1], a[2])
+        if d and d.SetTooltip then
+          d:SetTooltip(function(tip)
+            tip:AddLine(a[1], 1, 1, 1)
+            tip:AddLine(a[3], 0.85, 0.85, 0.85, true)
+          end)
+        end
+      end
+    end)
+    return
+  end
+  if not (WorldMapFrame and WorldMapFrame:IsShown()) then
+    Geo.ShowStep(st) -- map closed: it opens on the step
+    return
+  end
   local u, v = Geo.MapUV(st.p)
   local qid = st.task and st.task.id
   if qid and IsInLog(qid) then
@@ -83,7 +294,7 @@ end
 local function NewRow(parent)
   local r = CreateFrame("Button", nil, parent)
   r:SetHeight(K.MAP_PANEL_ROW)
-  r:RegisterForClicks("LeftButtonUp")
+  r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   r.current = r:CreateTexture(nil, "BACKGROUND")
   r.current:SetAllPoints()
   r.current:SetColorTexture(1, 0.82, 0, 0.18)
@@ -115,12 +326,35 @@ local function NewRow(parent)
   r:SetScript("OnEnter", RowEnter)
   r:SetScript("OnLeave", function() GameTooltip:Hide() end)
   r:SetScript("OnClick", RowClick)
+  r:RegisterForDrag("LeftButton")
+  r:SetScript("OnDragStart", DragStart)
+  r:SetScript("OnDragStop", DragStop)
   return r
 end
 
+local function SavePlace()
+  Settings().stepsPos = { panel:GetLeft() or 0, panel:GetTop() or 0 }
+  Settings().stepsHeight = math.floor(panel:GetHeight() + 0.5)
+end
+
+-- Shift-drag (anywhere on the panel, steps too) moves the panel; the release does not click.
+DragStart = function()
+  if IsShiftKeyDown() then
+    panel.moving = true
+    panel:StartMoving()
+  end
+end
+DragStop = function()
+  if not panel.moving then return end
+  panel.moving = nil
+  panel:StopMovingOrSizing()
+  panel.dragEnd = GetTime()
+  SavePlace()
+end
+
 local function Create()
-  local wm = WorldMapFrame
-  panel = CreateFrame("Frame", nil, wm, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  panel = CreateFrame("Frame", nil, UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  panel:SetFrameStrata("DIALOG") -- over the map when it opens
   if panel.SetBackdrop then
     panel:SetBackdrop({
       bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -136,51 +370,77 @@ local function Create()
     bg:SetColorTexture(0.06, 0.05, 0.03, 0.94)
   end
   panel:EnableMouse(true) -- (over the map: clicks stay on the panel)
+  panel:SetClampedToScreen(true)
+  -- Moved by Shift-drag (as the Objective button), resized in height by its bottom edge.
+  panel:SetMovable(true)
+  panel:SetResizable(true)
+  if panel.SetResizeBounds then
+    panel:SetResizeBounds(K.MAP_PANEL_W, K.MAP_PANEL_MIN_H, K.MAP_PANEL_W, K.MAP_PANEL_MAX_H)
+  elseif panel.SetMinResize then
+    panel:SetMinResize(K.MAP_PANEL_W, K.MAP_PANEL_MIN_H)
+    panel:SetMaxResize(K.MAP_PANEL_W, K.MAP_PANEL_MAX_H)
+  end
+  panel:RegisterForDrag("LeftButton")
+  panel:SetScript("OnDragStart", DragStart)
+  panel:SetScript("OnDragStop", DragStop)
   panel.titleText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   panel.titleText:SetPoint("TOPLEFT", 10, -9)
-  panel.count = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  panel.count:SetPoint("TOPLEFT", panel.titleText, "BOTTOMLEFT", 0, -3)
-  -- No close button: the panel is shown or hidden from OpenMap's menu only (Geo.MapInit).
+  panel.titleText:SetText(L["Roadbook"])
+  -- Header (information and option) shown or hidden: -/+ at the right of the title bar. (No close
+  -- button: the Objective button and the Steps button show or hide the panel.)
+  local fold = CreateFrame("Button", nil, panel)
+  fold:SetSize(16, 16)
+  fold:SetPoint("TOPRIGHT", -8, -7)
+  fold:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight", "ADD")
+  fold:SetScript("OnClick", function()
+    Settings().stepsHeaderHidden = (not Settings().stepsHeaderHidden) or nil
+    GameTooltip:Hide()
+    Geo.MapPanelHeaderSync()
+    UpdateScrollBar(panel.scroll)
+  end)
+  fold:SetScript("OnEnter", function(self)
+    Tip(self, Settings().stepsHeaderHidden and L["Show the information"] or L["Hide the information"],
+      L["Shows or hides the information at the top of the panel (quests, steps, XP, travel, warnings) and its option."])
+  end)
+  fold:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  panel.fold = fold
   -- Start / Pause, as the Roadbook tab's button.
   local startB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   startB:SetSize(66, 20)
-  startB:SetPoint("TOPRIGHT", -8, -5)
+  startB:SetPoint("TOP", 0, -5) -- centered in the title bar
   startB:SetScript("OnClick", function()
     if Geo.Tracking() then CP.Pause() else CP.Start() end
   end)
   startB:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine(L["Start / Pause"], 1, 1, 1)
-    GameTooltip:AddLine(L["Start: the Objective button follows the Roadbook. Pause: the tracking stops, the progress is kept."], 0.85, 0.85, 0.85, true)
-    GameTooltip:Show()
+    Tip(self, L["Start / Pause"], L["Start: the Objective button follows the Roadbook. Pause: the tracking stops, the progress is kept."])
   end)
   startB:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.startB = startB
-  -- Roadbook: opens the Roadbook window on its tab.
-  local showB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  showB:SetSize(66, 20)
-  showB:SetPoint("RIGHT", startB, "LEFT", -2, 0)
-  showB:SetText(L["Roadbook"])
-  showB:SetScript("OnClick", function()
-    if CP.OpenWindow then CP.OpenWindow("xp") end
-  end)
-  showB:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine(L["Roadbook"], 1, 1, 1)
-    GameTooltip:AddLine(L["Opens this Roadbook in the addon's window."], 0.85, 0.85, 0.85, true)
-    GameTooltip:Show()
-  end)
-  showB:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  panel.titleText:SetPoint("RIGHT", showB, "LEFT", -4, 0)
+  panel.titleText:SetPoint("RIGHT", startB, "LEFT", -4, 0)
   panel.titleText:SetJustifyH("LEFT")
   panel.titleText:SetWordWrap(false)
-  local rule = panel:CreateTexture(nil, "ARTWORK")
-  rule:SetColorTexture(1, 0.82, 0, 0.35)
-  rule:SetHeight(1)
-  rule:SetPoint("TOPLEFT", 6, -K.MAP_PANEL_HEAD)
-  rule:SetPoint("TOPRIGHT", -6, -K.MAP_PANEL_HEAD)
+  -- Header: size and progress, XP, travel, what to watch.
+  panel.header = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  panel.header:SetPoint("TOPLEFT", 10, -K.MAP_PANEL_TITLE)
+  panel.header:SetWidth(K.MAP_PANEL_W - 20)
+  panel.header:SetJustifyH("LEFT")
+  panel.header:SetSpacing(2)
+  -- Option: steps done hidden.
+  local hideDone = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+  hideDone:SetSize(20, 20)
+  hideDone.label = hideDone:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  hideDone.label:SetPoint("LEFT", hideDone, "RIGHT", 2, 0)
+  hideDone.label:SetText(L["Hide the finished steps"])
+  hideDone:SetScript("OnClick", function(self)
+    Settings().stepsHideDone = self:GetChecked() or nil
+    panel.scrollKey = nil -- scrolled to the objective again
+    Geo.MapPanelSync()
+  end)
+  panel.hideDone = hideDone
+  panel.rule = panel:CreateTexture(nil, "ARTWORK")
+  panel.rule:SetColorTexture(1, 0.82, 0, 0.35)
+  panel.rule:SetHeight(1)
   local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", 6, -K.MAP_PANEL_HEAD - 4)
   scroll:SetPoint("BOTTOMRIGHT", -26, 8)
   local child = CreateFrame("Frame", nil, scroll)
   child:SetSize(K.MAP_PANEL_W - 32, 1)
@@ -188,11 +448,36 @@ local function Create()
   scroll.child = child
   scroll:HookScript("OnScrollRangeChanged", UpdateScrollBar) -- scroll bar shown only when useful
   panel.scroll, panel.child, panel.rows = scroll, child, {}
-  -- Placed again whenever the map window moves to or from the screen's right edge.
-  wm:HookScript("OnSizeChanged", function()
-    if panel:IsShown() then Geo.MapPanelPlace() UpdateScrollBar(scroll) end
+  -- Resize handle in the middle of the bottom edge: a discreet bar, brighter on hover.
+  local grip = CreateFrame("Button", nil, panel)
+  grip:SetSize(60, 10)
+  grip:SetPoint("BOTTOM", 0, 1)
+  grip:SetFrameLevel(scroll:GetFrameLevel() + 5)
+  grip.bar = grip:CreateTexture(nil, "OVERLAY")
+  grip.bar:SetSize(40, 3)
+  grip.bar:SetPoint("CENTER")
+  grip.bar:SetColorTexture(1, 0.82, 0, 0.45)
+  grip:SetScript("OnEnter", function(self)
+    self.bar:SetColorTexture(1, 0.9, 0.4, 0.9)
   end)
-  wm:HookScript("OnShow", function() panel.scrollKey = nil end) -- scrolled to the objective at each opening
+  grip:SetScript("OnLeave", function(self)
+    self.bar:SetColorTexture(1, 0.82, 0, 0.45)
+  end)
+  grip:SetScript("OnMouseDown", function() panel:StartSizing("BOTTOM") end)
+  grip:SetScript("OnMouseUp", function()
+    panel:StopMovingOrSizing()
+    SavePlace()
+    UpdateScrollBar(scroll)
+  end)
+  -- The header's hearthstone and teleport cooldowns tick while it is shown.
+  local elapsed = 0
+  panel:SetScript("OnUpdate", function(_, e)
+    elapsed = elapsed + e
+    if elapsed >= 5 then
+      elapsed = 0
+      Geo.MapPanelHeaderSync()
+    end
+  end)
 end
 
 ---------------------------------------------------------------------------
@@ -201,10 +486,7 @@ end
 -- Second line of a step: its zone, and its XP.
 local function SubText(s)
   local zone = s.p and (s.p.instance or AreaName(s.p.area) or s.p.zoneName) or "?"
-  local xp
-  if s.kind == "turnin" then xp = Geo.XPText(s.task and s.task.xp)
-  elseif s.kind == "obj" then xp = Geo.XPText(s.xp, true)
-  elseif s.kind == "dungeon" then xp = Geo.XPText(s.xp) end
+  local xp = Geo.StepXP(s)
   return xp and (zone .. K.DESC_SEP .. xp) or zone
 end
 
@@ -213,62 +495,98 @@ local function Plain(s)
   return (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
 end
 
--- Fills the panel with the shown Roadbook (or hides it). Only while the map is open.
+-- Header text again (cooldowns), the option and the list placed under it; folded (-/+ button):
+-- only the list, under the title bar.
+function Geo.MapPanelHeaderSync()
+  if not (panel and panel:IsShown()) then return end
+  local fz = Geo.Frozen()
+  if not fz then return end
+  local done = 0
+  for i = 2, #fz.route do if CP.StepDone(fz.route[i]) then done = done + 1 end end
+  local folded = Settings().stepsHeaderHidden
+  panel.fold:SetNormalTexture(folded and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
+  panel.fold:SetPushedTexture(folded and "Interface\\Buttons\\UI-PlusButton-Down" or "Interface\\Buttons\\UI-MinusButton-Down")
+  panel.header:SetShown(not folded)
+  panel.hideDone:SetShown(not folded)
+  local top = K.MAP_PANEL_TITLE - 2
+  if not folded then
+    local ok, text = pcall(Geo.MapPanelHeader, fz.route, fz.info, done)
+    panel.header:SetText(ok and text or "")
+    top = K.MAP_PANEL_TITLE + (panel.header:GetStringHeight() or 0) + 4
+    panel.hideDone:ClearAllPoints()
+    panel.hideDone:SetPoint("TOPLEFT", 6, -top)
+    top = top + 22
+  end
+  panel.rule:ClearAllPoints()
+  panel.rule:SetPoint("TOPLEFT", 6, -top)
+  panel.rule:SetPoint("TOPRIGHT", -6, -top)
+  panel.scroll:SetPoint("TOPLEFT", 6, -top - 4)
+end
+
+-- Fills the panel with the saved Roadbook, or hides it (no Roadbook, or hidden by the Objective or
+-- Steps button).
 function Geo.MapPanelSync()
-  if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
-  if not (Geo.MapPanelGet() and Geo.MapPanelShown()) then
+  if Settings().stepsHidden or not Geo.MapPanelShown() then
     if panel then panel:Hide() end
     return
   end
-  if not panel then Create() end
-  Geo.MapPanelPlace()
+  -- Placed when it appears (a new frame counts as shown: placed at its creation too).
+  if not panel then
+    Create()
+    Geo.MapPanelPlace()
+  elseif not panel:IsShown() then
+    Geo.MapPanelPlace()
+  end
   panel:Show()
   local route = Geo.Frozen().route
   local cur = CP.CurrentFocus()
   local rows, width = panel.rows, K.MAP_PANEL_W - 32
-  local n, done, target, total = 0, 0, nil, 0
+  local hideDone = Settings().stepsHideDone
+  panel.hideDone:SetChecked(hideDone and true or false)
+  local n, target, total = 0, nil, 0
   for i = 2, #route do
     local st = route[i]
-    total = total + 1
-    local r = rows[total] or NewRow(panel.child)
-    rows[total] = r
-    r:ClearAllPoints()
-    r:SetPoint("TOPLEFT", 0, -(total - 1) * K.MAP_PANEL_ROW)
-    r:SetWidth(width)
-    local isDone = CP.StepDone(st)
-    local ok, title = pcall(CP.StepSummary, st)
-    if not (ok and title) then title = CP.StepText(st) end
-    local c = K.MAP_COLOR[st.kind] or K.MAP_COLOR.other
-    r.bar:SetColorTexture(c[1], c[2], c[3], isDone and 0.3 or 0.9)
-    r.step = st
-    if isDone then
-      done = done + 1
-      r.n = nil
-      r.num:SetText("")
-      r.check:Show()
-      r.title:SetText(Color("808080", Plain(title)))
-      r.sub:SetText(Plain(SubText(st)))
-    else
-      n = n + 1
-      r.n = n
-      r.num:SetText(n)
-      r.check:Hide()
-      r.title:SetText(title)
-      r.sub:SetText(SubText(st))
-      if not target then target = total end -- first step not done
+    -- Steps done hidden (option): the numbers stay those of the pins (steps not done).
+    if not (hideDone and CP.StepDone(st)) then
+      total = total + 1
+      local r = rows[total] or NewRow(panel.child)
+      rows[total] = r
+      r:ClearAllPoints()
+      r:SetPoint("TOPLEFT", 0, -(total - 1) * K.MAP_PANEL_ROW)
+      r:SetWidth(width)
+      local isDone = CP.StepDone(st)
+      local ok, title = pcall(CP.StepSummary, st)
+      if not (ok and title) then title = CP.StepText(st) end
+      local c = K.MAP_COLOR[st.kind] or K.MAP_COLOR.other
+      r.bar:SetColorTexture(c[1], c[2], c[3], isDone and 0.3 or 0.9)
+      r.step = st
+      if isDone then
+        r.n = nil
+        r.num:SetText("")
+        r.check:Show()
+        r.title:SetText(Color("808080", Plain(title)))
+        r.sub:SetText(Plain(SubText(st)))
+      else
+        n = n + 1
+        r.n = n
+        r.num:SetText(n)
+        r.check:Hide()
+        r.title:SetText(title)
+        r.sub:SetText(SubText(st))
+        if not target then target = total end -- first step not done
+      end
+      local isCur = st == cur
+      if isCur then target = total end
+      r.current:SetShown(isCur)
+      r.num:SetTextColor(isCur and 0.4 or 1, 1, isCur and 0.4 or 1)
+      r.time:SetText(FormatTime(math.max(0, (st.at or 0) - (route[i - 1].at or 0)))) -- the step alone
+      r:Show()
     end
-    local isCur = st == cur
-    if isCur then target = total end
-    r.current:SetShown(isCur)
-    r.num:SetTextColor(isCur and 0.4 or 1, 1, isCur and 0.4 or 1)
-    r.time:SetText(FormatTime(st.at or 0))
-    r:Show()
   end
   for i = total + 1, #rows do rows[i]:Hide() rows[i].step = nil end
   panel.child:SetHeight(math.max(1, total * K.MAP_PANEL_ROW))
+  Geo.MapPanelHeaderSync()
   UpdateScrollBar(panel.scroll)
-  panel.titleText:SetText(L["Roadbook"])
-  panel.count:SetText(string.format(L["%d/%d steps done"], done, total))
   local following = Geo.Tracking()
   panel.startB:SetText(following and L["Pause"] or L["Start"])
   panel.startB:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))

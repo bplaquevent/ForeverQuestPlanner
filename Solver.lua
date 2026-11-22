@@ -462,7 +462,7 @@ function S.Evaluate(P, route, opts)
     local lvNow = legacy and pl.level or level
     res.nets[i], res.binds[i] = net, bind
     if st.reqLevel and level < st.reqLevel and not legacy then
-      res.violations[#res.violations + 1] = { i = i, kind = "level", what = "picked up below its required level " .. st.reqLevel }
+      res.violations[#res.violations + 1] = { i = i, kind = "level", ci = st.ci, what = "picked up below its required level " .. st.reqLevel }
     end
     local move, dest = 0, st.p
     if st.kind == "hearth" then
@@ -520,8 +520,10 @@ end
 ---------------------------------------------------------------------------
 -- Goal
 ---------------------------------------------------------------------------
--- Goal of the automatic Roadbook: { kind = "time", value = seconds } (most XP within that time) or
--- { kind = "level", value = level } (fastest route to that level, at least the next one: target).
+-- Goal of a computation: "custom" (every quest of the list, P.custom, in the least time),
+-- { kind = "time", value = seconds } (most XP within that time) or { kind = "level", value = level }
+-- (fastest route to that level, at least the next one: target). With a list (P.custom), a duration or
+-- level goal completes it with candidate quests, or keeps only the part of it that serves the goal best.
 function S.Goal(P, goal)
   if goal == "custom" then return goal end
   goal = goal or P.player.goal or { kind = "time", value = 7200 }
@@ -537,30 +539,40 @@ end
 -- does, and two such routes compare by the time they would take getting the missing XP at their own rate;
 -- time goal: minus the XP gained within the time; custom Roadbook ("custom"): total time, a quest picked
 -- up below its required level costing S.LEVEL_PENALTY (its list may not allow better: a soft rule).
+-- A quest of the list picked up below its required level is a soft rule with the other goals too
+-- (S.LIST_LEVEL_PENALTY XP for a duration, S.LEVEL_PENALTY seconds for a level).
+S.LIST_LEVEL_PENALTY = 1e6
 function S.Objective(P, res, goal)
-  if goal == "custom" then
-    local penalty = 0
-    for _, v in ipairs(res.violations) do
-      if v.kind ~= "level" then return 1e12 + #res.violations end
-      penalty = penalty + S.LEVEL_PENALTY
-    end
-    return res.time + penalty
+  local soft = 0
+  for _, v in ipairs(res.violations) do
+    if v.kind ~= "level" or not v.ci then return 1e12 + #res.violations end
+    soft = soft + 1
   end
-  if #res.violations > 0 then return 1e12 + #res.violations end
+  if goal == "custom" then return res.time + soft * S.LEVEL_PENALTY end
   local eps = 1e-3 * res.time
   if goal.kind == "level" then
-    if res.reach then return res.reach + eps end
+    if res.reach then return res.reach + eps + soft * S.LEVEL_PENALTY end
     local pl = P.player
     local missing = ((res.level == pl.level and pl.xpMax) or Needed(P, res.level)) - res.xpLeft
     for lv = res.level + 1, goal.target - 1 do missing = missing + Needed(P, lv) end
     local rate = math.max(res.xp / math.max(res.time, 60), 0.5)
-    return 1e7 + res.time + missing / rate + eps
+    return 1e7 + res.time + missing / rate + eps + soft * S.LEVEL_PENALTY
   end
   local xp = 0
   for i = 2, #res.at do
     if res.at[i] <= goal.value then xp = xp + res.stepXP[i] end
   end
-  return -xp + eps
+  return -xp + eps + soft * S.LIST_LEVEL_PENALTY
+end
+
+-- Rules broken by a route that no order of its steps can excuse (every violation but a quest of the
+-- list picked up below its required level).
+function S.HardViolations(res)
+  local n = 0
+  for _, v in ipairs(res.violations) do
+    if v.kind ~= "level" or not v.ci then n = n + 1 end
+  end
+  return n
 end
 
 ---------------------------------------------------------------------------
@@ -755,12 +767,19 @@ local function QuickTravel(P, a, b)
 end
 
 -- Inserts a task's steps where they cost the least (quick estimate), in their order, after the turn-in
--- of the quest they follow. Returns the new core and the extra time, or nil.
+-- of the quest they follow (a candidate quest or a quest of the list: depCi). Returns the new core and
+-- the extra time, or nil.
 function S.InsertTask(P, core, t)
   local r = {}
   for i, st in ipairs(core) do r[i] = st end
   local lo = 1
-  if t.dep then
+  if t.depCi then
+    lo = nil
+    for i, st in ipairs(r) do
+      if st.ci == t.depCi then lo = i break end
+    end
+    if not lo then return nil end
+  elseif t.dep then
     local dep = P.byN[t.dep]
     local last = dep and dep.stops[#dep.stops]
     lo = nil
@@ -794,14 +813,16 @@ end
 -- objectives in any order, fixed ones at their place, turn-in last), escort steps right after the
 -- previous step, a follow-up started after the turn-in of the quest it follows.
 function S.Valid(P, core)
-  local seen, done = {}, {}
+  local seen, done, ciDone = {}, {}, {}
   for i = 2, #core do
     local s = core[i]
+    if s.ci then ciDone[s.ci] = true end
     if s.tn then
       local c = seen[s.tn] or 0
       if c < s.below then return false end
       local t = P.byN[s.tn]
       if c == 0 and t.dep and not done[t.dep] then return false end
+      if c == 0 and t.depCi and not ciDone[t.depCi] then return false end
       if s.glue and s.k > 1 then
         local prev = core[i - 1]
         if prev.tn ~= s.tn or prev.k ~= s.k - 1 then return false end
@@ -829,6 +850,8 @@ end
 -- by the quick estimate and sorted by estimated XP per second.
 function S.Additions(P, core)
   local tasks, ids = Contents(core)
+  local ciIn = {}
+  for _, st in ipairs(core) do if st.ci then ciIn[st.ci] = true end end
   -- Quick sort of every quest that can be added: value with its follow-ups per second of its work plus
   -- a round trip from the nearest step of the route; only the best ADD_POOL ones are inserted.
   local pts = {}
@@ -836,7 +859,8 @@ function S.Additions(P, core)
   local k, speed = P.k, P.player.speed
   local pool = {}
   for _, t in ipairs(P.tasks) do
-    if not tasks[t.n] and not (t.id and ids[t.id]) and (not t.dep or tasks[t.dep]) then
+    if not tasks[t.n] and not t.inList and not (t.id and ids[t.id]) and (not t.dep or tasks[t.dep])
+      and (not t.depCi or ciIn[t.depCi]) then
       local d
       for _, s in ipairs(t.stops) do
         for _, q in ipairs(pts) do
@@ -867,7 +891,7 @@ function S.Additions(P, core)
         local best
         for _, fn in ipairs(P.followers[cur.n] or {}) do
           local f = P.byN[fn]
-          if not (f.id and (ids[f.id] or chainIds[f.id])) and (not best or (f.estValue or 0) > (best.estValue or 0)) then best = f end
+          if not f.inList and not (f.id and (ids[f.id] or chainIds[f.id])) and (not best or (f.estValue or 0) > (best.estValue or 0)) then best = f end
         end
         if not best then break end
         cur = best
@@ -1000,10 +1024,151 @@ function S.BuildCustom(P, core, rand, noise)
   return r
 end
 
--- Best automatic Roadbook for a goal: construction (quests or chains of quests with the most XP per
--- second added, until the goal is reached), then local search on the goal value: blocks of steps
--- moved, quests removed or added, binds at an inn, flight paths activated on the way.
--- Returns { route, res, core, evals, seconds, goal }.
+---------------------------------------------------------------------------
+-- List with candidate quests (a duration or level goal with a list): the list is kept whole and
+-- completed ("keep"), or only its part serving the goal best is kept ("pick")
+---------------------------------------------------------------------------
+-- Candidates already in the list are left out (inList); a candidate following a quest of the list
+-- starts after that quest's turn-in step (depCi: its step, or the dungeon visit where it is turned in).
+-- Units of the list: a quest, or the quests sharing a dungeon visit, added or removed whole ("pick").
+function S.MixPrepare(P)
+  local C = P.custom
+  if C.units then return end
+  local tiOf, turnin = {}, {}
+  for ti, t in ipairs(C.tasks) do if t.id then tiOf[t.id] = ti end end
+  for _, st in ipairs(C.steps) do
+    if st.kind == "turnin" and st.ti then turnin[st.ti] = st.ci end
+    for _, m in ipairs(st.members or {}) do
+      if m.kind == "turnin" and m.id and tiOf[m.id] then turnin[tiOf[m.id]] = st.ci end
+    end
+  end
+  for _, t in ipairs(P.tasks or {}) do
+    if t.id and tiOf[t.id] then t.inList = true end
+  end
+  for _, t in ipairs(P.tasks or {}) do
+    local d = t.dep and P.byN[t.dep]
+    if d and d.inList and not t.inList then
+      t.depCi, t.dep = turnin[tiOf[d.id]], nil
+      if not t.depCi then t.inList = true end -- turn-in of the list quest not found: left out
+    end
+  end
+  local parent = {}
+  for ti in ipairs(C.tasks) do parent[ti] = ti end
+  local function find(x)
+    while parent[x] ~= x do x = parent[x] end
+    return x
+  end
+  for _, st in ipairs(C.steps) do
+    local first
+    for _, m in ipairs(st.members or {}) do
+      local ti = m.id and tiOf[m.id]
+      if ti then
+        if first then parent[find(ti)] = find(first) else first = ti end
+      end
+    end
+    st.memberTi = first
+  end
+  C.unitOf, C.units, C.unitList = {}, {}, {}
+  for _, st in ipairs(C.steps) do
+    local ti = st.ti or st.memberTi
+    local u = ti and find(ti) or -st.ci
+    C.unitOf[st.ci] = u
+    if not C.units[u] then
+      C.units[u] = {}
+      C.unitList[#C.unitList + 1] = u
+    end
+    table.insert(C.units[u], st.ci)
+  end
+end
+
+-- Units of the list in a core.
+function S.UnitsIn(P, core)
+  local inCore = {}
+  for _, st in ipairs(core) do if st.ci then inCore[P.custom.unitOf[st.ci]] = true end end
+  return inCore
+end
+
+-- Inserts the steps of a unit of the list where they cost the least (quick estimate), each one once
+-- the steps before it are placed. Returns the new core, or nil (a step before it is not in the core).
+function S.InsertUnit(P, core, u, rand, noise)
+  local C = P.custom
+  local r = {}
+  for i, st in ipairs(core) do r[i] = st end
+  local remaining = {}
+  for _, ci in ipairs(C.units[u]) do remaining[#remaining + 1] = C.steps[ci] end
+  while #remaining > 0 do
+    local pos = {}
+    for i, st in ipairs(r) do if st.ci then pos[st.ci] = i end end
+    local best
+    for ri, s in ipairs(remaining) do
+      local ok, lo, hi = true, 1, #r
+      if not s.relaxed then
+        for _, pc in ipairs(C.pred[s.ci] or {}) do
+          local j = pos[pc]
+          if not j then ok = false break end
+          if j > lo then lo = j end
+        end
+      end
+      if ok and s.glueTo then
+        local j = pos[s.glueTo]
+        if j then lo, hi = j, j else ok = false end
+      end
+      if ok then
+        for j = lo, hi do
+          local a, b = r[j], r[j + 1]
+          if not (b and (b.glueTo or b.glue)) then
+            local d = QuickTravel(P, a.p, s.p)
+            if b then d = d + QuickTravel(P, s.p, b.p) - QuickTravel(P, a.p, b.p) end
+            if noise then d = d * (1 + noise * (rand(1000) - 1) / 1000) end
+            if not best or d < best.d then best = { ri = ri, j = j, d = d } end
+          end
+        end
+      end
+    end
+    if not best then return nil end
+    table.insert(r, best.j + 1, table.remove(remaining, best.ri))
+  end
+  return r
+end
+
+-- Removes a unit of the list, and the units needing it (a step before theirs, e.g. a prerequisite
+-- turned in).
+function S.WithoutUnit(P, core, u)
+  local C = P.custom
+  local gone = { [u] = true }
+  local changed = true
+  while changed do
+    changed = false
+    local present = {}
+    for _, st in ipairs(core) do
+      if st.ci and not gone[C.unitOf[st.ci]] then present[st.ci] = true end
+    end
+    for _, st in ipairs(core) do
+      local v = st.ci and C.unitOf[st.ci]
+      if v and not gone[v] and not st.relaxed then
+        for _, pc in ipairs(C.pred[st.ci] or {}) do
+          if not present[pc] then
+            gone[v], changed = true, true
+            break
+          end
+        end
+      end
+    end
+  end
+  local r = {}
+  for _, st in ipairs(core) do
+    if not (st.ci and gone[C.unitOf[st.ci]]) then r[#r + 1] = st end
+  end
+  return r
+end
+
+-- Best Roadbook for a goal: construction (quests or chains of quests with the most XP per second
+-- added, until the goal is reached), then local search on the goal value: blocks of steps moved,
+-- quests removed or added, binds at an inn, flight paths activated on the way.
+-- "custom": every step of the list. A duration or level goal with a list (P.custom): the whole list
+-- when it does not reach the goal, completed with candidate quests (mode "keep"); otherwise the units
+-- of the list (quests) serving the goal best (mode "pick"), without candidates.
+-- Returns { route, res, core, evals, seconds, goal, mode }.
 function S.Optimize(P, goal, opts)
   opts = opts or {}
   local O = S.OPT
@@ -1013,10 +1178,14 @@ function S.Optimize(P, goal, opts)
   P.net0 = P.net0 or S.Network(W, S.KnownStart(P), P.player.speed)
   goal = S.Goal(P, goal)
   local custom = goal == "custom"
-  if custom then
+  local mixed = not custom and P.custom ~= nil and #(P.custom.steps or {}) > 0
+  if custom or mixed then
     for _, st in ipairs(P.custom.steps) do S.Variants(st) end
   end
+  if mixed then S.MixPrepare(P) end
   local valid = custom and S.ValidCustom or S.Valid
+  if mixed then valid = function(p, c) return S.ValidCustom(p, c) and S.Valid(p, c) end end
+  local mode -- mixed: "keep" or "pick"
   local t0 = S.clock and S.clock() or 0
   local evals = 0
   local maxEvals = opts.maxEvals or O.MAX_EVALS
@@ -1044,8 +1213,35 @@ function S.Optimize(P, goal, opts)
   -- Construction: adds the quest (or chain) bringing the most XP per second added, until the goal
   -- (custom Roadbook: every step of the list, by cheapest insertion).
   -- noise: each rate is multiplied by a random factor up to 1 + noise (rebuilds explore other choices).
+  -- Units of the list added by the most XP per second (a unit adding a rule broken counts less).
+  local function constructUnits(c, noise, share)
+    local cur = sim(c)
+    while not reached(cur) and not out(share) do
+      local inCore, best = S.UnitsIn(P, c), nil
+      for _, u in ipairs(P.custom.unitList) do
+        if not inCore[u] then
+          local cand = S.InsertUnit(P, c, u, rand, noise)
+          if cand and valid(P, cand) then
+            local res = sim(cand)
+            local ok = S.HardViolations(res) == 0
+            if ok and goal.kind == "time" and res.time > goal.value * O.OVERSHOOT then ok = false end
+            if ok then
+              local rate = (res.xp - cur.xp) / math.max(res.time - cur.time, 30)
+              if #res.violations > #cur.violations then rate = rate / 10 end
+              if noise then rate = rate * (1 + noise * (rand(1000) - 1) / 1000) end
+              if rate > 0 and (not best or rate > best.rate) then best = { core = cand, res = res, rate = rate } end
+            end
+          end
+        end
+      end
+      if not best then break end
+      c, cur = best.core, best.res
+    end
+    return c
+  end
   local function construct(c, noise, share)
     if custom then return S.BuildCustom(P, c, rand, noise) end
+    if mode == "pick" then return constructUnits(c, noise, share) end
     local cur = sim(c)
     while not reached(cur) and not out(share) do
       local best
@@ -1054,7 +1250,7 @@ function S.Optimize(P, goal, opts)
         local cand = adds[j].core
         if valid(P, cand) then
           local res = sim(cand)
-          local ok = #res.violations == 0
+          local ok = S.HardViolations(res) == 0
           if ok and goal.kind == "time" and res.time > goal.value * O.OVERSHOOT then ok = false end
           if ok then
             local rate = (res.xp - cur.xp) / math.max(res.time - cur.time, 30)
@@ -1068,7 +1264,14 @@ function S.Optimize(P, goal, opts)
     end
     return c
   end
-  local core = construct({ { kind = "start", p = P.player.pos, work = 0 } }, nil, O.BUILD_SHARE)
+  local start = { { kind = "start", p = P.player.pos, work = 0 } }
+  if mixed then
+    -- The whole list reaching the goal: only its best part; otherwise all of it, completed.
+    local whole = S.BuildCustom(P, start, rand)
+    mode = reached(sim(whole)) and "pick" or "keep"
+    if mode == "keep" then start = whole end
+  end
+  local core = construct(start, nil, O.BUILD_SHARE)
 
   -- Local search: every change kept when the goal value improves.
   local bestScore, bestRes, bestRoute
@@ -1159,6 +1362,27 @@ function S.Optimize(P, goal, opts)
     return any
   end
 
+  -- Units of the list removed or added ("pick").
+  local function removeUnits()
+    local any = false
+    for _, u in ipairs(P.custom.unitList) do
+      if out() then break end
+      if S.UnitsIn(P, core)[u] and try(S.WithoutUnit(P, core, u)) then any = true end
+    end
+    return any
+  end
+  local function addUnits()
+    local any = false
+    for _, u in ipairs(P.custom.unitList) do
+      if out() then break end
+      if not S.UnitsIn(P, core)[u] then
+        local c = S.InsertUnit(P, core, u, rand)
+        if c and try(c) then any = true end
+      end
+    end
+    return any
+  end
+
   -- Hunting spots: each objective step tried at its other dense spots; kept when the route gets better
   -- (the detour from the route against the hunting time there).
   local function spots()
@@ -1224,7 +1448,8 @@ function S.Optimize(P, goal, opts)
     repeat
       rounds = rounds + 1
       local improved = false
-      local moves = custom and { relocate, spots, flightMasters, binds }
+      local moves = (custom and { relocate, spots, flightMasters, binds })
+        or (mode == "pick" and { relocate, spots, removeUnits, addUnits, flightMasters, binds })
         or { relocate, spots, remove, add, swap, flightMasters, binds }
       for _, move in ipairs(moves) do
         if out() then break end
@@ -1241,10 +1466,14 @@ function S.Optimize(P, goal, opts)
   local rebuilt = 0
   for it = 1, O.LNS_ROUNDS do
     if out() then break end
-    -- Quests of the route and their steps (automatic: task numbers; custom: quests of the list).
+    -- Quests of the route and their steps (candidates: task numbers; custom: quests of the list;
+    -- "pick": units of the list).
     local steps, tasks = {}, {}
     for _, st in ipairs(core) do
-      local key = custom and st.ti or st.tn
+      local key
+      if custom then key = st.ti
+      elseif mode == "pick" then key = st.ci and P.custom.unitOf[st.ci]
+      else key = st.tn end
       if key then
         if not steps[key] then
           steps[key] = {}
@@ -1272,6 +1501,10 @@ function S.Optimize(P, goal, opts)
       for _, st in ipairs(core) do
         if not (st.ti and drop[st.ti]) then c[#c + 1] = st end
       end
+    elseif mode == "pick" then
+      for _, key in ipairs(tasks) do
+        if drop[key] then c = S.WithoutUnit(P, c, key) end
+      end
     else
       for _, key in ipairs(tasks) do
         if drop[key] then c = Without(P, c, key) end
@@ -1284,7 +1517,7 @@ function S.Optimize(P, goal, opts)
   end
 
   return { route = bestRoute, res = bestRes, core = core, evals = evals, rounds = rounds, rebuilt = rebuilt, goal = goal,
-    seconds = S.clock and (S.clock() - t0) or nil, score = bestScore }
+    mode = mode, seconds = S.clock and (S.clock() - t0) or nil, score = bestScore }
 end
 
 -- Shared with the next files.

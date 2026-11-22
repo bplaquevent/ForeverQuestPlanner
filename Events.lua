@@ -51,7 +51,8 @@ f:SetScript("OnEvent", function(_, event, ...)
     Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
     -- Options saved from the settings window or the tabs.
     local st = Settings()
-    Geo.MigrateRoadbooks() -- before the goal: a custom Roadbook kept selects the Custom goal
+    Geo.MigrateRoadbooks() -- before the goal: a custom Roadbook kept selects the "whole list" option
+    Geo.MigrateAutoRoadbook()
     if type(st.goal) == "table" and (st.goal.kind == "custom" or (st.goal.kind and st.goal.value)) then
       State.xpGoal = { kind = st.goal.kind, value = st.goal.value }
     end

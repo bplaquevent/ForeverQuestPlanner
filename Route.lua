@@ -401,10 +401,10 @@ function Geo.PreloadRewardItems()
   end
 end
 
--- Goal of the automatic Roadbook: { kind = "time", value = seconds } (most XP in that time) or
+-- "Generate" options: { kind = "time", value = seconds } (most XP in that time) or
 -- { kind = "level", value = level } (fastest route to that level).
 -- A far level is reached in stages: one computation plans at most this much, then "Generate"
--- at the end of the Roadbook computes the next stage (with the real XP and flight paths).
+-- at the end of the Roadbook plans the next stage (with the real XP and flight paths).
 K.LEVEL_PLAN_MAX_TIME = 40 * 3600 -- level goal: longest Roadbook computed
 K.PLAN_TIME = 30                  -- seconds of computation for a Roadbook, at most (solver budget, shown in the waiting messages)
 
@@ -466,61 +466,6 @@ function Geo.FromSolver(P, sroute, res)
   return route, info
 end
 
--- opts (adapting a Roadbook): ban = transport not usable on the first leg (Solver: P.ban).
-local function PlanXP(goal, opts)
-  Geo.PreloadRewardItems()
-  local pos = PlayerPos()
-  if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
-  if UnitLevel("player") >= Geo.MaxLevel() then
-    return nil, L["Max level reached: no more XP to earn. Choose the \"Custom list\" goal to do the quests you choose."]
-  end
-  Geo.xpScale = nil
-  Geo.planSpeed = TravelSpeed()
-  local P = Geo.Problem("auto", pos)
-  P.ban = opts and opts.ban
-  local opt = Geo.Solve(P, goal)
-  local route, info = Geo.FromSolver(P, opt.route, opt.res)
-  local g = opt.goal
-  info.skipped, info.later = P.skipped, P.later
-  info.goal = { kind = g.kind, value = g.kind == "level" and g.target or g.value }
-  -- Target not reached in one computation (its size, or the quests known now): this Roadbook is a
-  -- stage; "Generate" at its end plans the next one from the real level, XP and flight paths.
-  if g.kind == "level" and not opt.res.reach then info.goalStage = true end
-  return route, nil, info
-end
-
--- Skipped quest: its steps leave the saved Roadbook `fz` and the route of the steps left is
--- adapted: the travel, flight master and hearthstone steps are computed again for them, in the
--- same order (no quest is added). isDone(st): step done, kept as it is at the start of the route.
--- Returns the new route and its info.
-Geo.AUX_STEPS = { travel = true, fm = true, hearth = true, bind = true }
-function Geo.Reroute(fz, id, isDone)
-  local old = fz.route
-  local done, todo = {}, {}
-  for i = 2, #old do
-    local st = old[i]
-    if isDone(st) then
-      done[#done + 1] = st
-    elseif not (st.task and st.task.id == id) and not Geo.AUX_STEPS[st.kind] then
-      todo[#todo + 1] = st
-    end
-  end
-  local pos = PlayerPos() or (done[#done] or old[1]).p
-  local P = Geo.Problem("none", pos)
-  local core = { { kind = "start", p = P.player.pos, work = 0 } }
-  for _, st in ipairs(todo) do core[#core + 1] = ns.Problem.Step(st, true) end
-  local goal = fz.info.custom and "custom" or Solver.Goal(P, fz.info.goal)
-  local res, sroute = Solver.Simulate(P, core, goal)
-  local rest, restInfo = Geo.FromSolver(P, sroute, res)
-  local info = {}
-  for k, v in pairs(fz.info) do info[k] = v end
-  local route = Geo.KeepDone(fz, isDone, rest, restInfo, info)
-  info.net, info.speed, info.netCache = restInfo.net, restInfo.speed, nil
-  local levels = info.levels
-  if info.goal and info.goal.kind == "level" then info.goalStage = (levels[#levels] or 0) < info.goal.value or nil end
-  return route, info
-end
-
 -- History of a Roadbook computed again: the steps done of the saved Roadbook `fz` (isDone(st)) come
 -- first, in their order, with their time and level as planned, marked done for good; then the new
 -- steps `rest` (route from a start step, info `restInfo`), their times following the last step done.
@@ -565,7 +510,7 @@ function Geo.KeepDone(fz, isDone, rest, restInfo, info)
 end
 
 -- Roadbook computation in the background (spread over several frames) with caching.
--- goal: goal of the automatic Roadbook ({ kind, value }) or "custom" (custom Roadbook, its quest list in the key).
+-- goal: "Generate" option ({ kind, value }) or "custom" (the whole list); the list is in the key.
 function Geo.GoalKey(goal)
   if goal == "custom" then return goal end
   return goal.kind .. goal.value
@@ -584,9 +529,7 @@ function Geo.PlanKey(goal)
   local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
   local b = Geo.BindStore()[CharKey()]
   local list = {}
-  if goal == "custom" then
-    for _, it in ipairs(Geo.CustomList()) do list[#list + 1] = it.id end
-  end
+  for _, it in ipairs(Geo.CustomList()) do list[#list + 1] = it.id end
   return table.concat({ Geo.GoalKey(goal), table.concat(list, ","), tostring(Settings().noHearth),
     tostring(Settings().noRecallSpells), tostring(Settings().noFMDetour), UnitLevel("player"),
     UnitXP and UnitXP("player") or 0, e and e.updated or "", tostring(scan.entries), TaxiCount(),
@@ -595,7 +538,7 @@ end
 
 -- Returns true if the cached plan is up to date; otherwise starts (or continues) the computation and
 -- calls cb(route, err, info) when done. force = recompute even if the cache is valid.
--- opts: a Roadbook adapted (PlanXP / Geo.PlanCustom), computed apart from the plans of the tabs.
+-- opts: a Roadbook adapted (Geo.PlanCustom), computed apart from the plans of the tabs.
 function Geo.RequestPlan(goal, cb, force, opts)
   local key = Geo.PlanKey(goal) .. (opts and "|adapt" or "")
   local pos = PlayerPos()
@@ -614,7 +557,7 @@ function Geo.RequestPlan(goal, cb, force, opts)
   Geo.runningKey = key
   local co = coroutine.create(function()
     if goal == "custom" then return Geo.PlanCustom(opts) end
-    return PlanXP(goal, opts)
+    return Geo.PlanGenerate(goal, opts)
   end)
   Geo.co = co
   local function finish(result)

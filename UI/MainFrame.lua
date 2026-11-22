@@ -11,10 +11,13 @@ local SelectTab, Settings, Snapshot, State, StopNearTicker, expandedCategories =
 local journalStates, nearStates, panels, tabButtons = ns.journalStates, ns.nearStates, ns.panels, ns.tabButtons
 
 -- Roadbook tab, options at the top:
---                       [  search  ]                                 [Map] [Start|Pause] [Delete]
+--   [Steps]             [  search  ]                                 [Map] [Start|Pause] [Delete]
 --   +-------------------------------------------------------------------------------------------+
---   | Goal: (o) Session of [2 h v]   (o) Reach level [25 v]   (o) Custom list          [Generate] |
+--   | Generate for: (o) a session of [2 h v]  (o) level [25 v]  (o) the whole list    [Generate] |
 --   +-------------------------------------------------------------------------------------------+
+--   Quests                                                                          [Remove all]
+--   N quests (fixed header)
+--   (list of the quests, scrolling; the steps are in the panel of the map, RoadbookPanel.lua)
 local function CreateRoadbookPanel(f)
   local xp = CreateFilterPanel(f, {}, function() return nil end, function() end, function(text)
     State.xpQuery = ParseQuery(text)
@@ -34,6 +37,10 @@ local function CreateRoadbookPanel(f)
   -- the window; the radio buttons, captions and "Generate" are created in it.
   local host = FilterBox(xp)
   local rowY = AddFilterRow(xp)
+  -- The quests of the list under the box: a fixed header over their own list.
+  xp.scroll:Hide()
+  local top = K.FILTER_BOX_TOP - host:GetHeight() - 6
+  xp.quests = Geo.CreatePane(xp, 12, (f:GetWidth() or 820) - 12, top)
   -- Radio button and caption: x from the left of the box, y of the middle of their row.
   local function Radio(x, y, label, onClick)
     local okR, b = pcall(CreateFrame, "CheckButton", nil, host, "UIRadioButtonTemplate")
@@ -66,7 +73,7 @@ local function CreateRoadbookPanel(f)
   delete:SetText(L["Delete"])
   delete:SetScript("OnClick", function() CP.Delete() end)
   delete:SetPoint("TOPRIGHT", -12, -70)
-  Tooltip(delete, L["Delete"], L["Deletes the Roadbook: its steps and their progress, and the custom quest list when it is made of it."])
+  Tooltip(delete, L["Delete"], L["Deletes the Roadbook: its steps, their progress and the quest list."])
   local startB = CreateFrame("Button", nil, xp, "UIPanelButtonTemplate")
   startB:SetSize(80, 22)
   startB:SetText(L["Start"])
@@ -87,14 +94,24 @@ local function CreateRoadbookPanel(f)
     if o and o.mode == "preview" then mapB:LockHighlight() else mapB:UnlockHighlight() end
   end
   Geo.mapButtons = { UpdateMapButton }
+  -- Steps panel (RoadbookPanel.lua): shown or hidden.
+  local stepsB = CreateFrame("Button", nil, xp, "UIPanelButtonTemplate")
+  stepsB:SetSize(80, 22)
+  stepsB:SetText(L["Steps"])
+  stepsB:SetScript("OnClick", function() Geo.MapPanelOpen(true) end)
+  stepsB:SetPoint("TOPLEFT", 14, -70) -- left of the search line (the right one is full)
+  Tooltip(stepsB, L["Steps"], L["Shows or hides the panel of the Roadbook's steps. The Objective button does it too."])
+  function xp.UpdateStepsButton()
+    stepsB:SetEnabled(Geo.Frozen() ~= nil)
+  end
   local generate = Button(L["Generate"], 80, function() CP.Generate() end)
   generate:SetPoint("RIGHT", host, "TOPRIGHT", -8, rowY) -- right end of the goal box
-  Tooltip(generate, L["Generate"], L["Computes a new Roadbook with the chosen goal; the current one is replaced, after confirmation. Click \"Start\" to follow the new one."])
+  Tooltip(generate, L["Generate"], L["Computes a new Roadbook with the chosen option, the list becoming its quests; the current one is replaced, after confirmation. Click \"Start\" to follow the new one. Afterwards, the Roadbook always does every quest of the list in the least time, and is computed again at each change of the list."])
 
   -- Waiting animation while the Roadbook is computed (Geo.RenderBusy shows it).
   local busy = CreateFrame("Frame", nil, xp)
   busy:SetSize(400, 120)
-  busy:SetPoint("TOP", xp.scroll, "TOP", 10, -70)
+  busy:SetPoint("TOP", xp, "TOP", 0, top - 90)
   busy:Hide()
   local busyText = busy:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   busyText:SetPoint("TOP", 0, 0)
@@ -139,7 +156,7 @@ local function CreateRoadbookPanel(f)
     startB:SetEnabled(not Geo.computing and (following or (Geo.HasRoadbook() and not Geo.IsFinished())))
     mapB:SetEnabled(not Geo.computing and Geo.HasRoadbook())
     UpdateMapButton()
-    delete:SetEnabled(not Geo.computing and (Geo.HasRoadbook() or (CP.CustomMode() and #Geo.CustomRec().list > 0)))
+    delete:SetEnabled(not Geo.computing and (Geo.HasRoadbook() or #Geo.CustomRec().list > 0))
     generate:SetEnabled(not Geo.computing)
   end
   return xp
@@ -148,7 +165,7 @@ end
 -- Goal of the Roadbook on one row of its box (y: middle of the row), one radio button per
 -- dropdown; returns its update function.
 function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
-  local _, gx = Caption(10, y, L["Goal:"])
+  local _, gx = Caption(10, y, L["Generate for:"])
   local function GoalTime()
     local g = State.xpGoal
     return Settings().goalTime or (g.kind == "time" and g.value) or 7200
@@ -163,17 +180,19 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
     local v = Settings().goalLevel or (g.kind == "level" and g.value) or lo
     return math.min(math.max(v, lo), hi)
   end
-  local timeRadio, tx = Radio(gx, y, L["Session of"], function() CP.SetGoal("time", GoalTime()) end)
-  Tooltip(timeRadio, L["For a play session"], L["The route earning the most XP within this time."])
+  local timeTip = L["The list is completed with the quests earning the most XP within this time (all its quests kept), or, when it is longer, only its quests earning the most XP within this time are kept."]
+  local timeRadio, tx = Radio(gx, y, L["a session of"], function() CP.SetGoal("time", GoalTime()) end)
+  Tooltip(timeRadio, L["For a play session"], timeTip)
   -- Each dropdown right after its label.
   local TIMES = { { key = 3600, label = "1 h" }, { key = 7200, label = "2 h" }, { key = 10800, label = "3 h" },
     { key = 14400, label = "4 h" } }
   local timeDD = Geo.Dropdown(box, 60, function() return TIMES end,
     function(v) return GoalTime() == v end, function(v) CP.SetGoal("time", v) end)
   timeDD:SetPoint("LEFT", box, "TOPLEFT", tx + 4, y)
-  Tooltip(timeDD, L["For a play session"], L["The route earning the most XP within this time."])
-  local levelRadio, lx = Radio(tx + 4 + 60 + 26, y, L["Reach level"], function() CP.SetGoal("level", GoalLevel()) end)
-  Tooltip(levelRadio, L["To reach the level"], L["The fastest route to this level (at most 10 levels above yours)."])
+  Tooltip(timeDD, L["For a play session"], timeTip)
+  local levelTip = L["The list is completed with the quests reaching this level the fastest (all its quests kept), or, when it goes beyond, only its quests reaching it the fastest are kept (at most 10 levels above yours)."]
+  local levelRadio, lx = Radio(tx + 4 + 60 + 26, y, L["level"], function() CP.SetGoal("level", GoalLevel()) end)
+  Tooltip(levelRadio, L["To reach the level"], levelTip)
   -- Levels from the current level + 1 to K.GOAL_LEVEL_SPAN levels above (at most max level).
   local levelDD = Geo.Dropdown(box, 60, function()
     local lo, hi = LevelRange()
@@ -182,10 +201,10 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
     return list
   end, function(v) return GoalLevel() == v end, function(v) CP.SetGoal("level", v) end)
   levelDD:SetPoint("LEFT", box, "TOPLEFT", lx + 4, y)
-  Tooltip(levelDD, L["To reach the level"], L["The fastest route to this level (at most 10 levels above yours)."])
-  local customRadio = Radio(lx + 4 + 60 + 26, y, L["Custom list"], function() CP.SetGoal("custom") end)
-  Tooltip(customRadio, L["Custom list"], function()
-    return string.format(L["The fastest route doing every quest of your list (%d now): add them with the \"Add\" button of the other tabs, with the prerequisites they still need. Once generated, the Roadbook is computed again at each change of the list."], #Geo.CustomList())
+  Tooltip(levelDD, L["To reach the level"], levelTip)
+  local customRadio = Radio(lx + 4 + 60 + 26, y, L["the whole list"], function() CP.SetGoal("custom") end)
+  Tooltip(customRadio, L["The whole list"], function()
+    return string.format(L["The fastest route doing every quest of the list (%d now), as it is: add quests with the \"Add\" button of the other tabs, with the prerequisites they still need."], #Geo.CustomList())
   end)
 
   -- Update function.
@@ -196,6 +215,10 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
       State.xpGoal = { kind = "level", value = GoalLevel() }
       Settings().goal = { kind = "level", value = State.xpGoal.value }
     end
+    -- Max level: no XP to earn, only the whole list.
+    local xpLeft = UnitLevel("player") < Geo.MaxLevel()
+    timeRadio:SetEnabled(xpLeft)
+    levelRadio:SetEnabled(xpLeft)
     timeRadio:SetChecked(State.xpGoal.kind == "time")
     levelRadio:SetChecked(State.xpGoal.kind == "level")
     customRadio:SetChecked(State.xpGoal.kind == "custom")
@@ -363,7 +386,7 @@ local function CreateMainFrame()
     { key = "dungeon", label = L["Dungeons"] },
     { key = "pvp", label = L["PvP"] },
     { key = "class", label = L["Class & professions"] },
-    { key = "custom", label = L["Custom list"] },
+    { key = "custom", label = L["Roadbook list"] },
   }, function() return State.availFilter end, function(v)
     State.availFilter = v
     Settings().availFilter = v

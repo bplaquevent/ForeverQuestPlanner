@@ -55,6 +55,30 @@ function Geo.MigrateRoadbooks()
   if rec and rec.info and rec.info.custom then st.goal = { kind = "custom" } end
 end
 
+-- Versions with an automatic Roadbook (its quests chosen at each computation): it becomes the
+-- Roadbook of a list, its quests not turned in yet, with the steps done kept.
+function Geo.MigrateAutoRoadbook()
+  local st = Settings()
+  local rec = st.roadbook and st.roadbook[CharKey()]
+  if not (rec and rec.info) or rec.info.custom then return end
+  local list, seen = {}, {}
+  local function add(id, title, level)
+    if not id or seen[id] or IsCompleted(id) then return end
+    seen[id] = true
+    list[#list + 1] = { id = id, title = title or ("#" .. id), level = level }
+  end
+  for _, s in ipairs(rec.steps or {}) do
+    local t = s.task or {}
+    if s.kind == "take" or s.kind == "obj" or s.kind == "turnin" then add(t.id, t.title, t.level) end
+    for _, m in ipairs(s.members or {}) do add(m.id, m.title, m.level) end
+  end
+  Geo.CustomRec().list = list
+  local g = rec.info.goal
+  rec.info.custom = true
+  rec.info.generated = g and g.kind and { kind = g.kind, value = g.value, stage = rec.info.goalStage } or nil
+  rec.info.goal, rec.info.goalStage, rec.excluded = nil, nil, nil
+end
+
 function Geo.CustomIndex(id)
   for i, e in ipairs(Geo.CustomRec().list) do
     if e.id == id then return i end
@@ -146,7 +170,7 @@ function Geo.CustomAdd(id, title, level, quiet)
   end
   rec.list[#rec.list + 1] = { id = id, title = title, level = level or Geo.QuestLevelOf(id) }
   if quiet then return true, pre end
-  Print(L["Added to the custom quest list: "] .. title ..
+  Print(L["Added to the Roadbook list: "] .. title ..
     (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
   Geo.CustomHint()
   if not Geo.ForPlayer(id) then Print(L["Warning: this quest is not for your class or race."]) end
@@ -161,7 +185,7 @@ function Geo.CustomAddList(list)
     local ok, p = Geo.CustomAdd(q.id, q.title, q.level, true)
     if ok then added, pre = added + 1, pre + p end
   end
-  Print(string.format(L["%d quest(s) added to the custom quest list"], added) ..
+  Print(string.format(L["%d quest(s) added to the Roadbook list"], added) ..
     (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
   if added > 0 then Geo.CustomHint() end
   if added > 0 then Geo.CustomChanged() end
@@ -202,7 +226,7 @@ function Geo.CustomRemove(id, quiet)
     end
   end
   if quiet then return true, removed end
-  Print(L["Removed from the custom quest list: "] .. (e.title or tostring(id)) ..
+  Print(L["Removed from the Roadbook list: "] .. (e.title or tostring(id)) ..
     (removed > 0 and string.format(L[" (and %d prerequisite quest(s))"], removed) or ""))
   Geo.CustomChanged()
   return true, removed
@@ -214,7 +238,7 @@ function Geo.CustomRemoveList(list)
     local ok, r = Geo.CustomRemove(q.id, true)
     if ok then n, extra = n + 1, extra + r end
   end
-  Print(string.format(L["%d quest(s) removed from the custom quest list"], n) ..
+  Print(string.format(L["%d quest(s) removed from the Roadbook list"], n) ..
     (extra > 0 and string.format(L[" (and %d prerequisite quest(s))"], extra) or ""))
   if n > 0 then Geo.CustomChanged() end
 end
@@ -222,20 +246,20 @@ end
 function Geo.CustomClear()
   Geo.CustomRec().list = {}
   Geo.customUnplanned = nil
-  Print(L["Quests removed from the custom quest list; the steps done of the Roadbook are kept."])
+  Print(L["Quests removed from the list; the steps done of the Roadbook are kept."])
   Geo.CustomChanged()
 end
 
--- The list is not the Roadbook's (another goal, or no Roadbook): where it is used.
+-- No Roadbook yet: how the list becomes one.
 function Geo.CustomHint()
-  if Geo.IsCustom() or (Geo.computing and Geo.computingGoal == "custom") then return end
-  Print(L["The custom quest list is used by the Roadbook with the \"Custom list\" goal: choose it, then click \"Generate\"."])
+  if Geo.HasRoadbook() then return end
+  Print(L["Click \"Generate\" in the Roadbook tab to make the Roadbook of the list."])
 end
 
--- List changed while the Roadbook is made of it: its steps to come are computed again (grouped
--- when several quests are added in a row), its steps done and its tracking kept; empty list: the
--- steps to come are removed and it is paused, the steps done stay (only "Delete" empties them).
--- A Roadbook with another goal is not touched (the list waits for "Generate" with the Custom goal).
+-- List changed while there is a Roadbook: its steps to come are computed again (grouped when several
+-- quests are added in a row), its steps done and its tracking kept; empty list: the steps to come
+-- are removed and it is paused, the steps done stay (only "Delete" empties them). No Roadbook (or one
+-- being generated, which makes its own list): nothing is computed, "Generate" makes it.
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1
   local token = Geo.customToken
@@ -255,7 +279,7 @@ function Geo.CustomChanged()
 end
 
 StaticPopupDialogs["FQP_CUSTOM_CLEAR"] = {
-  text = L["Remove every quest from the custom quest list?"],
+  text = L["Remove every quest from the list?"],
   button1 = L["Remove all"],
   button2 = CANCEL or L["Cancel"],
   OnAccept = function() Geo.CustomClear() end,
@@ -456,17 +480,119 @@ function Geo.PlanCustom(opts)
   local P = Geo.Problem("custom", pos, cp)
   P.ban = opts and opts.ban
   local opt = Geo.Solve(P, "custom")
+  local route, info = Geo.ListRoute(P, opt)
+  info.skipped, info.unplanned = #cp.unplanned, cp.unplanned
+  return route, nil, info
+end
+
+-- Game route of a solver result with a list: warnings (quest picked up below its required level,
+-- order rule of the list not kept), dungeon visits and flight paths activated counted.
+function Geo.ListRoute(P, opt)
   for _, v in ipairs(opt.res.violations) do
     local s = v.kind == "level" and opt.route[v.i].src
     if s and s.task then s.task.levelWarn = true end
   end
-  for _, s in ipairs(P.custom.steps) do
+  for _, s in ipairs(P.custom and P.custom.steps or {}) do
     if s.relaxed and s.src and s.src.task then s.src.task.orderWarn = true end
   end
   local route, info = Geo.FromSolver(P, opt.route, opt.res)
-  local discovered = 0
-  for _, st in ipairs(route) do if st.kind == "fm" then discovered = discovered + 1 end end
-  info.custom, info.count, info.skipped, info.unplanned = true, #cp.tasks, #cp.unplanned, cp.unplanned
-  info.dungeons, info.discovered, info.later = #cp.dungeons, discovered, {}
+  local discovered, dungeons = 0, 0
+  for _, st in ipairs(route) do
+    if st.kind == "fm" then discovered = discovered + 1 end
+    if st.kind == "dungeon" then dungeons = dungeons + 1 end
+  end
+  info.custom, info.dungeons, info.discovered, info.later = true, dungeons, discovered, {}
+  return route, info
+end
+
+-- "Generate" with a duration or level (goal): the list (if any) kept whole and completed with the
+-- quests serving the goal best, or, when it alone goes beyond the goal, only its part serving it best
+-- (Solver.Optimize). The quests of the list that cannot be located stay in it, unplanned.
+function Geo.PlanGenerate(goal, opts)
+  Geo.PreloadRewardItems()
+  local pos = PlayerPos()
+  if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
+  local plevel = UnitLevel("player")
+  if plevel >= Geo.MaxLevel() then
+    return nil, L["Max level reached: no more XP to earn. Choose \"the whole list\" to do the quests of your list."]
+  end
+  Geo.xpScale, Geo.customCtx = nil, nil
+  Geo.planSpeed = TravelSpeed()
+  local cp, unplanned
+  if #Geo.CustomList() > 0 then
+    local _, u
+    cp, _, u = Geo.CustomPlanSteps(pos, plevel)
+    unplanned = cp and cp.unplanned or u
+  end
+  local P = Geo.Problem("auto", pos, cp)
+  P.ban = opts and opts.ban
+  local opt = Geo.Solve(P, goal)
+  local route, info = Geo.ListRoute(P, opt)
+  local g = opt.goal
+  info.later, info.unplanned = P.later, unplanned
+  info.generated = { kind = g.kind, value = g.kind == "level" and g.target or g.value, mode = opt.mode,
+    stage = (g.kind == "level" and not opt.res.reach) or nil }
   return route, nil, info
 end
+
+-- Quests of a generated route, in route order (dungeon visits: their quests), then the unplanned
+-- quests of the list: the new list. An entry already in the list keeps its fields.
+function Geo.ListFromRoute(route, unplanned)
+  local old = {}
+  for _, e in ipairs(Geo.CustomList()) do old[e.id] = e end
+  local out, seen = {}, {}
+  local function add(id, title, level)
+    if not id or seen[id] or IsCompleted(id) then return end
+    seen[id] = true
+    out[#out + 1] = old[id] or { id = id, title = title or QGet(QDB.Quest, id, "name") or ("#" .. id), level = level or Geo.QuestLevelOf(id) }
+  end
+  for i = 2, #route do
+    local st = route[i]
+    if st.kind == "dungeon" then
+      for _, m in ipairs(st.task.members or {}) do add(m.task and m.task.id, m.task and m.task.title, m.task and m.task.level) end
+    elseif st.task then
+      add(st.task.id, st.task.title, st.task.level)
+    end
+  end
+  for _, u in ipairs(unplanned or {}) do add(u.id, u.title) end
+  for _, e in ipairs(out) do
+    if e.pre and not seen[e.pre] then e.pre = nil end -- added for a quest no longer in the list
+  end
+  return out
+end
+
+-- Generated Roadbook: the list becomes its quests (after a confirmation when quests of the list
+-- leave it), then it is saved. done(accepted).
+function Geo.AcceptGenerated(route, info, done)
+  local list = Geo.ListFromRoute(route, info.unplanned)
+  local keep, dropped = {}, 0
+  for _, e in ipairs(list) do keep[e.id] = true end
+  for _, e in ipairs(Geo.CustomList()) do
+    if not keep[e.id] then dropped = dropped + 1 end
+  end
+  local function apply()
+    Geo.CustomRec().list = list
+    Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute of the former list
+    Geo.customCache, Geo.customUnplanned = nil, info.unplanned
+    Geo.Freeze(route, info)
+    if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
+    done(true)
+  end
+  if dropped == 0 then
+    apply()
+  else
+    StaticPopup_Show("FQP_TRIM_LIST", dropped, nil, { apply = apply, done = done })
+  end
+end
+
+StaticPopupDialogs["FQP_TRIM_LIST"] = {
+  text = L["%d quest(s) of your list do not fit this goal: they leave the list.\n\nKeep the new Roadbook?"],
+  button1 = YES or L["Yes"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, data) if data then data.apply() end end,
+  OnCancel = function(_, data) if data then data.done(false) end end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}

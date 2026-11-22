@@ -3,7 +3,7 @@
 
 local ADDON_NAME, ns = ...
 local ChainInfo, ChainText, CharKey, Color, FormatNumber, Geo = ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color, ns.FormatNumber, ns.Geo
-local GeoReady, IsClassMeta, IsInLog, K, L, Nearest = ns.GeoReady, ns.IsClassMeta, ns.IsInLog, ns.K, ns.L, ns.Nearest
+local GeoReady, IsClassMeta, IsCompleted, IsInLog, K, L, Nearest = ns.GeoReady, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
 local PlayerPos, PointText, Print, QDB, QGet, QuestMeta = ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta
 local QuestTargets, Refresh, RemainingTargets, Settings, Snapshot, State = ns.QuestTargets, ns.Refresh, ns.RemainingTargets, ns.Settings, ns.Snapshot, ns.State
 local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.TurnInText, ns.StartPoints, ns.EntityPoints
@@ -247,7 +247,7 @@ local function ListRow(panel, i)
   local r = panel.rows[i]
   if r then return r end
   r = CreateFrame("Frame", nil, panel.scroll.child)
-  r:SetWidth(CONTENT_WIDTH)
+  r:SetWidth(panel.contentWidth or CONTENT_WIDTH)
   r.isListRow = true
   r.bg = r:CreateTexture(nil, "BACKGROUND")
   r.bg:SetAllPoints()
@@ -361,8 +361,10 @@ K.MAX_VISIBLE_ROWS = 400
 
 local OpenQuestDetails -- defined with quest tracking, further down
 
+-- panel: a tab, or a pane of one ({ scroll, contentWidth }: Geo.CreatePane).
 local function RenderList(panel, tabKey, items, forceOpen)
   Geo.HideRowTooltip()
+  local width = panel.contentWidth or CONTENT_WIDTH
   -- Two grids: quest lines and category bars, each aligned to the right.
   local rowItems, headerItems = {}, {}
   for _, it in ipairs(items) do
@@ -413,7 +415,7 @@ local function RenderList(panel, tabKey, items, forceOpen)
       local hasButtons = it.b1 or it.b2 or it.b3
       r.text:SetFontObject(it.section and "GameFontNormalLarge" or "GameFontHighlight")
       r.rule:SetShown(it.section and true or false)
-      r.text:SetWidth(CONTENT_WIDTH - (hasButtons and (grid.total + 12) or 16) - (trash and 12 or 0))
+      r.text:SetWidth(width - (hasButtons and (grid.total + 12) or 16) - (trash and 12 or 0))
       if it.stripe then
         r.stripe:SetColorTexture(it.stripe[1], it.stripe[2], it.stripe[3], 1)
         r.stripe:Show()
@@ -508,7 +510,7 @@ local function RenderList(panel, tabKey, items, forceOpen)
     r:SetScript("OnMouseUp", nil)
     r.text:ClearAllPoints()
     r.text:SetPoint("TOPLEFT", 10, -6)
-    r.text:SetWidth(CONTENT_WIDTH - 16)
+    r.text:SetWidth(width - 16)
     r.text:SetText(Color("ff8040", L["Too many expanded lines: collapse some categories, pick a narrower filter or search."]))
     r:SetHeight(26)
     y = y - 26
@@ -516,6 +518,59 @@ local function RenderList(panel, tabKey, items, forceOpen)
   for i = n + 1, #(panel.rows or {}) do panel.rows[i]:Hide() end
   panel.scroll.child:SetHeight(-y + 10)
   UpdateScrollBar(panel.scroll)
+end
+
+-- Pane of a tab: a fixed header (title, info lines, a button on the right) above its own scrolling
+-- list, between x1 and x2 (from the left of the window) and from y = top to the bottom.
+-- RenderList draws in it; Geo.PaneHeader fills the header.
+function Geo.CreatePane(parent, x1, x2, top)
+  local pane = { contentWidth = x2 - x1 - 26 }
+  local head = CreateFrame("Frame", nil, parent)
+  head:SetPoint("TOPLEFT", State.mainFrame, "TOPLEFT", x1, top)
+  head:SetWidth(x2 - x1)
+  head:SetHeight(30)
+  pane.head = head
+  pane.title = head:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  pane.title:SetPoint("TOPLEFT", 10, -4)
+  pane.rule = head:CreateTexture(nil, "BORDER")
+  pane.rule:SetPoint("TOPLEFT", pane.title, "BOTTOMLEFT", -4, -3)
+  pane.rule:SetPoint("RIGHT", head, "RIGHT", -6, 0)
+  pane.rule:SetHeight(1)
+  pane.rule:SetColorTexture(1, 0.82, 0, 0.6)
+  pane.button = CreateFrame("Button", nil, head, "UIPanelButtonTemplate")
+  pane.button:SetHeight(20)
+  pane.button:SetPoint("TOPRIGHT", -24, -2)
+  pane.button:Hide()
+  pane.info = head:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  pane.info:SetPoint("TOPLEFT", pane.rule, "BOTTOMLEFT", 4, -5)
+  pane.info:SetWidth(pane.contentWidth - 8)
+  pane.info:SetJustifyH("LEFT")
+  pane.info:SetSpacing(2)
+  local child = CreateFrame("Frame", nil, parent)
+  child:SetSize(pane.contentWidth, 1)
+  local scroll = CreateScrollPanel(parent, child)
+  scroll:ClearAllPoints()
+  scroll:SetPoint("TOPLEFT", head, "BOTTOMLEFT", 0, -2)
+  scroll:SetPoint("BOTTOMRIGHT", State.mainFrame, "BOTTOMLEFT", x2 - 22, 24)
+  pane.scroll = scroll
+  return pane
+end
+
+-- Header of a pane: title, info text (nil: none) and button ({ text, fn, tip }; nil: hidden).
+function Geo.PaneHeader(pane, title, info, button)
+  pane.title:SetText(title or "")
+  pane.info:SetText(info or "")
+  pane.info:SetShown(info ~= nil and info ~= "")
+  SetButton(pane.button, button)
+  if button then
+    measureText = measureText or UIParent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    measureText:Hide()
+    measureText:SetText(button.text)
+    pane.button:SetWidth(math.max(80, (measureText:GetStringWidth() or 60) + 24))
+  end
+  local h = 4 + (pane.title:GetStringHeight() or 16) + 4
+  if pane.info:IsShown() then h = h + 5 + (pane.info:GetStringHeight() or 0) end
+  pane.head:SetHeight(h + 6)
 end
 
 local function ShowMessage(panel, tabKey, text)
@@ -675,6 +730,7 @@ local ICON = {
   watched = "|TInterface\\Buttons\\UI-CheckBox-Check:16:16|t",         -- check mark: tracked
   custom = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:16:16|t", -- yellow star: custom Roadbook
   abandon = "|TInterface\\RaidFrame\\ReadyCheck-NotReady:16:16|t",       -- red cross: to abandon
+  done = "|TInterface\\RaidFrame\\ReadyCheck-Ready:16:16|t",            -- green check: turned in (as the steps done)
 }
 
 -- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
@@ -694,6 +750,8 @@ local function StateIcons(questId)
     local done = C_QuestLog.IsComplete and C_QuestLog.IsComplete(questId)
     icons[#icons + 1] = done and ICON.turnin or ICON.inprogress
     if IsWatched(questId) then icons[#icons + 1] = ICON.watched end
+  elseif IsCompleted(questId) then
+    icons[#icons + 1] = ICON.done
   else
     icons[#icons + 1] = ICON.available
   end
@@ -1020,12 +1078,12 @@ function Geo.MapButton(getPoint, title, questId)
 end
 
 -- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.
-K.CUSTOM_TIP = "Custom list: your own quest list; the Roadbook with the \"Custom list\" goal does them all along the fastest route."
+K.CUSTOM_TIP = "Roadbook list: the quests the Roadbook does, along the fastest route."
 function Geo.CustomButton(id, title, level)
   if not id then return nil end
   local inList = Geo.InCustom(id)
   return { text = inList and L["Remove"] or L["Add"],
-    tip = { inList and L["Remove from the custom list"] or L["Add to the custom list"], L[K.CUSTOM_TIP] },
+    tip = { inList and L["Remove from the Roadbook list"] or L["Add to the Roadbook list"], L[K.CUSTOM_TIP] },
     fn = function()
       if Geo.InCustom(id) then Geo.CustomRemove(id) else Geo.CustomAdd(id, title, level) end
     end }
@@ -1034,9 +1092,9 @@ end
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
 function Geo.CustomBulkButtons(list)
   return { text = L["Add all"], fn = function() Geo.CustomAddList(list) end,
-      tip = { L["Add every quest of this category to the custom list"], L[K.CUSTOM_TIP] } },
+      tip = { L["Add every quest of this category to the Roadbook list"], L[K.CUSTOM_TIP] } },
     { text = L["Remove all"], fn = function() Geo.CustomRemoveList(list) end,
-      tip = { L["Remove every quest of this category from the custom list"], L[K.CUSTOM_TIP] } }
+      tip = { L["Remove every quest of this category from the Roadbook list"], L[K.CUSTOM_TIP] } }
 end
 
 ---------------------------------------------------------------------------
