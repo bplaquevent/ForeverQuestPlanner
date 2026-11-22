@@ -34,7 +34,7 @@ local function LogSelectedQuest()
 end
 
 local function Toggle(id)
-  if not id then return end
+  if not id or Geo.ListLocked() then return end
   if Geo.InCustom(id) then Geo.CustomRemove(id) else Geo.CustomAdd(id) end
   Geo.QuestLogButtonSync()
 end
@@ -100,6 +100,7 @@ function Geo.QuestLogButtonSync()
     local id = host:IsShown() and b.getQuest()
     if id then
       b:SetText(Geo.InCustom(id) and L["- Roadbook"] or L["+ Roadbook"])
+      b:SetEnabled(not Geo.computing) -- the list is locked while the Roadbook is computed
       b:Show()
     else
       b:Hide()

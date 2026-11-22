@@ -215,16 +215,16 @@ local function RenderXP()
   local query = State.xpQuery
   local searching = #query > 0
 
-  -- Saved Roadbook: it changes with the list (and when it is adapted), or with "Generate".
+  -- Saved Roadbook: it changes with the list (and when it is adapted), or with "Adapt".
   local fz = Geo.Frozen()
   if fz then pcall(Geo.InjectQuickWins) end
 
   local qItems = {}
   -- No Roadbook: how to make one (and why the last computation failed).
   if not fz and not searching then
-    local last = State.xpGoal.kind == "custom" and Geo.customCache or Geo.planCache
+    local last = #Geo.CustomList() > 0 and Geo.customCache or Geo.planCache
     if last and last.err and not last.route then qItems[#qItems + 1] = { text = Color("ff6060", last.err) } end
-    qItems[#qItems + 1] = { text = Color("ffd100", L["No Roadbook. Fill the list with the \"Add\" button (or \"Add all\" on a category) of the Around me, Quest log and Available tabs, and/or let \"Generate\" fill it: for a play session (the most XP within that time) or a level (reached the fastest), the list is completed or trimmed; \"the whole list\" keeps it as it is. The Roadbook then does every quest of the list in the least time, and the Objective button follows it."]) }
+    qItems[#qItems + 1] = { text = Color("ffd100", L["No Roadbook. Fill the list with the \"Add\" button (or \"Add all\" on a category) of the Around me, Quest log and Available tabs, and/or let \"Adapt\" fill it: for a play session (the most XP within that time) or a level (reached the fastest), the list is completed or trimmed. The Roadbook is computed at each change of the list: it does every quest of the list in the least time, and the Objective button follows it."]) }
   end
   local before = #qItems
   local shown = Geo.RoadbookQuestItems(qItems, fz, query)

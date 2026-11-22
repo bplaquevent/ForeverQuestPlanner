@@ -427,9 +427,9 @@ function Geo.PreloadRewardItems()
   end
 end
 
--- "Generate" options: { kind = "time", value = seconds } (most XP in that time) or
+-- "Adapt" options: { kind = "time", value = seconds } (most XP in that time) or
 -- { kind = "level", value = level } (fastest route to that level).
--- A far level is reached in stages: one computation plans at most this much, then "Generate"
+-- A far level is reached in stages: one computation plans at most this much, then "Adapt"
 -- at the end of the Roadbook plans the next stage (with the real XP and flight paths).
 K.LEVEL_PLAN_MAX_TIME = 40 * 3600 -- level goal: longest Roadbook computed
 K.PLAN_TIME = 30                  -- seconds of computation for a Roadbook, at most (solver budget, shown in the waiting messages)
@@ -542,7 +542,7 @@ function Geo.KeepDone(fz, isDone, rest, restInfo, info)
 end
 
 -- Roadbook computation in the background (spread over several frames) with caching.
--- goal: "Generate" option ({ kind, value }) or "custom" (the whole list); the list is in the key.
+-- goal: "Adapt" option ({ kind, value }) or "custom" (the list as it is); the list is in the key.
 function Geo.GoalKey(goal)
   if goal == "custom" then return goal end
   return goal.kind .. goal.value

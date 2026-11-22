@@ -302,6 +302,7 @@ end
 local function SetButton(b, spec)
   if spec then
     b:SetText(spec.text)
+    b:SetEnabled(not spec.disabled)
     b:SetScript("OnClick", spec.fn)
     local tip = spec.tip
     b:SetScript("OnEnter", tip and function(self)
@@ -1091,16 +1092,19 @@ function Geo.CustomButton(id, title, level)
   local inList = Geo.InCustom(id)
   return { text = inList and L["Remove"] or L["Add"],
     tip = { inList and L["Remove from the Roadbook list"] or L["Add to the Roadbook list"], L[K.CUSTOM_TIP] },
+    disabled = Geo.computing and true or nil, -- the list is locked while the Roadbook is computed
     fn = function()
+      if Geo.ListLocked() then return end
       if Geo.InCustom(id) then Geo.CustomRemove(id) else Geo.CustomAdd(id, title, level) end
     end }
 end
 
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
 function Geo.CustomBulkButtons(list)
-  return { text = L["Add all"], fn = function() Geo.CustomAddList(list) end,
+  local locked = Geo.computing and true or nil
+  return { text = L["Add all"], disabled = locked, fn = function() if not Geo.ListLocked() then Geo.CustomAddList(list) end end,
       tip = { L["Add every quest of this category to the Roadbook list"], L[K.CUSTOM_TIP] } },
-    { text = L["Remove all"], fn = function() Geo.CustomRemoveList(list) end,
+    { text = L["Remove all"], disabled = locked, fn = function() if not Geo.ListLocked() then Geo.CustomRemoveList(list) end end,
       tip = { L["Remove every quest of this category from the Roadbook list"], L[K.CUSTOM_TIP] } }
 end
 

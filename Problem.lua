@@ -343,7 +343,7 @@ function Pb.Player(P, pos)
     rested = GetXPExhaustion and GetXPExhaustion() or 0, maxLevel = maxLevel, xpNeeded = needed,
     speed = TravelSpeed(), pos = Pb.Point(pos), faction = UnitFactionGroup("player"),
     class = select(2, UnitClass("player")), race = select(2, UnitRace("player")),
-    goal = g and g.kind ~= "custom" and { kind = g.kind, value = g.value } or nil,
+    goal = g and { kind = g.kind, value = g.value } or nil,
     settings = { noHearth = st.noHearth, noRecallSpells = st.noRecallSpells, noFMDetour = st.noFMDetour,
       noElite = st.noElite } }
 end
@@ -419,7 +419,7 @@ end
 function Pb.Baselines(P, done)
   local todo = {}
   local g = State.xpGoal
-  if g and g.kind ~= "custom" then todo[#todo + 1] = { name = "auto", goal = g } end
+  if g then todo[#todo + 1] = { name = "auto", goal = g } end
   if #Geo.CustomList() > 0 then todo[#todo + 1] = { name = "custom", goal = "custom" } end
   local function nextOne(i)
     local b = todo[i]
