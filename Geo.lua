@@ -1110,25 +1110,62 @@ local function QuestTargets(id)
   return t
 end
 
+-- Game objective of each QuestieDB target (t = QuestTargets): the one naming it, otherwise the one at
+-- the same position (custom Forever quests: QuestieDB only has the English names, e.g.
+-- "Kristof's Report" for "Rapport de Kristof"). Source items are not game objectives.
+-- Returns { [target index] = objective index }, { [objective index] = true } (the ones matched).
+function Geo.MatchObjectives(objs, t)
+  local map, used = {}, {}
+  for i, tg in ipairs(t) do
+    if not tg.sourceItem then
+      local match
+      if tg.name then
+        for j, o in ipairs(objs) do
+          if not used[j] and o.text and o.text:find(tg.name, 1, true) then match = j break end
+        end
+      end
+      if not match and objs[i] and not used[i] then match = i end
+      if match then map[i], used[match] = match, true end
+    end
+  end
+  return map, used
+end
+
+-- Game objective (from objs, GetObjectives) of the target tg of quest id, or nil. tg can be a copy
+-- (Roadbook saved: name and kind only).
+function Geo.TargetObjective(id, tg, objs)
+  if not (id and tg) then return nil end
+  local t = QuestTargets(id)
+  local k
+  for i, x in ipairs(t) do
+    if x == tg then k = i break end
+  end
+  if not k then
+    for i, x in ipairs(t) do
+      if x.name == tg.name and x.kind == tg.kind then k = i break end
+    end
+  end
+  local j = k and Geo.MatchObjectives(objs, t)[k]
+  if j then return objs[j] end
+  if not tg.name then return nil end
+  local lname = tg.name:lower() -- target no longer known: by its name alone
+  for _, o in ipairs(objs) do
+    if o.text and o.text:lower():find(lname, 1, true) then return o end
+  end
+  return nil
+end
+
 -- Remaining objectives: matches the game's objectives (with progress) to QuestieDB targets.
 local function RemainingTargets(q, t)
-  local out, used = {}, {}
+  local out = {}
   local objs = (q and q.objectives) or {}
+  local map, used = Geo.MatchObjectives(objs, t)
   for i, tg in ipairs(t) do
-    local match
-    if tg.sourceItem then
-      match = -1 -- not a game objective: needed while it is not in the bags
-    elseif tg.name then
-      for j, o in ipairs(objs) do
-        if not used[j] and o.text and o.text:find(tg.name, 1, true) then match = j break end
-      end
-    end
-    if not match and objs[i] and not used[i] then match = i end
+    local match = tg.sourceItem and -1 or map[i] -- source item: needed while it is not in the bags
     local count = tg.defaultCount
     if match == -1 then
       if (GetItemCount(tg.sourceItem) or 0) > 0 then count = 0 end
     elseif match then
-      used[match] = true
       local o = objs[match]
       if o.finished or (o.need and o.have and o.need > 0 and o.have >= o.need) then
         count = 0

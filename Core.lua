@@ -651,6 +651,19 @@ local function Snapshot()
     end
   end
 
+  -- The game can return no objectives (and level 0) for a while, at logout for instance: the ones of
+  -- the last capture stay, otherwise the next plans would take every objective as still to do.
+  local prev = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
+  local before = {}
+  for _, q in ipairs(prev and prev.quests or {}) do before[q.id] = q end
+  for _, q in ipairs(quests) do
+    local b = before[q.id]
+    if b then
+      if #q.objectives == 0 and not q.complete and #(b.objectives or {}) > 0 then q.objectives = b.objectives end
+      if (q.level or 0) == 0 and (b.level or 0) > 0 then q.level = b.level end
+    end
+  end
+
   local _, class = UnitClass("player")
   ForeverQuestPlannerDB = ForeverQuestPlannerDB or {}
   ForeverQuestPlannerDB[CharKey()] = {

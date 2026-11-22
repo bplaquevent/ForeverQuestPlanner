@@ -374,14 +374,8 @@ function CP.StepDone(st)
     -- Source item (not a game objective): done once it is in the bags.
     local src = st.r and st.r.tg and st.r.tg.sourceItem
     if src then return (GetItemCount(src) or 0) > 0 end
-    local name = st.r and st.r.tg and st.r.tg.name
-    if name then
-      local lname = name:lower()
-      for _, o in ipairs(GetObjectives(id)) do
-        if o.text and o.text:lower():find(lname, 1, true) then return o.finished and true or false end
-      end
-    end
-    return false
+    local o = Geo.TargetObjective(id, st.r and st.r.tg, GetObjectives(id))
+    return o and o.finished and true or false
   end
   if st.kind == "fm" then
     local node = (st.fmHub and st.fmHub.node) or Geo.NodeAt(st.p)
@@ -1291,13 +1285,8 @@ function CP.StepSummary(s)
   elseif s.kind == "obj" then
     local name = s.r and s.r.tg.name or L["objective"]
     local prog = "x" .. (s.r and s.r.count or "?")
-    local lname = name:lower()
-    for _, o in ipairs(task.id and IsInLog(task.id) and GetObjectives(task.id) or {}) do
-      if o.text and o.need and o.text:lower():find(lname, 1, true) then
-        prog = (o.have or 0) .. "/" .. o.need
-        break
-      end
-    end
+    local o = task.id and IsInLog(task.id) and Geo.TargetObjective(task.id, s.r and s.r.tg, GetObjectives(task.id))
+    if o and o.need then prog = (o.have or 0) .. "/" .. o.need end
     local multi = (s.spots and s.spots > 1) and (L[" · multiple spots ("] .. s.spots .. ")") or ""
     return ICON.inprogress .. " " .. (task.title or "?"), name .. " " .. prog .. " · " .. place .. multi
   end
