@@ -47,7 +47,7 @@ function Geo.ServiceStep()
     task = { title = title .. (sv.name or "?"), npc = sv.name, npcId = sv.id, service = sv.kind, xp = 0 } }
 end
 
--- The Roadbook is followed (a step is focused); paused otherwise.
+-- The Roadbook is tracked (a step is focused); not tracked otherwise.
 function Geo.Tracking()
   return ns.CP.CurrentFocus() ~= nil
 end
@@ -270,13 +270,6 @@ function Geo.CustomRemoveList(list)
   if n > 0 then Geo.CustomChanged() end
 end
 
-function Geo.CustomClear()
-  Geo.CustomRec().list = {}
-  Geo.customUnplanned = nil
-  Print(L["Quests removed from the list; the steps done of the Roadbook are kept."])
-  Geo.CustomChanged()
-end
-
 -- No Roadbook yet: how the list becomes one.
 function Geo.CustomHint()
   if Geo.HasRoadbook() then return end
@@ -285,7 +278,7 @@ end
 
 -- List changed while there is a Roadbook: its steps to come are computed again (grouped when several
 -- quests are added in a row), its steps done and its tracking kept; empty list: the steps to come
--- are removed and it is paused, the steps done stay (only "Delete" empties them). No Roadbook (or one
+-- are removed and its tracking stops, the steps done stay (only "Empty" empties them). No Roadbook (or one
 -- being generated, which makes its own list): nothing is computed, "Generate" makes it.
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1
@@ -295,7 +288,7 @@ function Geo.CustomChanged()
   if mine and #Geo.CustomList() == 0 then
     Geo.customUnplanned = nil
     Geo.ServiceClear()
-    if ns.CP then ns.CP.Pause(true) end
+    if ns.CP then ns.CP.TrackOff(true) end
     if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
   elseif mine then
     C_Timer.After(0.6, function()
@@ -305,17 +298,6 @@ function Geo.CustomChanged()
   if ns.Refresh then ns.Refresh() end
   if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
 end
-
-StaticPopupDialogs["FQP_CUSTOM_CLEAR"] = {
-  text = L["Remove every quest from the list?"],
-  button1 = L["Remove all"],
-  button2 = CANCEL or L["Cancel"],
-  OnAccept = function() Geo.CustomClear() end,
-  timeout = 0,
-  whileDead = true,
-  hideOnEscape = true,
-  preferredIndex = 3,
-}
 
 ---------------------------------------------------------------------------
 -- Planning: fastest route to do every quest of the list

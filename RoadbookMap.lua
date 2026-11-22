@@ -1,8 +1,8 @@
 -- Forever Quest Planner: the Roadbook on OpenMap's world map.
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 --
--- A Roadbook "holds" the map while it is followed (mode "track") or previewed (mode "preview",
--- "Map" button of its tab): its remaining steps are drawn as numbered pins joined by its route, in
+-- A Roadbook "holds" the map while it is followed (mode "track") or previewed (mode "preview", a click
+-- on a step of the Roadbook): its remaining steps are drawn as numbered pins joined by its route, in
 -- pin sets of its own on OpenMap's stitched map (only it creates, updates or clears them), the
 -- current objective highlighted. Meanwhile the player's OpenMap pins are hidden and no pin can be
 -- added; when the Roadbook lets the map go, the map gets back exactly what it showed before
@@ -17,7 +17,6 @@ K.MAP_ROUTE_SET = "fqp_roadbook_route" -- and of the route (under the pins)
 K.MAP_LINE = 3                         -- px: route thickness
 K.MAP_WALK = { 1, 0.82, 0.2, 0.85 }    -- route on foot (r, g, b, a)
 K.MAP_RIDE = { 0.4, 0.72, 1, 0.85 }    -- flight, boat, zeppelin legs
-K.MAP_FIT = 0.7                        -- preview: share of the view the whole Roadbook takes
 -- Pin colour by step kind (the current objective: the game's tracked pin, uncoloured).
 K.MAP_COLOR = {
   take = { 1, 0.85, 0.2 }, obj = { 1, 0.45, 0.3 }, turnin = { 0.45, 0.95, 0.4 },
@@ -77,7 +76,6 @@ function Geo.MapRelease()
   end
   pcall(wm.RefreshWaypoint)
   if Geo.MapPanelSync then pcall(Geo.MapPanelSync) end -- the panel goes back to the active Roadbook
-  if Geo.mapButtons then for _, update in pairs(Geo.mapButtons) do update() end end
 end
 
 ---------------------------------------------------------------------------
@@ -89,7 +87,7 @@ function Geo.MapInstallLocks()
   if next(Geo.mapOrig) then return end
   local wm, orig = OM.worldmap, Geo.mapOrig
   local function Refuse()
-    Print(L["A Roadbook holds the map: no map pin until it is paused (or its preview closed)."])
+    Print(L["A Roadbook holds the map: no map pin until its tracking is off (or its preview closed)."])
   end
   orig.AddPin, orig.DropWaypoint, orig.SetPinMode = wm.AddPin, wm.DropWaypoint, wm.SetPinMode
   orig.SetPinsHidden, orig.PinAt = wm.SetPinsHidden, wm.PinAt
@@ -220,8 +218,8 @@ local function AddStepPin(set, st, u, v, n, current)
 end
 
 -- A walk on the map from p (u1, v1) to q (u2, v2): through the zone passes on its way (Geo.WalkWay),
--- a straight line otherwise. fit(u, v): each pass joins the drawn points' bounds.
-function Geo.MapWalk(lines, u1, v1, p, q, u2, v2, fit)
+-- a straight line otherwise.
+function Geo.MapWalk(lines, u1, v1, p, q, u2, v2)
   local S = OM.stitch
   local pts = { u1, v1 }
   local ok, _, way = false, nil, nil
@@ -231,7 +229,6 @@ function Geo.MapWalk(lines, u1, v1, p, q, u2, v2, fit)
     if okW and u then
       table.insert(pts, u)
       table.insert(pts, v)
-      fit(u, v)
     end
   end
   table.insert(pts, u2)
@@ -241,10 +238,9 @@ end
 
 -- Draws the Roadbook holding the map: its steps not done yet (every one, or the current objective
 -- only when "Whole Roadbook on the map" is off), joined in order; a transport leg runs to its
--- arrival, a hearthstone is a jump (no line). Geo.mapBox: the drawn points' bounds (preview framing).
+-- arrival, a hearthstone is a jump (no line).
 function Geo.MapDraw()
   Geo.MapClear()
-  Geo.mapBox = nil
   local owner = Geo.MapOwner()
   if not owner then return end
   if not OM.api.IsStitched() then
@@ -260,12 +256,6 @@ function Geo.MapDraw()
   local S = OM.stitch
   local cur = owner.mode == "track" and CP.CurrentFocus() or nil
   local whole = owner.mode == "preview" or Geo.MapWholeGet()
-  local box
-  local function Fit(u, v)
-    if not box then box = { u, v, u, v } return end
-    box[1], box[2] = math.min(box[1], u), math.min(box[2], v)
-    box[3], box[4] = math.max(box[3], u), math.max(box[4], v)
-  end
   local n, pu, pv, pp, curPin = 0, nil, nil, nil, nil
   for i = 2, #fz.route do
     local st = fz.route[i]
@@ -274,14 +264,13 @@ function Geo.MapDraw()
       local u, v = Geo.MapUV(st.p)
       if u then
         if whole then
-          if pu and not st.p.teleport then Geo.MapWalk(set.lines, pu, pv, pp, st.p, u, v, Fit) end
+          if pu and not st.p.teleport then Geo.MapWalk(set.lines, pu, pv, pp, st.p, u, v) end
           pu, pv, pp = u, v, st.p
           local du, dv = nil, nil
           if st.kind == "travel" and st.task then du, dv = Geo.MapUV(st.task.destP) end
           if du then
             S.AddLine(set.lines, u, v, du, dv, K.MAP_LINE, unpack(K.MAP_RIDE))
             pu, pv, pp = du, dv, st.task.destP
-            Fit(du, dv)
           end
         end
         if st == cur then
@@ -289,12 +278,10 @@ function Geo.MapDraw()
         elseif whole then
           AddStepPin(set.pins, st, u, v, n, false)
         end
-        if whole or st == cur then Fit(u, v) end
       end
     end
   end
   if curPin then AddStepPin(set.pins, curPin[1], curPin[2], curPin[3], curPin[4], true) end
-  Geo.mapBox = box
 end
 
 -- Redraws when the map is open (otherwise at its next opening), with the steps panel beside it.
@@ -319,44 +306,9 @@ function Geo.MapGlide(p)
   end)
 end
 
--- The view framed on the drawn Roadbook.
-function Geo.MapFit()
-  local b = Geo.mapBox
-  if not b then return end
-  local span = math.max(b[3] - b[1], b[4] - b[2], 0.005)
-  pcall(OM.api.ShowWorld, (b[1] + b[3]) / 2, (b[2] + b[4]) / 2, math.max(1, K.MAP_FIT / span))
-end
-
 ---------------------------------------------------------------------------
--- Preview ("Map" button of a Roadbook tab) and the "Whole Roadbook on the map" option
+-- Preview (click on a step of the Roadbook) and the "Whole Roadbook on the map" option
 ---------------------------------------------------------------------------
--- Shows the Roadbook on the map without following it; a second click (or closing the map) ends it.
--- Followed: the map opens on it.
-function Geo.MapPreview()
-  local owner = Geo.MapOwner()
-  if owner and owner.mode == "preview" then
-    Geo.MapRelease()
-    return
-  end
-  if not Geo.Frozen() then
-    Print(L["This Roadbook has no step: click \"Generate\" first."])
-    return
-  end
-  if not owner then Geo.MapClaim("preview") end
-  Geo.OpenWorldMap(nil, true) -- the Forever Quest Planner window stays open
-  Geo.MapHookWorldMap()
-  C_Timer.After(0.05, function()
-    local o = Geo.MapOwner()
-    if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
-      if o and o.mode == "preview" then Geo.MapRelease() end
-      return
-    end
-    Geo.MapSync()
-    Geo.MapFit()
-  end)
-  if Geo.mapButtons then for _, update in pairs(Geo.mapButtons) do update() end end
-end
-
 -- Click on a step of a Roadbook tab (done or not): the world map opens centered on it, with the
 -- Roadbook drawn (previewed when no Roadbook holds the map), and the quest log on its quest.
 -- The Forever Quest Planner window stays open.
@@ -377,7 +329,6 @@ function Geo.ShowStep(st)
     local u, v = Geo.MapUV(st.p)
     if u then pcall(OM.api.ShowWorld, u, v) end
   end)
-  if Geo.mapButtons then for _, update in pairs(Geo.mapButtons) do update() end end
 end
 
 function Geo.MapWholeGet()
