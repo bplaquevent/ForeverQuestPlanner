@@ -75,6 +75,16 @@ local function CreateRoadbookPanel(f)
   adapt:SetPoint("RIGHT", empty, "LEFT", -6, 0)
   Tooltip(adapt, L["Adapt"], L["Completes or trims the list for the chosen session or level, then computes the Roadbook again: its steps done and its tracking are kept. The Roadbook always does every quest of the list in the least time, and is computed again at each change of the list."])
 
+  local auto = CreateFrame("CheckButton", nil, host, "UICheckButtonTemplate")
+  auto:SetSize(22, 22)
+  auto.label = host:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  auto.label:SetText(L["Auto"])
+  auto.label:SetPoint("RIGHT", adapt, "LEFT", -10, 0)
+  auto:SetPoint("RIGHT", auto.label, "LEFT", -2, 0)
+  auto:SetScript("OnClick", function(self) CP.SetAutoAdd(self:GetChecked()) end)
+  Tooltip(auto, L["Auto"], L["Each quest you accept is proposed for the Roadbook list (a window asks each time)."])
+  xp.auto = auto
+
   -- Waiting animation while the Roadbook is computed (Geo.RenderBusy shows it).
   local busy = CreateFrame("Frame", nil, xp)
   busy:SetSize(400, 120)
@@ -116,6 +126,7 @@ local function CreateRoadbookPanel(f)
 
   function xp.UpdateMode()
     updateLeft()
+    auto:SetChecked(Settings().autoAdd and true or false)
     empty:SetEnabled(not Geo.computing and (Geo.HasRoadbook() or #Geo.CustomRec().list > 0))
     adapt:SetEnabled(not Geo.computing and UnitLevel("player") < Geo.MaxLevel()) -- max level: no XP to earn
   end
