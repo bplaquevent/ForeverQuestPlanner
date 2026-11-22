@@ -278,7 +278,7 @@ end
 
 -- List changed while there is a Roadbook: its steps to come are computed again (grouped when several
 -- quests are added in a row), its steps done and its tracking kept; empty list: the steps to come
--- are removed and its tracking stops, the steps done stay (only "Abandon" empties them). No Roadbook (or one
+-- are removed and its tracking stops, the steps done stay (only "Empty" empties them). No Roadbook (or one
 -- being generated, which makes its own list): nothing is computed, "Generate" makes it.
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1

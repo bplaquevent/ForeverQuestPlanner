@@ -391,23 +391,23 @@ local function Create()
   end)
   fold:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.fold = fold
-  -- "Abandon" (as the Roadbook tab's button) right-aligned in the title bar, and the "Tracking" box
+  -- "Empty" (as the Roadbook tab's button) right-aligned in the title bar, and the "Tracking" box
   -- (turns the tracking on or off) at its left.
-  local abandonB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  abandonB:SetSize(76, 20)
-  abandonB:SetText(L["Abandon"])
-  abandonB:SetPoint("RIGHT", fold, "LEFT", -4, 0)
-  abandonB:SetScript("OnClick", function() CP.Abandon() end)
-  abandonB:SetScript("OnEnter", function(self)
-    Tip(self, L["Abandon"], L["Abandons the Roadbook: its steps, their progress and the quest list."])
+  local emptyB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+  emptyB:SetSize(60, 20)
+  emptyB:SetText(L["Empty"])
+  emptyB:SetPoint("RIGHT", fold, "LEFT", -4, 0)
+  emptyB:SetScript("OnClick", function() CP.Empty() end)
+  emptyB:SetScript("OnEnter", function(self)
+    Tip(self, L["Empty"], L["Empties the Roadbook: its steps, their progress and the quest list."])
   end)
-  abandonB:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  panel.abandonB = abandonB
+  emptyB:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  panel.emptyB = emptyB
   local track = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
   track:SetSize(20, 20)
   track.label = track:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   track.label:SetText(L["Tracking"])
-  track.label:SetPoint("RIGHT", abandonB, "LEFT", -6, 0)
+  track.label:SetPoint("RIGHT", emptyB, "LEFT", -6, 0)
   track:SetPoint("RIGHT", track.label, "LEFT", -2, 0)
   track:SetHitRectInsets(0, -((track.label:GetStringWidth() or 40) + 2), 0, 0)
   track:SetScript("OnClick", function()
@@ -593,7 +593,7 @@ function Geo.MapPanelSync()
   local following = Geo.Tracking()
   panel.track:SetChecked(following)
   panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
-  panel.abandonB:SetEnabled(not Geo.computing)
+  panel.emptyB:SetEnabled(not Geo.computing)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then

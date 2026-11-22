@@ -206,7 +206,6 @@ local function RenderXP()
   local panel = panels.xp
   local qp = panel.quests
   if panel.busy then panel.busy:Hide() end
-  if panel.UpdateStepsButton then panel.UpdateStepsButton() end
   if not GeoReady() then
     Geo.PaneHeader(qp, L["Quests"])
     ShowMessage(qp, "xp", L["Unable to convert QuestieDB positions to this client's map."])

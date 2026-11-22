@@ -11,9 +11,9 @@ local SelectTab, Settings, Snapshot, State, StopNearTicker, expandedCategories =
 local journalStates, nearStates, panels, tabButtons = ns.journalStates, ns.nearStates, ns.panels, ns.tabButtons
 
 -- Roadbook tab, options at the top:
---   [Steps]             [  search  ]                                                      [Abandon]
+--   [                       search                       ]
 --   +-------------------------------------------------------------------------------------------+
---   | Generate for: (o) a session of [2 h v]  (o) level [25 v]  (o) the whole list    [Generate] |
+--   | Generate for: (o) a session of [2 h v]  (o) level [25 v]  (o) the whole list [Generate] [Empty] |
 --   +-------------------------------------------------------------------------------------------+
 --   Quests
 --   N quests (fixed header)
@@ -67,25 +67,12 @@ local function CreateRoadbookPanel(f)
     return b
   end
 
-  -- Right of the search line: abandon the Roadbook (after confirmation).
-  local abandon = CreateFrame("Button", nil, xp, "UIPanelButtonTemplate")
-  abandon:SetSize(80, 22)
-  abandon:SetText(L["Abandon"])
-  abandon:SetScript("OnClick", function() CP.Abandon() end)
-  abandon:SetPoint("TOPRIGHT", -12, -70)
-  Tooltip(abandon, L["Abandon"], L["Abandons the Roadbook: its steps, their progress and the quest list."])
-  -- Steps panel (RoadbookPanel.lua): shown or hidden.
-  local stepsB = CreateFrame("Button", nil, xp, "UIPanelButtonTemplate")
-  stepsB:SetSize(80, 22)
-  stepsB:SetText(L["Steps"])
-  stepsB:SetScript("OnClick", function() Geo.MapPanelOpen(true) end)
-  stepsB:SetPoint("TOPLEFT", 14, -70) -- left of the search line (the right one is full)
-  Tooltip(stepsB, L["Steps"], L["Shows or hides the panel of the Roadbook's steps. A right-click on the Objective button does it too."])
-  function xp.UpdateStepsButton()
-    stepsB:SetEnabled(Geo.Frozen() ~= nil)
-  end
+  -- Right end of the goal box: "Generate" makes the Roadbook, "Empty" empties it (after confirmation).
+  local empty = Button(L["Empty"], 80, function() CP.Empty() end)
+  empty:SetPoint("RIGHT", host, "TOPRIGHT", -8, rowY)
+  Tooltip(empty, L["Empty"], L["Empties the Roadbook: its steps, their progress and the quest list."])
   local generate = Button(L["Generate"], 80, function() CP.Generate() end)
-  generate:SetPoint("RIGHT", host, "TOPRIGHT", -8, rowY) -- right end of the goal box
+  generate:SetPoint("RIGHT", empty, "LEFT", -6, 0)
   Tooltip(generate, L["Generate"], L["Computes a new Roadbook with the chosen option, the list becoming its quests; the current one is replaced, after confirmation. The new one is not tracked: turn the tracking on from the Objective button or the steps panel. Afterwards, the Roadbook always does every quest of the list in the least time, and is computed again at each change of the list."])
 
   -- Waiting animation while the Roadbook is computed (Geo.RenderBusy shows it).
@@ -129,7 +116,7 @@ local function CreateRoadbookPanel(f)
 
   function xp.UpdateMode()
     updateLeft()
-    abandon:SetEnabled(not Geo.computing and (Geo.HasRoadbook() or #Geo.CustomRec().list > 0))
+    empty:SetEnabled(not Geo.computing and (Geo.HasRoadbook() or #Geo.CustomRec().list > 0))
     generate:SetEnabled(not Geo.computing)
   end
   return xp

@@ -267,7 +267,7 @@ function Geo.KeepOnlyDone()
   return true
 end
 
--- Every step of the Roadbook is done: it can only be extended (custom: quests added), generated again or abandoned.
+-- Every step of the Roadbook is done: it can only be extended (custom: quests added), generated again or emptied.
 function Geo.IsFinished()
   local fz = Geo.Frozen()
   if not fz or #fz.route < 2 then return false end
@@ -802,12 +802,12 @@ function CP.TrackOff(quiet)
   if Refresh then C_Timer.After(0.1, Refresh) end
 end
 
--- Abandons the Roadbook after confirmation: tracking stopped, steps and list emptied.
-function CP.Abandon()
-  StaticPopup_Show("FQP_ABANDON")
+-- Empties the Roadbook after confirmation: tracking stopped, steps and list emptied.
+function CP.Empty()
+  StaticPopup_Show("FQP_EMPTY")
 end
 
-function CP.DoAbandon()
+function CP.DoEmpty()
   if Geo.computing then -- computation in progress: cancelled
     Geo.co, Geo.runningKey, Geo.planCbs, Geo.computing = nil, nil, nil, nil
     CP.computeToken = (CP.computeToken or 0) + 1
@@ -819,17 +819,17 @@ function CP.DoAbandon()
   Geo.CustomRec().list = {}
   Geo.customUnplanned = nil
   Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute
-  Print(L["Roadbook abandoned."])
+  Print(L["Roadbook emptied."])
   if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
   CP.RefreshButton()
   if Refresh then Refresh() end
 end
 
-StaticPopupDialogs["FQP_ABANDON"] = {
-  text = L["Abandon the Roadbook?\n\nIts steps, their progress and the quest list are lost."],
-  button1 = L["Abandon"],
+StaticPopupDialogs["FQP_EMPTY"] = {
+  text = L["Empty the Roadbook?\n\nIts steps, their progress and the quest list are lost."],
+  button1 = L["Empty"],
   button2 = CANCEL or L["Cancel"],
-  OnAccept = function() CP.DoAbandon() end,
+  OnAccept = function() CP.DoEmpty() end,
   timeout = 0,
   whileDead = true,
   hideOnEscape = true,
