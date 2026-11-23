@@ -390,6 +390,24 @@ local function Create()
   end)
   fold:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.fold = fold
+  -- Recompute (Roadbook tracked only): the steps to come planned again from here.
+  local recalc = CreateFrame("Button", nil, panel)
+  recalc:SetSize(16, 16)
+  recalc:SetPoint("RIGHT", fold, "LEFT", -4, 0)
+  recalc:SetNormalTexture("Interface\\Buttons\\UI-RotationRight-Button-Up")
+  recalc:SetPushedTexture("Interface\\Buttons\\UI-RotationRight-Button-Down")
+  recalc:SetDisabledTexture("Interface\\Buttons\\UI-RotationRight-Button-Up")
+  recalc:GetDisabledTexture():SetDesaturated(true)
+  recalc:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  recalc:SetScript("OnClick", function()
+    GameTooltip:Hide()
+    if CP.Replan(L["Recompute requested. "]) then Geo.MapPanelSync() end
+  end)
+  recalc:SetScript("OnEnter", function(self)
+    Tip(self, L["Recompute"], L["Plans the steps to come again from where you are: the steps done and the tracking are kept."])
+  end)
+  recalc:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  panel.recalc = recalc
   -- "Empty" (as the Roadbook tab's button) right-aligned in the title bar, and the "Tracking" box
   -- (turns the tracking on or off) at its left.
   local emptyB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -607,6 +625,10 @@ function Geo.MapPanelSync()
   panel.auto:SetChecked(Settings().autoAdd and true or false)
   panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
   panel.emptyB:SetEnabled(not Geo.computing)
+  panel.recalc:SetShown(following and true or false)
+  panel.recalc:SetEnabled(not Geo.computing)
+  panel.emptyB:ClearAllPoints()
+  panel.emptyB:SetPoint("RIGHT", following and panel.recalc or panel.fold, "LEFT", -4, 0)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then
