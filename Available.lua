@@ -300,21 +300,27 @@ local function QuestDiag(text)
   local want, id = text:lower(), tonumber(text)
   local ok, ids = pcall(QDB.Quest.GetAllIds)
   if not ok or type(ids) ~= "table" then Print("QuestieDB quest list unavailable") return end
-  local found = 0
+  local ctx = BuildScanContext()
   local function list(v) return type(v) == "table" and table.concat(v, ",") or tostring(v) end
+  local function bits(mask) -- 1-based positions of the bits set
+    local t = {}
+    for i = 0, 40 do if math.floor((mask or 0) / 2 ^ i) % 2 == 1 then t[#t + 1] = i + 1 end end
+    return #t > 0 and table.concat(t, ",") or "all"
+  end
+  local found = 0
   for k, v in pairs(ids) do
     local q = type(v) == "number" and v or k
     local name = QGet(QDB.Quest, q, "name")
     if name and ((id and q == id) or (not id and name:lower():find(want, 1, true))) then
       found = found + 1
-      if found > 8 then Print("... more matches, refine the search") break end
+      if found > 25 then Print("... more matches, refine the search") break end
       local function g(key) return QGet(QDB.Quest, q, key) end
-      Print(string.format("#%d %s: level %s, requires %s, races %s, classes %s, sort %s, minRep %s",
-        q, name, tostring(g("questLevel")), tostring(g("requiredLevel")), tostring(g("requiredRaces")),
-        tostring(g("requiredClasses")), tostring(g("zoneOrSort")), list(g("requiredMinRep"))))
-      Print(string.format("   preSingle %s, preGroup %s, exclusiveTo %s, next %s, parent %s, completed %s, inLog %s",
-        list(g("preQuestSingle")), list(g("preQuestGroup")), list(g("exclusiveTo")), tostring(g("nextQuestInChain")),
-        tostring(g("parentQuest")), tostring(IsCompleted(q)), tostring(IsInLog(q))))
+      local okc, entry = pcall(CheckAvailable, q, ctx)
+      Print(string.format("#%d %s lvl %s req %s races[%s] classes %s sort %s rep %s | pre %s/%s excl %s next %s parent %s | done %s log %s | %s",
+        q, name, tostring(g("questLevel")), tostring(g("requiredLevel")), bits(g("requiredRaces")), tostring(g("requiredClasses")),
+        tostring(g("zoneOrSort")), list(g("requiredMinRep")), list(g("preQuestSingle")), list(g("preQuestGroup")),
+        list(g("exclusiveTo")), tostring(g("nextQuestInChain")), tostring(g("parentQuest")),
+        tostring(IsCompleted(q)), tostring(IsInLog(q)), (okc and entry) and "AVAILABLE" or "hidden"))
     end
   end
   if found == 0 then Print("no quest matches") end
