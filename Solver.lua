@@ -1462,10 +1462,17 @@ function S.Optimize(P, goal, opts)
       if out() then break end
       local same = S.Dist(inn.p, P.world.bind)
       if not (same and same < 60) then
-        local i, d = NearestStep(core, inn.p)
-        if i and d <= (P.k.INN_DETOUR or 500) then
-          local st = { kind = "bind", p = inn.p, inn = inn, work = P.k.BIND_WORK or 20, title = "Bind: " .. tostring(inn.name) }
-          if try(InsertAt(core, i, st)) then any = true end
+        -- Every place near the inn is tried (after each step within the detour, the start included):
+        -- the nearest step is often too late (a turn-in in town, after the hearth back).
+        local st = { kind = "bind", p = inn.p, inn = inn, work = P.k.BIND_WORK or 20, title = "Bind: " .. tostring(inn.name) }
+        local places = {}
+        for i, s in ipairs(core) do
+          local d = S.Dist(s.p, inn.p)
+          if d and d <= (P.k.INN_DETOUR or 500) then places[#places + 1] = i end
+        end
+        for _, i in ipairs(places) do
+          if out() then break end
+          if try(InsertAt(core, i, st)) then any = true break end
         end
       end
     end
