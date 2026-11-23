@@ -115,6 +115,7 @@ walked, places reached by the teleport spells) is shared by all your characters.
 | `/fqp passes reset` | Forget the zone passes learned on foot |
 | `/fqp npc` | Diagnose the targeted NPC for the service shortcuts (class trainer data) |
 | `/fqp dump` | Capture the Roadbook problem for the test bench (then `/reload`) |
+| `/fqp quest <id or name>` | What QuestieDB says about the matching quests (races, classes, prerequisites, exclusive quests, completed) |
 
 The French command names (`journal`, `dispo`, `autour`, `reglages`, `foyer`) still work.
 
