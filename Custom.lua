@@ -273,8 +273,7 @@ function Geo.ListLocked()
 end
 
 -- List changed: the Roadbook is computed again (grouped when several quests are added in a row), its
--- steps done and its tracking kept; not tracked: nothing is computed, the change is kept (`pending`)
--- until the tracking is turned on (a first Roadbook is computed at once); empty list: the steps to come
+-- steps done and its tracking kept (tracked or not); empty list: the steps to come
 -- are removed and its tracking stops, the steps done stay (only "Empty" empties them).
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1
@@ -282,15 +281,9 @@ function Geo.CustomChanged()
   Geo.customCache = nil
   if #Geo.CustomList() == 0 then
     Geo.customUnplanned = nil
-    Geo.CustomRec().pending = nil
     Geo.ServiceClear()
     if ns.CP then ns.CP.TrackOff(true) end
     if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
-  elseif Geo.HasRoadbook() and not Geo.Tracking() then
-    if not Geo.CustomRec().pending then
-      Geo.CustomRec().pending = true
-      Print(L["List changed: the Roadbook is computed when the tracking is turned on."])
-    end
   else
     C_Timer.After(0.6, function()
       if token == Geo.customToken and ns.CP then ns.CP.Recompute("custom", true) end

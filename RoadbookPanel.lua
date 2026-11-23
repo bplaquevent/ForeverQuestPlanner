@@ -394,12 +394,12 @@ local function Create()
     Tip(self, L["Empty"], L["Empties the Roadbook: its steps, their progress and the quest list."])
   end)
   panel.emptyB = emptyB
-  -- Recompute (greyed unless the Roadbook is tracked): the steps to come planned again from here.
+  -- Recompute (tracked or not): the steps to come planned again from here.
   local recalc = IconButton(16, "Interface\\Buttons\\UI-RefreshButton")
   recalc:SetPoint("RIGHT", emptyB, "LEFT", -6, 0)
   recalc:SetScript("OnClick", function()
     GameTooltip:Hide()
-    if CP.Replan(L["Recompute requested. "]) then Geo.MapPanelSync() end
+    if CP.Replan(L["Recompute requested. "], nil, true) then Geo.MapPanelSync() end
   end)
   recalc:SetScript("OnEnter", function(self)
     Tip(self, L["Recompute"], L["Plans the steps to come again from where you are: the steps done and the tracking are kept."])
@@ -430,7 +430,7 @@ local function Create()
     Geo.MapPanelSync()
   end)
   track:SetScript("OnEnter", function(self)
-    Tip(self, L["Tracking"], L["On: the Objective button, the map pin and the watched quest follow the Roadbook. Off: they stop and the Roadbook is no longer updated (greyed steps). Turning it on computes the steps to come again."])
+    Tip(self, L["Tracking"], L["On: the Objective button, the map pin and the watched quest follow the Roadbook. Off: they stop and the Roadbook is only computed again by the Recompute icon or a change of its list (greyed steps). Turning it on computes the steps to come again."])
   end)
   track:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.track = track
@@ -626,9 +626,9 @@ function Geo.MapPanelSync()
   UpdateScrollBar(panel.scroll)
   panel.track:SetChecked(following)
   panel.auto:SetChecked(Settings().autoAdd and true or false)
-  panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished() or Geo.CustomRec().pending))
+  panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
   panel.emptyB:SetEnabled(not Geo.computing)
-  panel.recalc:SetEnabled(following and not Geo.computing and true or false) -- greyed when tracking is off
+  panel.recalc:SetEnabled(not Geo.computing and true or false)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then

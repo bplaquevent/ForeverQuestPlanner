@@ -490,12 +490,11 @@ function CP.TrackOn()
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
     return
   end
-  local pending = Geo.CustomRec().pending
-  if not Geo.Frozen() and not (pending and #Geo.CustomList() > 0) then
+  if not Geo.Frozen() then
     Print(L["This Roadbook has no step: add quests to its list or click \"Adapt\"."])
     return
   end
-  if Geo.IsFinished() and not pending then
+  if Geo.IsFinished() then
     CP.FinishedMessage()
     return
   end
@@ -555,8 +554,9 @@ end
 -- the steps to come are planned again from here, the steps done stay (history): every quest left of
 -- the list in the least time.
 -- opts: { ban = transport not usable on the first leg }. Returns true if a computation started.
-function CP.Replan(msg, opts)
-  if not (Geo.Tracking() or CP.turningOn) then return false end -- never computed again while not tracked
+function CP.Replan(msg, opts, manual)
+  -- Never computed again by itself while not tracked (manual: the Recompute icon).
+  if not (manual or Geo.Tracking() or CP.turningOn) then return false end
   if not GeoReady() then return false end
   if Geo.computing then
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
@@ -789,10 +789,10 @@ function CP.RecallCast(key)
 end
 
 -- Turns the tracking off: only the Objective button, the pin and the map stop following it; the
--- Roadbook, its steps and their progress are kept (not updated until the tracking is on again).
+-- Roadbook, its steps and their progress are kept (computed again only by the Recompute icon or a change of its list).
 function CP.TrackOff(quiet)
   CP.StopFocus()
-  if not quiet then Print(L["Tracking off: the Roadbook is no longer updated. Turn the tracking on to compute it again and follow it."]) end
+  if not quiet then Print(L["Tracking off: the Roadbook is only computed again by the Recompute icon or a change of its list. Turn the tracking on to follow it again."]) end
   if Refresh then C_Timer.After(0.1, Refresh) end
 end
 
@@ -927,7 +927,6 @@ function CP.Recompute(goal, keep, attempt, token, re)
   Geo.Recompute(goal, function(route, err)
     local refocus = CP.focusAfter -- tracking (re)started during the computation
     CP.focusAfter = nil
-    if route and #route >= 2 then Geo.CustomRec().pending = nil end
     if not route or #route < 2 then
       Print(err or L["The Roadbook is empty: no step to follow."])
       CP.RefreshButton()
