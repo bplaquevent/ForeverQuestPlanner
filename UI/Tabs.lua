@@ -336,11 +336,12 @@ local function RenderAvailable()
       if e.missing then
         text = text .. Geo.DescLine(Color(D.bad, L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", ")))
       end
-      text = text .. Geo.ChainLines(e.id)
       local rewards = Geo.RewardLine(e.id)
       if rewards then text = text .. Geo.DescLine(rewards) end
+      local chainText, chainLinks = Geo.ChainLines(e.id)
+      text = text .. chainText
       local id = e.id
-      items[#items + 1] = { text = text, links = rewards ~= nil, linkQuest = id,
+      items[#items + 1] = { text = text, links = rewards ~= nil or chainLinks, linkQuest = id,
         b1 = Geo.CustomButton(id, e.name, e.level),
         b2 = Geo.MapButton(function() return Geo.GiverPoint(id, PlayerPos()) end, e.name, id) }
     end

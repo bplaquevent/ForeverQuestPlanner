@@ -1151,7 +1151,7 @@ end
 
 K.MAX_CHAIN_LINES = 10
 K.CHAIN_INDENT = K.DESC_LINE .. "   "
--- Lines under a quest: its follow-ups as an indented block (title, level, level required, XP), muted
+-- Lines under a quest: its follow-ups (each with its possible rewards; 2nd value: true when some carry item links) as an indented block (title, level, level required, XP), muted
 -- as they cannot be picked up yet. Beyond K.MAX_CHAIN_LINES, the last ones share a single line.
 function Geo.ChainLines(id)
   local chain = Geo.ChainQuests(id)
@@ -1159,7 +1159,7 @@ function Geo.ChainLines(id)
   local D, plevel = K.DESC, UnitLevel("player")
   local sep = Color(D.meta, K.DESC_SEP)
   local function title(c) return Color(D.chain, (c.title or "?") .. (c.level and (" [" .. c.level .. "]") or "")) end
-  local text = K.DESC_LINE .. Color(D.chain, L["Follow-up:"])
+  local text, links = K.DESC_LINE .. Color(D.chain, L["Follow-up:"]), false
   for i, c in ipairs(chain) do
     if i >= K.MAX_CHAIN_LINES and #chain > K.MAX_CHAIN_LINES then
       local rest = {}
@@ -1172,8 +1172,13 @@ function Geo.ChainLines(id)
     local xp = Geo.XPText(ns.DBXP(c.id, plevel), true)
     if xp then parts[#parts + 1] = xp end
     text = text .. K.CHAIN_INDENT .. StateIcons(c.id) .. table.concat(parts, sep)
+    local rewards = Geo.RewardLine(c.id)
+    if rewards then
+      text = text .. K.CHAIN_INDENT .. "   " .. rewards
+      links = true
+    end
   end
-  return text
+  return text, links
 end
 
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
