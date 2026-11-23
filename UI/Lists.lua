@@ -1133,7 +1133,7 @@ function Geo.ChainLines(id)
   local D, plevel = K.DESC, UnitLevel("player")
   local sep = Color(D.meta, K.DESC_SEP)
   local function title(c) return Color(D.chain, (c.title or "?") .. (c.level and (" [" .. c.level .. "]") or "")) end
-  local text = ""
+  local text = K.DESC_LINE .. Color(D.chain, L["Follow-up:"])
   for i, c in ipairs(chain) do
     if i >= K.MAX_CHAIN_LINES and #chain > K.MAX_CHAIN_LINES then
       local rest = {}
