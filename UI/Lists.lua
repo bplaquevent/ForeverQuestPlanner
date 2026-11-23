@@ -1099,6 +1099,49 @@ function Geo.CustomButton(id, title, level)
     end }
 end
 
+-- Button "Add all" / "Remove all" of a quest with follow-ups: the quest and its whole chain. nil without follow-ups.
+function Geo.ChainButton(id, title, level)
+  if not id then return nil end
+  local chain, all = Geo.ChainState(id)
+  if #chain == 0 then return nil end
+  local last = 0
+  for _, c in ipairs(chain) do last = math.max(last, c.level or c.reqLevel or 0) end
+  return { text = all and L["Remove all"] or L["Add all"],
+    tip = { all and L["Remove this quest and its whole chain from the Roadbook list"] or L["Add this quest and its whole chain to the Roadbook list"],
+      string.format(L["%d follow-up quest(s), up to level %d. Refused when the quests of the list cannot reach the levels required."], #chain, last) },
+    disabled = Geo.computing and true or nil,
+    fn = function()
+      if Geo.ListLocked() then return end
+      if all then Geo.CustomRemoveChain(id) else Geo.CustomAddChain(id, title, level) end
+    end }
+end
+
+-- Line "follow-up: n quest(s) up to level X" (nothing for a quest without follow-ups).
+function Geo.ChainTextLine(id)
+  if not id then return "" end
+  local text = ChainText(ChainInfo(id, UnitLevel("player"), 0))
+  return text and Geo.DescLine(Color(K.DESC.chain, text)) or ""
+end
+
+K.MAX_CHAIN_LINES = 8
+-- Lines under a quest: its follow-ups, one per line (title, level required, XP).
+function Geo.ChainLines(id)
+  local chain = Geo.ChainQuests(id)
+  local text = ""
+  for i, c in ipairs(chain) do
+    if i > K.MAX_CHAIN_LINES then
+      text = text .. Geo.DescLine(Color(K.DESC.chain, string.format(L["… +%d more quest(s)"], #chain - K.MAX_CHAIN_LINES)))
+      break
+    end
+    local xp = ns.DBXP(c.id, UnitLevel("player"))
+    text = text .. Geo.DescLine(Color(K.DESC.chain, "↳ ") .. StateIcons(c.id) ..
+      Geo.QuestTitle(c.title, { id = c.id, level = c.level }),
+      c.reqLevel > UnitLevel("player") and Color(K.DESC.meta, L["requires level "] .. c.reqLevel) or nil,
+      Geo.XPText(xp, true))
+  end
+  return text
+end
+
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
 function Geo.CustomBulkButtons(list)
   local locked = Geo.computing and true or nil

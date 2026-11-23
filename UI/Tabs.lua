@@ -73,7 +73,8 @@ local function RenderTodo(a)
         tint = q._abandon and { 0.9, 0.5, 0.25 } or nil,
         stripe = q._abandon and { 1, 0.5, 0.15 } or nil,
         b1 = Geo.CustomButton(q.id, q.title, q.level),
-        b2 = Geo.MapButton(function() return Geo.ObjectivePoint(q) end, q.title, q.id),
+        b2 = Geo.ChainButton(q.id, q.title, q.level),
+        b3 = Geo.MapButton(function() return Geo.ObjectivePoint(q) end, q.title, q.id),
         trash = AbandonButton(q), -- trash icon at the left of the quest
       }
     end
@@ -336,12 +337,14 @@ local function RenderAvailable()
       if e.missing then
         text = text .. Geo.DescLine(Color(D.bad, L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", ")))
       end
+      text = text .. Geo.ChainLines(e.id)
       local rewards = Geo.RewardLine(e.id)
       if rewards then text = text .. Geo.DescLine(rewards) end
       local id = e.id
       items[#items + 1] = { text = text, links = rewards ~= nil, linkQuest = id,
         b1 = Geo.CustomButton(id, e.name, e.level),
-        b2 = Geo.MapButton(function() return Geo.GiverPoint(id, PlayerPos()) end, e.name, id) }
+        b2 = Geo.ChainButton(id, e.name, e.level),
+        b3 = Geo.MapButton(function() return Geo.GiverPoint(id, PlayerPos()) end, e.name, id) }
     end
   end
   if total == 0 then items[#items + 1] = { text = searching and L["No quest matches the search."] or L["No quest available for this filter."] } end
@@ -387,12 +390,13 @@ local function RenderNear()
     local who = (take and L["Given by: "] or L["Turn in to: "]) .. (it.giver or "?")
     local text = "  " .. StateIcons(it.id) ..
       Geo.QuestTitle(it.label, it.id and { id = it.id, level = it.level } or nil) ..
-      Geo.DescLine(Color(D.action, who .. K.DESC_SEP .. PointText(it.p))) .. figures
+      Geo.DescLine(Color(D.action, who .. K.DESC_SEP .. PointText(it.p))) .. figures .. Geo.ChainTextLine(it.id)
     if it.rep then text = text .. Geo.DescLine(Color(D.bad, it.rep)) end
     local label = take and L["pick up the quest"] or L["turn in the quest"]
     return { text = text, questID = not take and it.id or nil, linkQuest = it.id,
       b1 = Geo.CustomButton(it.id, it.label, it.level),
-      b2 = Geo.MapButton(function() return it.p, label end, it.label, it.id) }
+      b2 = Geo.ChainButton(it.id, it.label, it.level),
+      b3 = Geo.MapButton(function() return it.p, label end, it.label, it.id) }
   end
 
   -- Quest in progress: one row per quest, one line per step within reach; the map pin goes to the nearest step.
@@ -403,10 +407,12 @@ local function RenderNear()
       text = text .. Geo.DescLine(Color(D.action, L["Objective: "] .. (it.extra or "?") .. K.DESC_SEP .. PointText(it.p)),
         Color(D.meta, string.format("%.0f m", it.d)))
     end
+    text = text .. Geo.ChainTextLine(g.id)
     local first = g.steps[1]
     return { text = text, questID = g.id, linkQuest = g.id,
       b1 = Geo.CustomButton(g.id, g.label, g.level),
-      b2 = Geo.MapButton(function() return first.p, first.extra end, g.label, g.id) }
+      b2 = Geo.ChainButton(g.id, g.label, g.level),
+      b3 = Geo.MapButton(function() return first.p, first.extra end, g.label, g.id) }
   end
 
   local sections = {
