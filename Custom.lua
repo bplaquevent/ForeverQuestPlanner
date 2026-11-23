@@ -473,6 +473,60 @@ function Geo.CustomConstraints(tasks)
   return pred, succ
 end
 
+-- Identity of a quest step (game step of the plan or of the saved route): kind, quest (or dungeon), target.
+function Geo.StepKey(st)
+  local t = st.task or {}
+  return st.kind .. ":" .. tostring(t.id or t.dungeon) .. ":" .. tostring(st.r and st.r.tg and st.r.tg.name)
+end
+
+-- Steps on the spot first (CP.NearbyCheck): near = { keys = StepKey of the steps wanted first, city = uiMapID
+-- of the city the player is in, or nil }. The steps wanted that can be done without any other step
+-- (their order rules reach only wanted steps; a glued chain whole) become order rules of every other
+-- step (outside the city if any): they come first. The pending service stays first.
+function Geo.ApplyNearFirst(tasks, steps, pred, near, svc)
+  local chosen, link = {}, {}
+  for _, s in ipairs(steps) do
+    if s ~= svc and near.keys[Geo.StepKey(s)] then chosen[s] = true end
+  end
+  for _, task in ipairs(tasks) do
+    for k = 2, #task.order do
+      local s = task.order[k]
+      if s.glue then
+        local a = task.order[k - 1]
+        link[s] = link[s] or {}
+        link[a] = link[a] or {}
+        table.insert(link[s], a)
+        table.insert(link[a], s)
+      end
+    end
+  end
+  local changed = true
+  while changed do
+    changed = false
+    for _, s in ipairs(steps) do
+      if chosen[s] then
+        local ok = true
+        for _, p in ipairs(pred[s] or {}) do if not chosen[p] then ok = false end end
+        for _, g in ipairs(link[s] or {}) do if not chosen[g] then ok = false end end
+        if not ok then
+          chosen[s] = nil
+          changed = true
+        end
+      end
+    end
+  end
+  local first = {}
+  for _, s in ipairs(steps) do if chosen[s] then first[#first + 1] = s end end
+  if #first == 0 then return 0 end
+  for _, t in ipairs(steps) do
+    if not chosen[t] and t ~= svc and t.p and (not near.city or Geo.ZoneIdAt(t.p) ~= near.city) then
+      pred[t] = pred[t] or {}
+      for _, s in ipairs(first) do table.insert(pred[t], s) end
+    end
+  end
+  return #first
+end
+
 -- Fastest route doing every quest of the list (solver): dungeon visits, order rules (pick-up first,
 -- turn-in last, prerequisites before), required levels (a quest picked up below it gets a warning,
 -- an order rule that cannot be kept too), teleports, binds and flight paths activated on the way.
@@ -482,7 +536,7 @@ function Geo.PlanCustom(opts)
   Geo.xpScale, Geo.customCtx = nil, nil
   Geo.laterList = {}
   Geo.planSpeed = TravelSpeed()
-  local cp, err, unplanned = Geo.CustomPlanSteps(pos, UnitLevel("player"))
+  local cp, err, unplanned = Geo.CustomPlanSteps(pos, UnitLevel("player"), opts and opts.near)
   Geo.customUnplanned = cp and cp.unplanned or unplanned or {}
   if not cp then return nil, err end
   local P = Geo.Problem("custom", pos, cp)

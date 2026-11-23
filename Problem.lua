@@ -101,8 +101,9 @@ function Pb.Tasks(P, pos, plevel, live)
 end
 
 -- Custom list as the game plans it: its quests, dungeon visits and order rules.
+-- near: steps on the spot first (Geo.ApplyNearFirst).
 -- Returns { tasks, steps, pred, dungeons, unplanned } (game objects), or nil and the reason.
-function Geo.CustomPlanSteps(pos, plevel)
+function Geo.CustomPlanSteps(pos, plevel, near)
   local list = Geo.CustomList()
   local svc = Geo.ServiceStep()
   if #list == 0 and not svc then return nil, L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] end
@@ -144,6 +145,7 @@ function Geo.CustomPlanSteps(pos, plevel)
       end
     end
   end
+  if near then Geo.ApplyNearFirst(tasks, steps, pred, near, svc) end -- steps on the spot first
   if svc then
     for i = 2, #steps do
       pred[steps[i]] = pred[steps[i]] or {}

@@ -70,6 +70,7 @@ f:SetScript("OnEvent", function(_, event, ...)
     if not okM then Print(L["Map drawing error: "] .. tostring(errM)) end
     CreateMinimapButton()
     C_Timer.NewTicker(K.PASS_TICK, function() pcall(Geo.PassTick) end) -- zone passes learned on foot
+    C_Timer.NewTicker(3, function() pcall(CP.NearbyCheck) end) -- steps on the spot first (Roadbook.lua)
     if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
     ScheduleSnapshot()
   elseif event == "PLAYER_LOGOUT" then
