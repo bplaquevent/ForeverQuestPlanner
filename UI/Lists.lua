@@ -1123,21 +1123,29 @@ function Geo.ChainTextLine(id)
   return text and Geo.DescLine(Color(K.DESC.chain, text)) or ""
 end
 
-K.MAX_CHAIN_LINES = 8
--- Lines under a quest: its follow-ups, one per line (title, level required, XP).
+K.MAX_CHAIN_LINES = 6
+K.CHAIN_INDENT = K.DESC_LINE .. "   "
+-- Lines under a quest: its follow-ups as an indented block (title, level, level required, XP), muted
+-- as they cannot be picked up yet. Beyond K.MAX_CHAIN_LINES, the last ones share a single line.
 function Geo.ChainLines(id)
   local chain = Geo.ChainQuests(id)
+  if #chain == 0 then return "" end
+  local D, plevel = K.DESC, UnitLevel("player")
+  local sep = Color(D.meta, K.DESC_SEP)
+  local function title(c) return Color(D.chain, (c.title or "?") .. (c.level and (" [" .. c.level .. "]") or "")) end
   local text = ""
   for i, c in ipairs(chain) do
-    if i > K.MAX_CHAIN_LINES then
-      text = text .. Geo.DescLine(Color(K.DESC.chain, string.format(L["… +%d more quest(s)"], #chain - K.MAX_CHAIN_LINES)))
+    if i >= K.MAX_CHAIN_LINES and #chain > K.MAX_CHAIN_LINES then
+      local rest = {}
+      for j = i, #chain do rest[#rest + 1] = title(chain[j]) end
+      text = text .. K.CHAIN_INDENT .. Color(D.chain, "> ") .. table.concat(rest, sep)
       break
     end
-    local xp = ns.DBXP(c.id, UnitLevel("player"))
-    text = text .. Geo.DescLine(Color(K.DESC.chain, "↳ ") .. StateIcons(c.id) ..
-      Geo.QuestTitle(c.title, { id = c.id, level = c.level }),
-      c.reqLevel > UnitLevel("player") and Color(K.DESC.meta, L["requires level "] .. c.reqLevel) or nil,
-      Geo.XPText(xp, true))
+    local parts = { title(c) }
+    if c.reqLevel > plevel then parts[#parts + 1] = Color(D.meta, L["requires level "] .. c.reqLevel) end
+    local xp = Geo.XPText(ns.DBXP(c.id, plevel), true)
+    if xp then parts[#parts + 1] = xp end
+    text = text .. K.CHAIN_INDENT .. Color(D.chain, "> ") .. table.concat(parts, sep)
   end
   return text
 end
