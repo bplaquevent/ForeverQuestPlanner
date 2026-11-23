@@ -372,7 +372,7 @@ local function Create()
   panel.titleText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   panel.titleText:SetPoint("TOPLEFT", 10, -9)
   panel.titleText:SetText(L["Roadbook"])
-  -- Title bar, right to left: "Empty" icon, "Recompute" icon (Roadbook tracked only), then the boxes
+  -- Title bar, right to left: "Empty" icon, "Recompute" icon, then the boxes
   -- "Tracking", "Auto" and "Info". (No close button: the Objective button and the Steps button show or
   -- hide the panel.)
   local function IconButton(size, normal, pushed, highlight)
@@ -386,16 +386,16 @@ local function Create()
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
     return b
   end
-  local emptyB = IconButton(22, "Interface\\Buttons\\UI-GroupLoot-Pass-Up", "Interface\\Buttons\\UI-GroupLoot-Pass-Down",
+  local emptyB = IconButton(16, "Interface\\Buttons\\UI-GroupLoot-Pass-Up", "Interface\\Buttons\\UI-GroupLoot-Pass-Down",
     "Interface\\Buttons\\UI-GroupLoot-Pass-Highlight")
-  emptyB:SetPoint("TOPRIGHT", -8, -5)
+  emptyB:SetPoint("TOPRIGHT", -8, -7)
   emptyB:SetScript("OnClick", function() CP.Empty() end)
   emptyB:SetScript("OnEnter", function(self)
     Tip(self, L["Empty"], L["Empties the Roadbook: its steps, their progress and the quest list."])
   end)
   panel.emptyB = emptyB
-  -- Recompute: the steps to come planned again from here.
-  local recalc = IconButton(22, "Interface\\Buttons\\UI-RefreshButton")
+  -- Recompute (greyed unless the Roadbook is tracked): the steps to come planned again from here.
+  local recalc = IconButton(16, "Interface\\Buttons\\UI-RefreshButton")
   recalc:SetPoint("RIGHT", emptyB, "LEFT", -2, 0)
   recalc:SetScript("OnClick", function()
     GameTooltip:Hide()
@@ -409,7 +409,7 @@ local function Create()
   track:SetSize(20, 20)
   track.label = track:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   track.label:SetText(L["Tracking"])
-  track.label:SetPoint("RIGHT", emptyB, "LEFT", -6, 0) -- re-anchored by MapPanelSync
+  track.label:SetPoint("RIGHT", recalc, "LEFT", -6, 0)
   track:SetPoint("RIGHT", track.label, "LEFT", -2, 0)
   local auto = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
   auto:SetSize(20, 20)
@@ -627,10 +627,7 @@ function Geo.MapPanelSync()
   panel.auto:SetChecked(Settings().autoAdd and true or false)
   panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
   panel.emptyB:SetEnabled(not Geo.computing)
-  panel.recalc:SetShown(following and true or false)
-  panel.recalc:SetEnabled(not Geo.computing)
-  panel.track.label:ClearAllPoints()
-  panel.track.label:SetPoint("RIGHT", following and panel.recalc or panel.emptyB, "LEFT", -6, 0)
+  panel.recalc:SetEnabled(following and not Geo.computing and true or false) -- greyed when tracking is off
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then
