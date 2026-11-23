@@ -93,7 +93,7 @@ function Geo.StepDetailLines(st)
   if figures ~= "" then lines[#lines + 1] = (figures:gsub("^" .. K.DESC_LINE:gsub("%p", "%%%0"), "")) end
   local task = st.task or {}
   local function add(hex, t) lines[#lines + 1] = Color(hex, t) end
-  if st.kind == "fm" and st.fmHub then add(D.good, L["used afterwards by the route"]) end
+  if st.kind == "fm" and st.fmHub then add(D.good, st.laterFM and L["for later trips"] or L["used afterwards by the route"]) end
   if st.escort then add(D.warn, "~" .. FormatTime(st.work or 0) .. L[", do not interrupt"]) end
   if st.kind == "take" then
     if task.levelWarn and task.reqLevel then

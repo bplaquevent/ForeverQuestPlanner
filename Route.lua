@@ -464,6 +464,7 @@ function Geo.FromSolver(P, sroute, res)
         .. (AreaName(s.p.area) or "?"), npc = s.inn and s.inn.name, xp = 0, bind = true } }
     elseif s.kind == "fm" and s.fm then
       st = Geo.FlightMasterStep(s.fm)
+      st.laterFM = s.near or nil -- activated for later trips, not for a gain of this route
     end
     if st then
       st.at = res.at[i]

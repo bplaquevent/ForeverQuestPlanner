@@ -688,7 +688,8 @@ S.OPT = {
   CHAIN_DEPTH = 2,    -- follow-ups added with a quest at once
   MAX_SEGMENT = 6,    -- longest block of steps moved at once
   OVERSHOOT = 1.15,   -- time goal: the construction may go this far beyond the time
-  FM_SEARCH = 2500,   -- yards: unknown flight masters this close to a step are tried
+  FM_SEARCH = 2500,   -- yards: unknown flight masters this close to a step are tried (kept if the route gains)
+  FM_NEAR = 500,      -- yards: unknown flight masters this close to a step are activated, whatever the gain
   MAX_EVALS = 40000,  -- evaluation budget
   MAX_TIME = 60,      -- seconds of computation, at most (when S.clock is set)
   LNS_ROUNDS = 30,    -- destroy and rebuild attempts
@@ -1549,6 +1550,34 @@ function S.Optimize(P, goal, opts)
     if try(construct(c, O.LNS_NOISE)) then
       rebuilt = rebuilt + 1
       rounds = rounds + localSearch()
+    end
+  end
+
+  -- Flight masters right next to a step of the final route: activated whatever the gain ("activate
+  -- nearby flight masters"). A flight path is worth it later, once the other end is known too, which the
+  -- goal of this route does not see. Each one goes where the goal value suffers least.
+  if not (P.player.settings and P.player.settings.noFMDetour) then
+    local known = S.KnownStart(P)
+    local inCore = {}
+    for _, st in ipairs(core) do if st.kind == "fm" then inCore[st.fmNode] = true end end
+    for _, fm in ipairs(P.world.fms or {}) do
+      if fm.node and not known[fm.node] and not inCore[fm.node] then
+        local st = { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, near = true, work = (P.k.OVERHEAD or 20) / 2,
+          title = "Flight path: " .. tostring(fm.name) }
+        local bc, bs, br, bscore
+        for i, s in ipairs(core) do
+          local d = S.Dist(s.p, fm.p)
+          if d and d <= O.FM_NEAR then
+            local c = InsertAt(core, i, st)
+            if valid(P, c) then
+              local res, route = sim(c)
+              local sc = S.Objective(P, res, goal)
+              if not bscore or sc < bscore then bc, bs, br, bscore = c, res, route, sc end
+            end
+          end
+        end
+        if bc then core, bestRes, bestRoute, bestScore, inCore[fm.node] = bc, bs, br, bscore, true end
+      end
     end
   end
 
