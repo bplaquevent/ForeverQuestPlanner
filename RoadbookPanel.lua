@@ -396,7 +396,7 @@ local function Create()
   panel.emptyB = emptyB
   -- Recompute (greyed unless the Roadbook is tracked): the steps to come planned again from here.
   local recalc = IconButton(16, "Interface\\Buttons\\UI-RefreshButton")
-  recalc:SetPoint("RIGHT", emptyB, "LEFT", -2, 0)
+  recalc:SetPoint("RIGHT", emptyB, "LEFT", -8, 0)
   recalc:SetScript("OnClick", function()
     GameTooltip:Hide()
     if CP.Replan(L["Recompute requested. "]) then Geo.MapPanelSync() end
