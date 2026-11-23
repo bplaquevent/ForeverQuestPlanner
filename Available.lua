@@ -292,7 +292,7 @@ end
 
 -- /fqp quest <id or part of a name>: what QuestieDB says about the quests that match, and why each is
 -- listed or not as available (debugging aid).
-function ns.Geo.QuestDiag(text)
+local function QuestDiag(text)
   local Print = ns.Print
   local _, race, raceID = UnitRace("player")
   local _, rbit = PlayerBits()
@@ -321,4 +321,4 @@ function ns.Geo.QuestDiag(text)
 end
 
 -- Shared with the next files.
-ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan = BuildScanContext, CheckAvailable, Refresh, StartScan, scan
+ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan, ns.QuestDiag = BuildScanContext, CheckAvailable, Refresh, StartScan, scan, QuestDiag
