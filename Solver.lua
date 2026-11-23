@@ -541,6 +541,44 @@ function S.Evaluate(P, route, opts)
   return res
 end
 
+-- Can the quests be done in some order, with the XP of the quests alone? player = { level, xp,
+-- xpNeeded = { [level] = XP to the next one }, maxLevel }; quests = { { id, row = { qLevel, baseXP },
+-- reqLevel, pres = { quest ids that must be done first }, inLog } }. A quest is ready when its
+-- prerequisites are done and the level required is reached (or it is in the log already); the lowest
+-- requirement goes first. Returns nil when all can be done, else { id, need, reach }: the blocked quest
+-- with the lowest required level, and the level reached when nothing more can be done.
+function S.LevelReach(player, quests)
+  local level, xp = player.level, player.xp or 0
+  local done, left = {}, {}
+  for i, q in ipairs(quests) do left[i] = q end
+  while #left > 0 do
+    local pick
+    for i, q in ipairs(left) do
+      local ready = q.inLog or (q.reqLevel or 0) <= level
+      for _, p in ipairs(q.pres or {}) do
+        if not done[p] then ready = false end
+      end
+      if ready and (not pick or (q.reqLevel or 0) < (left[pick].reqLevel or 0)) then pick = i end
+    end
+    if not pick then break end
+    local q = table.remove(left, pick)
+    done[q.id] = true
+    xp = xp + (q.row and S.QuestXP(q.row[1], q.row[2], level, player.maxLevel) or 0)
+    while level < player.maxLevel and xp >= (player.xpNeeded[level] or math.huge) do
+      xp, level = xp - player.xpNeeded[level], level + 1
+    end
+  end
+  if #left == 0 then return nil end
+  local worst
+  for _, q in ipairs(left) do
+    -- (a quest only waiting for a prerequisite is not the one to blame)
+    local late = (q.reqLevel or 0) > level
+    local wlate = worst and (worst.reqLevel or 0) > level
+    if not worst or (late and not wlate) or (late == wlate and (q.reqLevel or 0) < (worst.reqLevel or 0)) then worst = q end
+  end
+  return { id = worst.id, need = worst.reqLevel or 0, reach = level }
+end
+
 ---------------------------------------------------------------------------
 -- Goal
 ---------------------------------------------------------------------------

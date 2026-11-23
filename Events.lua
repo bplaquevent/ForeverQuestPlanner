@@ -235,6 +235,8 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     end
   elseif msg == "npc" then
     for _, line in ipairs(Geo.NpcInfo()) do Print(line) end
+  elseif msg:sub(1, 6) == "quest " then
+    ns.QuestDiag(msg:sub(7))
   elseif msg == "dump" then
     Geo.BenchDump()
   else

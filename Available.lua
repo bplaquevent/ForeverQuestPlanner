@@ -86,7 +86,16 @@ local function CheckAvailable(id, ctx)
   -- level alone does not hide it).
   -- Quests slightly too high kept for the Roadbook (unlocked by the expected level).
   if req > ctx.plevel + (ctx.lookahead or 0) then return nil end
-  local function done(q) return IsCompleted(q) or (ctx.done and ctx.done[q]) or false end
+  -- A prerequisite quest the player's race or class could never take (the quest of another race, flagged done
+  -- through the exclusive classic chain) does not count as done: what follows it cannot be taken either.
+  local function reachableBy(q)
+    local r = QGet(Q, q, "requiredRaces") or 0
+    if r ~= 0 and ctx.raceBit and not HasBit(r, ctx.raceBit) then return false end
+    local c = QGet(Q, q, "requiredClasses") or 0
+    if c ~= 0 and ctx.classBit and not HasBit(c, ctx.classBit) then return false end
+    return true
+  end
+  local function done(q) return (IsCompleted(q) or (ctx.done and ctx.done[q]) or false) and reachableBy(q) end
   -- Missing prerequisites (quests, professions): the quest is listed with what is missing.
   local missing = { texts = {}, quests = {} }
   local function questName(q) return string.format(L["\"%s\""], QGet(Q, q, "name") or ("#" .. q)) end
@@ -259,6 +268,29 @@ local function StartScan()
         end
         if ok then kept[#kept + 1] = en end
       end
+      -- A quest whose missing prerequisites are all listed quests that lead to it is shown in their
+      -- chain (Geo.ChainLines), not as a row of its own.
+      local listed = {}
+      for _, en in ipairs(kept) do listed[en.id] = en end
+      local heads = {}
+      for _, en in ipairs(kept) do
+        if not en.missing then
+          for _, c in ipairs(ns.Geo.ChainQuests(en.id)) do heads[c.id] = true end
+        end
+      end
+      results = {}
+      for _, en in ipairs(kept) do
+        local inChain = en.missing and heads[en.id]
+        if inChain then
+          for _, anyOf in ipairs(en.missing.quests) do
+            local one = false
+            for _, q in ipairs(anyOf) do if listed[q] then one = true break end end
+            if not one then inChain = false break end
+          end
+        end
+        if not inChain then results[#results + 1] = en end
+      end
+      kept = results
       results = kept
       scan.entries = results
       if Refresh then Refresh() end
@@ -267,5 +299,41 @@ local function StartScan()
   step()
 end
 
+-- /fqp quest <id or part of a name>: what QuestieDB says about the quests that match, and why each is
+-- listed or not as available (debugging aid).
+local function QuestDiag(text)
+  local Print = ns.Print
+  local _, race, raceID = UnitRace("player")
+  local _, rbit = PlayerBits()
+  Print(string.format("race %s (id %s), bit %s", tostring(race), tostring(raceID), tostring(rbit)))
+  local want, id = text:lower(), tonumber(text)
+  local ok, ids = pcall(QDB.Quest.GetAllIds)
+  if not ok or type(ids) ~= "table" then Print("QuestieDB quest list unavailable") return end
+  local ctx = BuildScanContext()
+  local function list(v) return type(v) == "table" and table.concat(v, ",") or tostring(v) end
+  local function bits(mask) -- 1-based positions of the bits set
+    local t = {}
+    for i = 0, 40 do if math.floor((mask or 0) / 2 ^ i) % 2 == 1 then t[#t + 1] = i + 1 end end
+    return #t > 0 and table.concat(t, ",") or "all"
+  end
+  local found = 0
+  for k, v in pairs(ids) do
+    local q = type(v) == "number" and v or k
+    local name = QGet(QDB.Quest, q, "name")
+    if name and ((id and q == id) or (not id and name:lower():find(want, 1, true))) then
+      found = found + 1
+      if found > 25 then Print("... more matches, refine the search") break end
+      local function g(key) return QGet(QDB.Quest, q, key) end
+      local okc, entry = pcall(CheckAvailable, q, ctx)
+      Print(string.format("#%d %s lvl %s req %s races[%s] classes %s sort %s rep %s | pre %s/%s excl %s next %s parent %s | done %s log %s | %s",
+        q, name, tostring(g("questLevel")), tostring(g("requiredLevel")), bits(g("requiredRaces")), tostring(g("requiredClasses")),
+        tostring(g("zoneOrSort")), list(g("requiredMinRep")), list(g("preQuestSingle")), list(g("preQuestGroup")),
+        list(g("exclusiveTo")), tostring(g("nextQuestInChain")), tostring(g("parentQuest")),
+        tostring(IsCompleted(q)), tostring(IsInLog(q)), (okc and entry) and "AVAILABLE" or "hidden"))
+    end
+  end
+  if found == 0 then Print("no quest matches") end
+end
+
 -- Shared with the next files.
-ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan = BuildScanContext, CheckAvailable, Refresh, StartScan, scan
+ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan, ns.QuestDiag = BuildScanContext, CheckAvailable, Refresh, StartScan, scan, QuestDiag

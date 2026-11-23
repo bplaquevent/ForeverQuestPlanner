@@ -264,6 +264,126 @@ function Geo.CustomRemoveList(list)
   if n > 0 then Geo.CustomChanged() end
 end
 
+---------------------------------------------------------------------------
+-- Quest chains: a quest and all its follow-ups
+---------------------------------------------------------------------------
+K.MAX_CHAIN = 40 -- safety: follow-ups walked
+
+-- Follow-ups of a quest (recursively, in the order of the chain), the ones for the character's class and
+-- race and not turned in yet. Of quests that exclude each other, only the first is kept.
+-- Returns { { id, title, level, reqLevel } }.
+function Geo.ChainQuests(id)
+  Geo.chainCache = Geo.chainCache or {}
+  local raw = Geo.chainCache[id]
+  if not raw then
+    raw = {}
+    local m = ns.QuestMeta(id)
+    if m then
+      local seen, queue, i = { [id] = true }, {}, 1
+      local function push(c)
+        local nm = ns.QuestMeta(c)
+        if nm then
+          for _, q in ipairs(ns.NextQuests(nm)) do
+            if not seen[q] then
+              seen[q] = true
+              queue[#queue + 1] = q
+            end
+          end
+        end
+      end
+      push(id)
+      while i <= #queue and i <= K.MAX_CHAIN do
+        raw[#raw + 1] = queue[i]
+        push(queue[i])
+        i = i + 1
+      end
+    end
+    Geo.chainCache[id] = raw
+  end
+  local out, taken = {}, {}
+  for _, q in ipairs(raw) do
+    local ok = not IsCompleted(q) and Geo.ForPlayer(q)
+    if ok then
+      local excl = QGet(QDB.Quest, q, "exclusiveTo")
+      if type(excl) == "table" then
+        for _, x in ipairs(excl) do
+          if taken[x] or IsCompleted(x) or Geo.InCustom(x) then ok = false break end
+        end
+      end
+    end
+    if ok then
+      taken[q] = true
+      out[#out + 1] = { id = q, title = QGet(QDB.Quest, q, "name") or ("#" .. q), level = Geo.QuestLevelOf(q),
+        reqLevel = QGet(QDB.Quest, q, "requiredLevel") or 0 }
+    end
+  end
+  return out
+end
+
+-- Can the quests ids (with their prerequisites) be added to the list: can the XP of the quests of the
+-- list reach the levels they require? Returns nil, or { id, need, reach } for the first quest blocked.
+function Geo.ChainLevelCheck(ids)
+  local set, order = {}, {}
+  local function add(q)
+    if not set[q] and not IsCompleted(q) then
+      set[q] = true
+      order[#order + 1] = q
+    end
+  end
+  for _, e in ipairs(Geo.CustomList()) do add(e.id) end
+  for _, q in ipairs(ids) do
+    for _, p in ipairs(Geo.MissingPrereqs(q)) do add(p) end
+    add(q)
+  end
+  local quests = {}
+  for _, q in ipairs(order) do
+    local pres = {}
+    for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
+      local lst = QGet(QDB.Quest, q, key)
+      if type(lst) == "table" then
+        for _, p in ipairs(lst) do if set[p] and p ~= q then pres[#pres + 1] = p end end
+      end
+    end
+    quests[#quests + 1] = { id = q, row = QDB.xp[q], reqLevel = QGet(QDB.Quest, q, "requiredLevel") or 0,
+      pres = pres, inLog = IsInLog(q) }
+  end
+  local needed = {}
+  for lv = 1, Geo.MaxLevel() do needed[lv] = Geo.XPNeeded(lv) end
+  return ns.Solver.LevelReach({ level = UnitLevel("player"), xp = UnitXP("player"), xpNeeded = needed,
+    maxLevel = Geo.MaxLevel() }, quests)
+end
+
+-- Adds a quest and all its follow-ups, unless the levels they require cannot be reached with the
+-- quests of the list (nothing is added then).
+function Geo.CustomAddChain(id, title, level)
+  local chain = Geo.ChainQuests(id)
+  local ids = { id }
+  for _, c in ipairs(chain) do ids[#ids + 1] = c.id end
+  local bad = Geo.ChainLevelCheck(ids)
+  if bad then
+    Print(string.format(L["Chain refused: \"%s\" requires level %d, the quests of the list only reach level %d."],
+      QGet(QDB.Quest, bad.id, "name") or ("#" .. bad.id), bad.need, bad.reach))
+    return false
+  end
+  local added, pre = 0, 0
+  local ok, p = Geo.CustomAdd(id, title, level, true)
+  if ok then added, pre = added + 1, pre + p end
+  for _, c in ipairs(chain) do
+    ok, p = Geo.CustomAdd(c.id, c.title, c.level, true)
+    if ok then added, pre = added + 1, pre + p end
+  end
+  Print(string.format(L["%d quest(s) of the chain added to the Roadbook list"], added) ..
+    (pre > 0 and string.format(L[" (+%d prerequisite quest(s))"], pre) or ""))
+  if added > 0 then Geo.CustomChanged() end
+  return added > 0
+end
+
+function Geo.CustomRemoveChain(id)
+  local list = { { id = id } }
+  for _, c in ipairs(Geo.ChainQuests(id)) do list[#list + 1] = { id = c.id } end
+  Geo.CustomRemoveList(list)
+end
+
 -- The list cannot change while the Roadbook is computed (the computation would be on a list that no
 -- longer exists): the user's changes are refused with a message. Returns true when locked.
 function Geo.ListLocked()

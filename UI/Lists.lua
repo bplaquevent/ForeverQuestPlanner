@@ -879,11 +879,22 @@ end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
 -- isClass, isProf, dungeon, noTypes (types left out, shown apart with Geo.QuestTypesText) }.
+-- A quest that follows another one (a quest prerequisite in QuestieDB).
+function Geo.IsFollowUp(id)
+  if not id then return false end
+  for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
+    local t = QGet(QDB.Quest, id, key)
+    if type(t) == "table" and #t > 0 then return true end
+  end
+  return false
+end
+
 function Geo.QuestBadges(o)
   local id = o.id
   local tag = o.tag
   if tag == nil and id then tag = Geo.LogTag(id) end
   local parts = {}
+  if id and Geo.IsFollowUp(id) then parts[#parts + 1] = Color(K.DESC.chain, L["Follow-up"]) end
   if id and Geo.IsEliteQuest(id, tag) then parts[#parts + 1] = Color("ff8040", L["Elite"]) end
   if tag and tag ~= "" and not tag:find("[EÉ]lite") and tag ~= ELITE then parts[#parts + 1] = tag
   elseif o.dungeon then parts[#parts + 1] = Geo.WithLevel(Color("80c0ff", L["Dungeon"]), o.dungeon) end
@@ -897,11 +908,13 @@ function Geo.QuestBadges(o)
   local types = o.noTypes and {} or Geo.QuestTypes(id)
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = K.QUEST_TYPE_LABEL[types[i]] end
   local badge = Geo.LevelBadge(o.level)
-  -- each part coloured on its own (colour codes do not nest; some parts carry their own colours)
+  -- each part in square brackets, coloured on its own (colour codes do not nest; some parts carry their own colours)
+  local blue = Color("80c0ff", "[")
   for i, p in ipairs(parts) do
-    if not p:find("^|c") then parts[i] = Color("80c0ff", p) end
+    if not p:find("^|c") then p = Color("80c0ff", p) end
+    parts[i] = blue .. p .. Color("80c0ff", "]")
   end
-  return "  " .. badge .. (#parts > 0 and (" " .. table.concat(parts, Color("80c0ff", " · "))) or "")
+  return "  " .. badge .. (#parts > 0 and (" " .. table.concat(parts, " ")) or "")
 end
 
 -- Quest descriptions: the same layout and colors in every tab and on the Objective button.
@@ -1095,8 +1108,77 @@ function Geo.CustomButton(id, title, level)
     disabled = Geo.computing and true or nil, -- the list is locked while the Roadbook is computed
     fn = function()
       if Geo.ListLocked() then return end
-      if Geo.InCustom(id) then Geo.CustomRemove(id) else Geo.CustomAdd(id, title, level) end
+      local chain = Geo.ChainQuests(id)
+      if Geo.InCustom(id) then
+        local inChain = 0
+        for _, c in ipairs(chain) do if Geo.InCustom(c.id) then inChain = inChain + 1 end end
+        if inChain == 0 then Geo.CustomRemove(id) return end
+        StaticPopup_Show("FQP_REMOVE_CHAIN", title or "?", inChain, { id = id })
+      elseif #chain == 0 then
+        Geo.CustomAdd(id, title, level)
+      else
+        StaticPopup_Show("FQP_ADD_CHAIN", title or "?", #chain, { id = id, title = title, level = level })
+      end
     end }
+end
+
+-- A quest with follow-ups: added or removed alone, or with its whole chain (Geo.CustomAddChain / CustomRemoveChain).
+StaticPopupDialogs["FQP_ADD_CHAIN"] = {
+  text = L["\"%s\" has %d follow-up quest(s). Add it to the Roadbook list with its whole chain, or alone?"],
+  button1 = L["Whole chain"],
+  button3 = L["This quest only"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, d) if d and not Geo.ListLocked() then Geo.CustomAddChain(d.id, d.title, d.level) end end,
+  OnAlt = function(_, d) if d and not Geo.ListLocked() then Geo.CustomAdd(d.id, d.title, d.level) end end,
+  timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+StaticPopupDialogs["FQP_REMOVE_CHAIN"] = {
+  text = L["\"%s\" and %d of its follow-up quest(s) are in the Roadbook list. Remove the whole chain, or this quest only?"],
+  button1 = L["Whole chain"],
+  button3 = L["This quest only"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function(_, d) if d and not Geo.ListLocked() then Geo.CustomRemoveChain(d.id) end end,
+  OnAlt = function(_, d) if d and not Geo.ListLocked() then Geo.CustomRemove(d.id) end end,
+  timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
+-- Line "follow-up: n quest(s) up to level X" (nothing for a quest without follow-ups).
+function Geo.ChainTextLine(id)
+  if not id then return "" end
+  local text = ChainText(ChainInfo(id, UnitLevel("player"), 0))
+  return text and Geo.DescLine(Color(K.DESC.chain, text)) or ""
+end
+
+K.MAX_CHAIN_LINES = 10
+K.CHAIN_INDENT = K.DESC_LINE .. "   "
+-- Lines under a quest: its follow-ups (each with its possible rewards; 2nd value: true when some carry item links) as an indented block (title, level, level required, XP), muted
+-- as they cannot be picked up yet. Beyond K.MAX_CHAIN_LINES, the last ones share a single line.
+function Geo.ChainLines(id)
+  local chain = Geo.ChainQuests(id)
+  if #chain == 0 then return "" end
+  local D, plevel = K.DESC, UnitLevel("player")
+  local sep = Color(D.meta, K.DESC_SEP)
+  local function title(c) return Color(D.chain, (c.title or "?") .. (c.level and (" [" .. c.level .. "]") or "")) end
+  local text, links = K.DESC_LINE .. Color(D.chain, L["Follow-up:"]), false
+  for i, c in ipairs(chain) do
+    if i >= K.MAX_CHAIN_LINES and #chain > K.MAX_CHAIN_LINES then
+      local rest = {}
+      for j = i, #chain do rest[#rest + 1] = title(chain[j]) end
+      text = text .. K.CHAIN_INDENT .. table.concat(rest, sep)
+      break
+    end
+    local parts = { title(c) }
+    if c.reqLevel > plevel then parts[#parts + 1] = Color(D.meta, L["requires level "] .. c.reqLevel) end
+    local xp = Geo.XPText(ns.DBXP(c.id, plevel), true)
+    if xp then parts[#parts + 1] = xp end
+    text = text .. K.CHAIN_INDENT .. StateIcons(c.id) .. table.concat(parts, sep)
+    local rewards = Geo.RewardLine(c.id)
+    if rewards then
+      text = text .. K.CHAIN_INDENT .. "   " .. rewards
+      links = true
+    end
+  end
+  return text, links
 end
 
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.

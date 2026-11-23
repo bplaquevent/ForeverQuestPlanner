@@ -338,8 +338,10 @@ local function RenderAvailable()
       end
       local rewards = Geo.RewardLine(e.id)
       if rewards then text = text .. Geo.DescLine(rewards) end
+      local chainText, chainLinks = Geo.ChainLines(e.id)
+      text = text .. chainText
       local id = e.id
-      items[#items + 1] = { text = text, links = rewards ~= nil, linkQuest = id,
+      items[#items + 1] = { text = text, links = rewards ~= nil or chainLinks, linkQuest = id,
         b1 = Geo.CustomButton(id, e.name, e.level),
         b2 = Geo.MapButton(function() return Geo.GiverPoint(id, PlayerPos()) end, e.name, id) }
     end
@@ -387,7 +389,7 @@ local function RenderNear()
     local who = (take and L["Given by: "] or L["Turn in to: "]) .. (it.giver or "?")
     local text = "  " .. StateIcons(it.id) ..
       Geo.QuestTitle(it.label, it.id and { id = it.id, level = it.level } or nil) ..
-      Geo.DescLine(Color(D.action, who .. K.DESC_SEP .. PointText(it.p))) .. figures
+      Geo.DescLine(Color(D.action, who .. K.DESC_SEP .. PointText(it.p))) .. figures .. Geo.ChainTextLine(it.id)
     if it.rep then text = text .. Geo.DescLine(Color(D.bad, it.rep)) end
     local label = take and L["pick up the quest"] or L["turn in the quest"]
     return { text = text, questID = not take and it.id or nil, linkQuest = it.id,
@@ -403,6 +405,7 @@ local function RenderNear()
       text = text .. Geo.DescLine(Color(D.action, L["Objective: "] .. (it.extra or "?") .. K.DESC_SEP .. PointText(it.p)),
         Color(D.meta, string.format("%.0f m", it.d)))
     end
+    text = text .. Geo.ChainTextLine(g.id)
     local first = g.steps[1]
     return { text = text, questID = g.id, linkQuest = g.id,
       b1 = Geo.CustomButton(g.id, g.label, g.level),
