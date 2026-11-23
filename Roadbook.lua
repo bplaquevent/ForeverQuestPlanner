@@ -671,6 +671,101 @@ function CP.AheadCheck()
   return true
 end
 
+-- Steps on the spot first: the plan models a walk as a straight line, so it can leave a city and come
+-- back later (or pass next to a step to do it much later). Steps of quest (never transports) that can be
+-- done now are brought first when, from the player's position: in a city, they are in that city (before
+-- any step outside it), anywhere else, they are within K.NEARBY_RADIUS. The Roadbook is then adapted
+-- with them first (Geo.ApplyNearFirst). Only steps already in the Roadbook; nothing is added.
+K.NEARBY_RADIUS = 150 -- yards: about one minute of detour at most
+K.NEARBY_KINDS = { take = 1, skill = 2, obj = 2, turnin = 3, dungeon = 2 } -- quest steps, in order of a quest
+K.CITY_MAPS = { [1453] = true, [1454] = true, [1455] = true, [1456] = true, [1457] = true, [1458] = true } -- uiMapID of the capitals
+CP.nearSeen = {} -- StepKey of the steps already brought first (forgotten once they are no longer on the spot)
+
+-- The step can be done at the player's level: pick-up with the level required, objective or dungeon with
+-- a quest not too high (Geo.MaxQuestLevel); turn-in and skill: always.
+function CP.StepLevelOk(st, plevel)
+  local t = st.task or {}
+  if st.kind == "turnin" or st.kind == "skill" then return true end
+  if st.kind == "take" then return (t.id and QGet(QDB.Quest, t.id, "requiredLevel") or 0) <= plevel end
+  if st.kind == "dungeon" then
+    for _, m in ipairs(t.members or {}) do
+      if not CP.StepLevelOk(m, plevel) then return false end
+    end
+    return true
+  end
+  return not (t.id and t.level) or t.level <= Geo.MaxQuestLevel(t.id, plevel, nil, "")
+end
+
+function CP.NearbyCheck()
+  local fz = Geo.Frozen()
+  if not fz or not Geo.Tracking() or Geo.computing or CP.autoPending or Geo.ServicePending() then return end
+  if CP.flying or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
+    or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) then return end
+  local pos = PlayerPos()
+  if not pos then return end
+  local plevel = UnitLevel("player")
+  local zone = Geo.ZoneIdAt(pos)
+  local city = zone and K.CITY_MAPS[zone] and zone or nil
+  local route = fz.route
+  -- Candidates: quest steps not done, on the spot and possible at this level.
+  local C, todo = {}, {}
+  for i = 2, #route do
+    local st = route[i]
+    if K.NEARBY_KINDS[st.kind] and st.task and st.p and st.p.c and not CP.StepDone(st) then
+      todo[#todo + 1] = i
+      local near
+      if city then near = Geo.ZoneIdAt(st.p) == city
+      else near = st.p.c == pos.c and (Dist(st.p, pos) or math.huge) < K.NEARBY_RADIUS end
+      if near and CP.StepLevelOk(st, plevel) then C[st] = true end
+    end
+  end
+  -- Possible now: the steps of its quest that come before it (pick-up, objectives) are in too; a glued
+  -- chain whole.
+  local changed = true
+  while changed do
+    changed = false
+    for _, i in ipairs(todo) do
+      local st = route[i]
+      if C[st] then
+        local ok = true
+        local rank, id = K.NEARBY_KINDS[st.kind], st.task.id
+        if id then
+          for _, j in ipairs(todo) do
+            local o = route[j]
+            if o.task.id == id and K.NEARBY_KINDS[o.kind] < rank and not C[o] then ok = false break end
+          end
+        end
+        if ok and st.glue and route[i - 1] and i > 2 and not C[route[i - 1]] then ok = false end
+        if ok and route[i + 1] and route[i + 1].glue and not C[route[i + 1]] then ok = false end
+        if not ok then
+          C[st] = nil
+          changed = true
+        end
+      end
+    end
+  end
+  -- Violation: a step not wanted first (outside the city, if in one) comes before a wanted one.
+  local keys, now, first, other = {}, {}, nil, nil
+  for _, i in ipairs(todo) do
+    local st = route[i]
+    local k = Geo.StepKey(st)
+    if C[st] then
+      keys[k], now[k] = true, true
+      if other and not first and not CP.nearSeen[k] then first = st end
+    elseif not other and (not city or Geo.ZoneIdAt(st.p) ~= city) then
+      other = st
+    end
+  end
+  for k in pairs(CP.nearSeen) do
+    if not now[k] then CP.nearSeen[k] = nil end -- no longer on the spot
+  end
+  if not first then return end
+  local msg = (city and L["Steps in this city first: "] or L["Step nearby first: "]) .. CP.StepText(first) .. ". "
+  if CP.Replan(msg, { near = { keys = keys, city = city } }) then
+    for k in pairs(keys) do CP.nearSeen[k] = true end
+  end
+end
+
 -- Quest gone from the log (QUEST_REMOVED, a moment later): turned in, the focused step moves on (if
 -- QUEST_TURNED_IN did not already do it); abandoned while the Roadbook plans it: remove it from the
 -- list, or keep it and pick it up again (the steps to come are computed again either way).
