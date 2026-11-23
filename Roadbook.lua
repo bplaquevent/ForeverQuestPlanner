@@ -928,6 +928,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
       CP.RefreshButton()
       return
     end
+    Print(L["Roadbook computed."])
     if not was then
       if refocus then CP.FocusNext(false) else CP.RefreshButton() end
       return
