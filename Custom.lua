@@ -320,17 +320,6 @@ function Geo.ChainQuests(id)
   return out
 end
 
--- Quests of the chain (not the quest itself) and whether they are all in the list.
-function Geo.ChainState(id)
-  local chain = Geo.ChainQuests(id)
-  if #chain == 0 then return chain, false end
-  local all = Geo.InCustom(id)
-  for _, c in ipairs(chain) do
-    if not Geo.InCustom(c.id) then all = false break end
-  end
-  return chain, all
-end
-
 -- Can the quests ids (with their prerequisites) be added to the list: can the XP of the quests of the
 -- list reach the levels they require? Returns nil, or { id, need, reach } for the first quest blocked.
 function Geo.ChainLevelCheck(ids)
