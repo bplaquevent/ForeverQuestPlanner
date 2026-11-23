@@ -86,7 +86,16 @@ local function CheckAvailable(id, ctx)
   -- level alone does not hide it).
   -- Quests slightly too high kept for the Roadbook (unlocked by the expected level).
   if req > ctx.plevel + (ctx.lookahead or 0) then return nil end
-  local function done(q) return IsCompleted(q) or (ctx.done and ctx.done[q]) or false end
+  -- A prerequisite quest the player's race or class could never take (the quest of another race, flagged done
+  -- through the exclusive classic chain) does not count as done: what follows it cannot be taken either.
+  local function reachableBy(q)
+    local r = QGet(Q, q, "requiredRaces") or 0
+    if r ~= 0 and ctx.raceBit and not HasBit(r, ctx.raceBit) then return false end
+    local c = QGet(Q, q, "requiredClasses") or 0
+    if c ~= 0 and ctx.classBit and not HasBit(c, ctx.classBit) then return false end
+    return true
+  end
+  local function done(q) return (IsCompleted(q) or (ctx.done and ctx.done[q]) or false) and reachableBy(q) end
   -- Missing prerequisites (quests, professions): the quest is listed with what is missing.
   local missing = { texts = {}, quests = {} }
   local function questName(q) return string.format(L["\"%s\""], QGet(Q, q, "name") or ("#" .. q)) end
