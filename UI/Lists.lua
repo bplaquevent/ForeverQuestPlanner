@@ -879,6 +879,16 @@ end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
 -- isClass, isProf, dungeon, noTypes (types left out, shown apart with Geo.QuestTypesText) }.
+-- A quest that follows another one (a quest prerequisite in QuestieDB).
+function Geo.IsFollowUp(id)
+  if not id then return false end
+  for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
+    local t = QGet(QDB.Quest, id, key)
+    if type(t) == "table" and #t > 0 then return true end
+  end
+  return false
+end
+
 function Geo.QuestBadges(o)
   local id = o.id
   local tag = o.tag
@@ -894,6 +904,7 @@ function Geo.QuestBadges(o)
   end
   if isClass then parts[#parts + 1] = L["Class"] end
   if o.isProf then parts[#parts + 1] = L["Profession"] end
+  if id and Geo.IsFollowUp(id) then parts[#parts + 1] = Color(K.DESC.chain, L["Follow-up"]) end
   local types = o.noTypes and {} or Geo.QuestTypes(id)
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = K.QUEST_TYPE_LABEL[types[i]] end
   local badge = Geo.LevelBadge(o.level)
@@ -1123,7 +1134,7 @@ function Geo.ChainTextLine(id)
   return text and Geo.DescLine(Color(K.DESC.chain, text)) or ""
 end
 
-K.MAX_CHAIN_LINES = 6
+K.MAX_CHAIN_LINES = 10
 K.CHAIN_INDENT = K.DESC_LINE .. "   "
 -- Lines under a quest: its follow-ups as an indented block (title, level, level required, XP), muted
 -- as they cannot be picked up yet. Beyond K.MAX_CHAIN_LINES, the last ones share a single line.

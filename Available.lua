@@ -259,6 +259,29 @@ local function StartScan()
         end
         if ok then kept[#kept + 1] = en end
       end
+      -- A quest whose missing prerequisites are all listed quests that lead to it is shown in their
+      -- chain (Geo.ChainLines), not as a row of its own.
+      local listed = {}
+      for _, en in ipairs(kept) do listed[en.id] = en end
+      local heads = {}
+      for _, en in ipairs(kept) do
+        if not en.missing then
+          for _, c in ipairs(ns.Geo.ChainQuests(en.id)) do heads[c.id] = true end
+        end
+      end
+      results = {}
+      for _, en in ipairs(kept) do
+        local inChain = en.missing and heads[en.id]
+        if inChain then
+          for _, anyOf in ipairs(en.missing.quests) do
+            local one = false
+            for _, q in ipairs(anyOf) do if listed[q] then one = true break end end
+            if not one then inChain = false break end
+          end
+        end
+        if not inChain then results[#results + 1] = en end
+      end
+      kept = results
       results = kept
       scan.entries = results
       if Refresh then Refresh() end
