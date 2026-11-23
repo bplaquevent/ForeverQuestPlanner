@@ -484,7 +484,7 @@ function CP.FinishedMessage()
 end
 
 -- Turns the tracking on ("Tracking" box of the steps panel, Objective button): the Objective button
--- follows the Roadbook. The Roadbook itself is up to date with or without tracking.
+-- follows the Roadbook, which is computed again from here.
 function CP.TrackOn()
   if Geo.computing then
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
@@ -501,62 +501,24 @@ function CP.TrackOn()
   CP.DoTrackOn()
 end
 
+-- Tracking turned on: the steps to come are always computed again from here (the Roadbook is not
+-- updated while it is not tracked); the focus is placed when the computation ends.
 function CP.DoTrackOn()
   if not Geo.Tracking() then Print(L["Tracking on."]) end
-  CP.turningOn = true -- a computation started by the check below ends with the focus
-  local ok, res = pcall(CP.Resync)
+  CP.turningOn = true -- a computation started here ends with the focus
+  local ok, res
+  if Geo.Frozen() then
+    ok, res = pcall(CP.Replan, L["Tracking on: the steps to come are computed again. "])
+  else
+    CP.focusAfter = true
+    ok, res = pcall(CP.Recompute, "custom", true)
+    res = ok and Geo.computing and true or false
+  end
   CP.turningOn = nil
   if not ok then Print(L["Roadbook update error: "] .. tostring(res)) end
   if not (ok and res) then CP.FocusNext(false) end
   CP.RefreshButton()
   if Refresh then Refresh() end
-end
-
--- Tracking turned on: if the hearthstone / teleport cooldowns changed since it was saved, or if you
--- are elsewhere while one can be used, the steps to come are computed again (CP.RecallCheck).
--- Otherwise its next transport steps are matched to where the player is now. The ones
--- up to a destination already reached are done; a flight / boat step far from both its departure
--- and the previous step is replaced by the route from here. Returns true if the focus was placed
--- (or will be, after the computation).
-function CP.Resync()
-  local okR, replanned = pcall(CP.RecallCheck, true)
-  if not okR then Print(L["Roadbook update error: "] .. tostring(replanned)) end
-  if okR and replanned then return true end
-  local okA, started = pcall(CP.AheadCheck) -- steps done ahead meanwhile
-  if not okA then Print(L["Roadbook update error: "] .. tostring(started)) end
-  if okA and started then return true end
-  local fz = Geo.Frozen()
-  local pos = PlayerPos()
-  if not (fz and pos) then return false end
-  local route = fz.route
-  local first
-  for i = 2, #route do if not CP.StepDone(route[i]) then first = i break end end
-  if not first then return false end
-  local reached
-  local i = first
-  while route[i] and (route[i].kind == "hearth" or route[i].kind == "travel") do
-    if CP.TransportReached(route[i], pos) then reached = i end
-    i = i + 1
-  end
-  local nextI = first
-  if reached then
-    for j = first, reached do
-      if not CP.StepDone(route[j]) then
-        Print(L["Already there, step skipped: "] .. CP.StepText(route[j]))
-        Geo.MarkDone(route[j])
-      end
-    end
-    nextI = reached + 1
-    while route[nextI] and CP.StepDone(route[nextI]) do nextI = nextI + 1 end
-  end
-  local st = route[nextI]
-  if not (st and st.kind == "travel") then return false end
-  local function far(p)
-    local d = Dist(pos, p)
-    return not d or d > K.LANDING_RADIUS
-  end
-  if far(st.p) and far(route[nextI - 1].p) then return CP.Reroute(st, pos, L["Position changed: new route. "]) end
-  return false
 end
 
 -- Hearthstone and class teleports ---------------------------------------------
@@ -570,12 +532,12 @@ function Geo.RestampRecalls()
   if rec then rec.recall = Geo.RecallState() end
 end
 
--- Returns true if an update was started. atStart: the tracking is turned on; the position counts too.
-function CP.RecallCheck(atStart)
+-- Returns true if an update was started.
+function CP.RecallCheck()
   local fz, rec = Geo.Frozen(), Geo.FrozenRec()
   if not (fz and rec) or Geo.computing then return false end
   local now = Geo.RecallState()
-  if not rec.recall and not atStart then -- Roadbook from a former version: its state starts now
+  if not rec.recall then -- Roadbook from a former version: its state starts now
     rec.recall = now
     return false
   end
@@ -583,15 +545,6 @@ function CP.RecallCheck(atStart)
   for i = 2, #route do if not CP.StepDone(route[i]) then first = i break end end
   if not first then return false end
   local changed, why = Geo.RecallChanged(rec.recall, now)
-  if not changed and atStart then
-    local ahead = next(now.src) ~= nil
-    for i = first, #route do
-      if route[i].kind == "hearth" or route[i].kind == "bind" then ahead = true break end
-    end
-    local pos = PlayerPos()
-    local d = ahead and pos and Dist(pos, route[first - 1].p)
-    changed = d ~= nil and d > K.LANDING_RADIUS
-  end
   if not changed then return false end
   Geo.Trace("recall", why or "position changed")
   return CP.Replan(L["Position or hearthstone / teleport cooldowns changed: the steps to come are updated. "])
@@ -601,7 +554,9 @@ end
 -- the steps to come are planned again from here, the steps done stay (history): every quest left of
 -- the list in the least time.
 -- opts: { ban = transport not usable on the first leg }. Returns true if a computation started.
-function CP.Replan(msg, opts)
+function CP.Replan(msg, opts, manual)
+  -- Never computed again by itself while not tracked (manual: the Recompute icon).
+  if not (manual or Geo.Tracking() or CP.turningOn) then return false end
   if not GeoReady() then return false end
   if Geo.computing then
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
@@ -615,8 +570,8 @@ function CP.Replan(msg, opts)
   return true
 end
 
--- Steps done ahead are checked a few seconds after a quest event, tracked or not; while the Roadbook is
--- tracked, cooldown, rune, spell or bind changes too (never during a flight, a fight or a computation).
+-- While the Roadbook is tracked, steps done ahead are checked a few seconds after a quest event, and
+-- cooldown, rune, spell or bind changes too (never during a flight, a fight or a computation).
 function CP.ScheduleRecallCheck(delay)
   if not (GetTime and Geo.Frozen()) then return end
   local now = GetTime()
@@ -627,7 +582,7 @@ function CP.ScheduleRecallCheck(delay)
   C_Timer.After(at - now, function()
     if token ~= CP.recallToken then return end
     CP.recallAt = nil
-    if not Geo.Frozen() then return end
+    if not Geo.Frozen() or not Geo.Tracking() then return end
     if CP.flying or Geo.computing or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
       or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) or not PlayerPos() then
       CP.ScheduleRecallCheck(10)
@@ -798,12 +753,8 @@ function CP.QuestRemoved(id)
   StaticPopup_Show("FQP_QUEST_ABANDONED", text, nil, { id = id, title = title })
 end
 
--- Roadbook adapted as soon as no computation is running.
-function CP.ReplanSoon(msg, tries)
-  if Geo.computing then
-    if (tries or 0) < 30 then C_Timer.After(2, function() CP.ReplanSoon(msg, (tries or 0) + 1) end) end
-    return
-  end
+-- Roadbook adapted (refused with a message while a computation is running).
+function CP.ReplanSoon(msg)
   CP.Replan(msg)
 end
 
@@ -834,10 +785,10 @@ function CP.RecallCast(key)
 end
 
 -- Turns the tracking off: only the Objective button, the pin and the map stop following it; the
--- Roadbook, its steps and their progress are kept and stay up to date.
+-- Roadbook, its steps and their progress are kept (computed again only by the Recompute icon or a change of its list).
 function CP.TrackOff(quiet)
   CP.StopFocus()
-  if not quiet then Print(L["Tracking off: the Roadbook stays up to date. Click the Objective button to follow it again."]) end
+  if not quiet then Print(L["Tracking off: the Roadbook is only computed again by the Recompute icon or a change of its list. Turn the tracking on to follow it again."]) end
   if Refresh then C_Timer.After(0.1, Refresh) end
 end
 
@@ -935,13 +886,8 @@ function CP.Recompute(goal, keep, attempt, token, re)
       if not keep then Print(L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."]) end
       return
     end
-    if Geo.computing then -- one computation at a time
-      if keep then
-        local t = Geo.customToken
-        C_Timer.After(1, function() if t == Geo.customToken then CP.Recompute(goal, keep, nil, nil, re) end end)
-      else
-        Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
-      end
+    if Geo.computing then -- one computation at a time: a request meanwhile is refused, not queued
+      Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
       return
     end
     CP.computeToken = (CP.computeToken or 0) + 1
@@ -982,6 +928,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
       CP.RefreshButton()
       return
     end
+    Print(L["Roadbook computed."])
     if not was then
       if refocus then CP.FocusNext(false) else CP.RefreshButton() end
       return

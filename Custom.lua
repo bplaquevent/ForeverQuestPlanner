@@ -272,8 +272,8 @@ function Geo.ListLocked()
   return true
 end
 
--- List changed: the Roadbook (existing or not) is computed again (grouped when several quests are
--- added in a row), its steps done and its tracking kept; empty list: the steps to come
+-- List changed: the Roadbook is computed again (grouped when several quests are added in a row), its
+-- steps done and its tracking kept (tracked or not); empty list: the steps to come
 -- are removed and its tracking stops, the steps done stay (only "Empty" empties them).
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1

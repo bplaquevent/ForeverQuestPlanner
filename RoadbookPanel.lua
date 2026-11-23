@@ -394,12 +394,12 @@ local function Create()
     Tip(self, L["Empty"], L["Empties the Roadbook: its steps, their progress and the quest list."])
   end)
   panel.emptyB = emptyB
-  -- Recompute (greyed unless the Roadbook is tracked): the steps to come planned again from here.
+  -- Recompute (tracked or not): the steps to come planned again from here.
   local recalc = IconButton(16, "Interface\\Buttons\\UI-RefreshButton")
   recalc:SetPoint("RIGHT", emptyB, "LEFT", -6, 0)
   recalc:SetScript("OnClick", function()
     GameTooltip:Hide()
-    if CP.Replan(L["Recompute requested. "]) then Geo.MapPanelSync() end
+    if CP.Replan(L["Recompute requested. "], nil, true) then Geo.MapPanelSync() end
   end)
   recalc:SetScript("OnEnter", function(self)
     Tip(self, L["Recompute"], L["Plans the steps to come again from where you are: the steps done and the tracking are kept."])
@@ -430,7 +430,7 @@ local function Create()
     Geo.MapPanelSync()
   end)
   track:SetScript("OnEnter", function(self)
-    Tip(self, L["Tracking"], L["On: the Objective button, the map pin and the watched quest follow the Roadbook. Off: they stop, the Roadbook stays up to date."])
+    Tip(self, L["Tracking"], L["On: the Objective button, the map pin and the watched quest follow the Roadbook. Off: they stop and the Roadbook is only computed again by the Recompute icon or a change of its list (greyed steps). Turning it on computes the steps to come again."])
   end)
   track:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.track = track
@@ -577,6 +577,7 @@ function Geo.MapPanelSync()
   local cur = CP.CurrentFocus()
   local rows, width = panel.rows, K.MAP_PANEL_W - 32
   local hideDone = Settings().stepsHideDone
+  local following = Geo.Tracking()
   panel.hideDone:SetChecked(hideDone and true or false)
   local n, target, total = 0, nil, 0
   for i = 2, #route do
@@ -593,7 +594,8 @@ function Geo.MapPanelSync()
       local ok, title = pcall(CP.StepSummary, st)
       if not (ok and title) then title = CP.StepText(st) end
       local c = K.MAP_COLOR[st.kind] or K.MAP_COLOR.other
-      r.bar:SetColorTexture(c[1], c[2], c[3], isDone and 0.3 or 0.9)
+      local grey = isDone or not following -- not tracked: the steps are greyed (not updated)
+      r.bar:SetColorTexture(c[1], c[2], c[3], grey and 0.3 or 0.9)
       r.step = st
       if isDone then
         r.n = nil
@@ -606,14 +608,14 @@ function Geo.MapPanelSync()
         r.n = n
         r.num:SetText(n)
         r.check:Hide()
-        r.title:SetText(title)
-        r.sub:SetText(SubText(st))
+        r.title:SetText(following and title or Color("808080", Plain(title)))
+        r.sub:SetText(following and SubText(st) or Color("808080", Plain(SubText(st))))
         if not target then target = total end -- first step not done
       end
       local isCur = st == cur
       if isCur then target = total end
       r.current:SetShown(isCur)
-      r.num:SetTextColor(isCur and 0.4 or 1, 1, isCur and 0.4 or 1)
+      if following then r.num:SetTextColor(isCur and 0.4 or 1, 1, isCur and 0.4 or 1) else r.num:SetTextColor(0.5, 0.5, 0.5) end
       r.time:SetText(FormatTime(math.max(0, (st.at or 0) - (route[i - 1].at or 0)))) -- the step alone
       r:Show()
     end
@@ -622,12 +624,11 @@ function Geo.MapPanelSync()
   panel.child:SetHeight(math.max(1, total * K.MAP_PANEL_ROW))
   Geo.MapPanelHeaderSync()
   UpdateScrollBar(panel.scroll)
-  local following = Geo.Tracking()
   panel.track:SetChecked(following)
   panel.auto:SetChecked(Settings().autoAdd and true or false)
   panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
   panel.emptyB:SetEnabled(not Geo.computing)
-  panel.recalc:SetEnabled(following and not Geo.computing and true or false) -- greyed when tracking is off
+  panel.recalc:SetEnabled(not Geo.computing and true or false)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then
