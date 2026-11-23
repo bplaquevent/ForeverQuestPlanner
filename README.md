@@ -75,7 +75,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Map** button on every quest: sets OpenMap's waypoint on its place (quest giver, or the monsters dropping the item that starts it; nearest remaining objective; turn-in) and opens the world map on it. While a Roadbook is followed, the map only opens there (the Roadbook keeps the waypoint).
 - **Shift-click** a quest in any tab: its quest link goes into the chat (the game's link for quests of your log, the same link built from QuestieDB otherwise).
 - **Minimap icon**: click opens the window on the Roadbook tab (or closes it); right-click: settings; drag: move it.
-- **Settings** (gear icon): General (minimap icon) and Roadbook (objective button: show, compass, center; hearthstone; class teleports; activate nearby flight masters; whole Roadbook on the map; difficulty, time estimates including the time per profession skill point) panels.
+- **Settings** (gear icon): General (minimap icon) and Roadbook (objective button: show, compass, center; hearthstone; class teleports; activate nearby flight masters (every unknown flight master within 500 yards of a step is activated, even without a gain for this Roadbook; farther ones only when they save time); whole Roadbook on the map; difficulty, time estimates including the time per profession skill point) panels.
 
 ## Dependencies
 
