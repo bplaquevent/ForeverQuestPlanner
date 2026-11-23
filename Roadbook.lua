@@ -753,12 +753,8 @@ function CP.QuestRemoved(id)
   StaticPopup_Show("FQP_QUEST_ABANDONED", text, nil, { id = id, title = title })
 end
 
--- Roadbook adapted as soon as no computation is running.
-function CP.ReplanSoon(msg, tries)
-  if Geo.computing then
-    if (tries or 0) < 30 then C_Timer.After(2, function() CP.ReplanSoon(msg, (tries or 0) + 1) end) end
-    return
-  end
+-- Roadbook adapted (refused with a message while a computation is running).
+function CP.ReplanSoon(msg)
   CP.Replan(msg)
 end
 
@@ -890,13 +886,8 @@ function CP.Recompute(goal, keep, attempt, token, re)
       if not keep then Print(L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."]) end
       return
     end
-    if Geo.computing then -- one computation at a time
-      if keep then
-        local t = Geo.customToken
-        C_Timer.After(1, function() if t == Geo.customToken then CP.Recompute(goal, keep, nil, nil, re) end end)
-      else
-        Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
-      end
+    if Geo.computing then -- one computation at a time: a request meanwhile is refused, not queued
+      Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
       return
     end
     CP.computeToken = (CP.computeToken or 0) + 1
