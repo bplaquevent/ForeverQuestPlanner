@@ -316,6 +316,20 @@ local function QuestDiag(text)
     for i = 0, 40 do if math.floor((mask or 0) / 2 ^ i) % 2 == 1 then t[#t + 1] = i + 1 end end
     return #t > 0 and table.concat(t, ",") or "all"
   end
+  -- {npcIds?, objectIds?, itemIds?} as "npc 123 Name, object 45 Name, item 67 Name".
+  local function givers(t)
+    if type(t) ~= "table" then return "-" end
+    local out = {}
+    for i, kind in ipairs({ "npc", "object", "item" }) do
+      local db = ({ QDB.Npc, QDB.Object, QDB.Item })[i]
+      if type(t[i]) == "table" then
+        for _, gid in ipairs(t[i]) do
+          out[#out + 1] = string.format("%s %s %s", kind, tostring(gid), tostring(QGet(db, gid, "name")))
+        end
+      end
+    end
+    return #out > 0 and table.concat(out, ", ") or "-"
+  end
   local found = 0
   for k, v in pairs(ids) do
     local q = type(v) == "number" and v or k
@@ -330,6 +344,7 @@ local function QuestDiag(text)
         tostring(g("zoneOrSort")), list(g("requiredMinRep")), list(g("preQuestSingle")), list(g("preQuestGroup")),
         list(g("exclusiveTo")), tostring(g("nextQuestInChain")), tostring(g("parentQuest")),
         tostring(IsCompleted(q)), tostring(IsInLog(q)), (okc and entry) and "AVAILABLE" or "hidden"))
+      Print("   startedBy " .. givers(g("startedBy")) .. " | finishedBy " .. givers(g("finishedBy")))
     end
   end
   if found == 0 then Print("no quest matches") end
