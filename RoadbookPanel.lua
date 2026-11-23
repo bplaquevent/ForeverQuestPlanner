@@ -372,41 +372,44 @@ local function Create()
   panel.titleText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   panel.titleText:SetPoint("TOPLEFT", 10, -9)
   panel.titleText:SetText(L["Roadbook"])
-  -- Header (information and option) shown or hidden: -/+ at the right of the title bar. (No close
-  -- button: the Objective button and the Steps button show or hide the panel.)
-  local fold = CreateFrame("Button", nil, panel)
-  fold:SetSize(16, 16)
-  fold:SetPoint("TOPRIGHT", -8, -7)
-  fold:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight", "ADD")
-  fold:SetScript("OnClick", function()
-    Settings().stepsHeaderHidden = (not Settings().stepsHeaderHidden) or nil
-    GameTooltip:Hide()
-    Geo.MapPanelHeaderSync()
-    UpdateScrollBar(panel.scroll)
-  end)
-  fold:SetScript("OnEnter", function(self)
-    Tip(self, Settings().stepsHeaderHidden and L["Show the information"] or L["Hide the information"],
-      L["Shows or hides the information at the top of the panel (quests, steps, XP, travel, warnings) and its option."])
-  end)
-  fold:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  panel.fold = fold
-  -- "Empty" (as the Roadbook tab's button) right-aligned in the title bar, and the "Tracking" box
-  -- (turns the tracking on or off) at its left.
-  local emptyB = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  emptyB:SetSize(60, 20)
-  emptyB:SetText(L["Empty"])
-  emptyB:SetPoint("RIGHT", fold, "LEFT", -4, 0)
+  -- Title bar, right to left: "Empty" icon, "Recompute" icon, then the boxes
+  -- "Tracking", "Auto" and "Info". (No close button: the Objective button and the Steps button show or
+  -- hide the panel.)
+  local function IconButton(size, normal, pushed, highlight)
+    local b = CreateFrame("Button", nil, panel)
+    b:SetSize(size, size)
+    b:SetNormalTexture(normal)
+    b:SetPushedTexture(pushed or normal)
+    b:SetDisabledTexture(normal)
+    b:GetDisabledTexture():SetDesaturated(true)
+    b:SetHighlightTexture(highlight or "Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return b
+  end
+  local emptyB = IconButton(16, "Interface\\Buttons\\UI-GroupLoot-Pass-Up", "Interface\\Buttons\\UI-GroupLoot-Pass-Down",
+    "Interface\\Buttons\\UI-GroupLoot-Pass-Highlight")
+  emptyB:SetPoint("TOPRIGHT", -8, -7)
   emptyB:SetScript("OnClick", function() CP.Empty() end)
   emptyB:SetScript("OnEnter", function(self)
     Tip(self, L["Empty"], L["Empties the Roadbook: its steps, their progress and the quest list."])
   end)
-  emptyB:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.emptyB = emptyB
+  -- Recompute (greyed unless the Roadbook is tracked): the steps to come planned again from here.
+  local recalc = IconButton(16, "Interface\\Buttons\\UI-RefreshButton")
+  recalc:SetPoint("RIGHT", emptyB, "LEFT", -6, 0)
+  recalc:SetScript("OnClick", function()
+    GameTooltip:Hide()
+    if CP.Replan(L["Recompute requested. "]) then Geo.MapPanelSync() end
+  end)
+  recalc:SetScript("OnEnter", function(self)
+    Tip(self, L["Recompute"], L["Plans the steps to come again from where you are: the steps done and the tracking are kept."])
+  end)
+  panel.recalc = recalc
   local track = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
   track:SetSize(20, 20)
   track.label = track:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   track.label:SetText(L["Tracking"])
-  track.label:SetPoint("RIGHT", emptyB, "LEFT", -6, 0)
+  track.label:SetPoint("RIGHT", recalc, "LEFT", -6, 0)
   track:SetPoint("RIGHT", track.label, "LEFT", -2, 0)
   local auto = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
   auto:SetSize(20, 20)
@@ -431,7 +434,26 @@ local function Create()
   end)
   track:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.track = track
-  panel.titleText:SetPoint("RIGHT", auto, "LEFT", -4, 0)
+  -- Header (information) shown or hidden.
+  local info = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+  info:SetSize(20, 20)
+  info.label = info:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  info.label:SetText(L["Info"])
+  info.label:SetPoint("RIGHT", auto, "LEFT", -6, 0)
+  info:SetPoint("RIGHT", info.label, "LEFT", -2, 0)
+  info:SetHitRectInsets(0, -((info.label:GetStringWidth() or 30) + 2), 0, 0)
+  info:SetScript("OnClick", function(self)
+    Settings().stepsHeaderHidden = (not self:GetChecked()) or nil
+    GameTooltip:Hide()
+    Geo.MapPanelHeaderSync()
+    UpdateScrollBar(panel.scroll)
+  end)
+  info:SetScript("OnEnter", function(self)
+    Tip(self, L["Info"], L["Shows or hides the information at the top of the panel (quests, steps, XP, travel, warnings)."])
+  end)
+  info:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  panel.info = info
+  panel.titleText:SetPoint("RIGHT", info, "LEFT", -4, 0)
   panel.titleText:SetJustifyH("LEFT")
   panel.titleText:SetWordWrap(false)
   -- Header: size and progress, XP, travel, what to watch.
@@ -519,19 +541,17 @@ function Geo.MapPanelHeaderSync()
   local done = 0
   for i = 2, #fz.route do if CP.StepDone(fz.route[i]) then done = done + 1 end end
   local folded = Settings().stepsHeaderHidden
-  panel.fold:SetNormalTexture(folded and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
-  panel.fold:SetPushedTexture(folded and "Interface\\Buttons\\UI-PlusButton-Down" or "Interface\\Buttons\\UI-MinusButton-Down")
+  panel.info:SetChecked(not folded)
   panel.header:SetShown(not folded)
-  panel.hideDone:SetShown(not folded)
   local top = K.MAP_PANEL_TITLE - 2
   if not folded then
     local ok, text = pcall(Geo.MapPanelHeader, fz.route, fz.info, done)
     panel.header:SetText(ok and text or "")
     top = K.MAP_PANEL_TITLE + (panel.header:GetStringHeight() or 0) + 4
-    panel.hideDone:ClearAllPoints()
-    panel.hideDone:SetPoint("TOPLEFT", 6, -top)
-    top = top + 22
   end
+  panel.hideDone:ClearAllPoints()
+  panel.hideDone:SetPoint("TOPLEFT", 6, -top)
+  top = top + 22
   panel.rule:ClearAllPoints()
   panel.rule:SetPoint("TOPLEFT", 6, -top)
   panel.rule:SetPoint("TOPRIGHT", -6, -top)
@@ -607,6 +627,7 @@ function Geo.MapPanelSync()
   panel.auto:SetChecked(Settings().autoAdd and true or false)
   panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
   panel.emptyB:SetEnabled(not Geo.computing)
+  panel.recalc:SetEnabled(following and not Geo.computing and true or false) -- greyed when tracking is off
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then
