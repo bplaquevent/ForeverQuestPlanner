@@ -15,8 +15,16 @@ local IsInLog, OpenQuestDetails, Print, Settings = ns.IsInLog, ns.OpenQuestDetai
 K.MAP_SET = "fqp_roadbook"             -- OpenMap pin set of the steps
 K.MAP_ROUTE_SET = "fqp_roadbook_route" -- and of the route (under the pins)
 K.MAP_LINE = 3                         -- px: route thickness
-K.MAP_WALK = { 1, 0.82, 0.2, 0.85 }    -- route on foot (r, g, b, a)
-K.MAP_RIDE = { 0.4, 0.72, 1, 0.85 }    -- flight, boat, zeppelin legs
+K.MAP_JUMP_LINE = 2                    -- px: thickness of a jump (hearthstone, teleport)
+K.MAP_PLAYER_SET = "fqp_roadbook_player" -- OpenMap pin set of the line from the player to the next step
+-- Route colour by kind of move (r, g, b, a): the Roadbook's own colours.
+K.MAP_MOVE = {
+  walk = { 1, 0.82, 0.2, 0.85 },       -- on foot
+  vol = { 0.4, 0.72, 1, 0.85 },        -- flight
+  ship = { 0.3, 0.9, 0.85, 0.85 },     -- boat, zeppelin, airship
+  hearth = { 0.78, 0.56, 1, 0.8 },     -- hearthstone
+  teleport = { 1, 0.5, 0.85, 0.8 },    -- teleport spells
+}
 -- Pin colour by step kind (the current objective: the game's tracked pin, uncoloured).
 K.MAP_COLOR = {
   take = { 1, 0.85, 0.2 }, obj = { 1, 0.45, 0.3 }, turnin = { 0.45, 0.95, 0.4 },
@@ -144,8 +152,9 @@ local function Sets()
   if not S.IsBuilt() then return nil end
   local okP, pins = pcall(S.PinSet, K.MAP_SET, 0, 6)
   local okL, lines = pcall(S.PinSet, K.MAP_ROUTE_SET, 0, 1)
-  if not (okP and okL and pins and lines) then return nil end
-  sets = { pins = pins, lines = lines }
+  local okY, player = pcall(S.PinSet, K.MAP_PLAYER_SET, 0, 2)
+  if not (okP and okL and okY and pins and lines and player) then return nil end
+  sets = { pins = pins, lines = lines, player = player }
   return sets
 end
 
@@ -153,6 +162,7 @@ function Geo.MapClear()
   if not sets then return end
   OM.stitch.ClearPinSet(sets.pins)
   OM.stitch.ClearPinSet(sets.lines)
+  OM.stitch.ClearPinSet(sets.player)
 end
 
 -- A step's point on OpenMap's stitched world (u, v), or nil.
@@ -219,7 +229,7 @@ end
 
 -- A walk on the map from p (u1, v1) to q (u2, v2): through the zone passes on its way (Geo.WalkWay),
 -- a straight line otherwise.
-function Geo.MapWalk(lines, u1, v1, p, q, u2, v2)
+function Geo.MapWalk(lines, u1, v1, p, q, u2, v2, color)
   local S = OM.stitch
   local pts = { u1, v1 }
   local ok, _, way = false, nil, nil
@@ -233,12 +243,20 @@ function Geo.MapWalk(lines, u1, v1, p, q, u2, v2)
   end
   table.insert(pts, u2)
   table.insert(pts, v2)
-  S.AddPath(lines, pts, K.MAP_LINE, unpack(K.MAP_WALK))
+  S.AddPath(lines, pts, K.MAP_LINE, unpack(color or K.MAP_MOVE.walk))
+end
+
+-- Colour of the move that leads to a step: flight / boat by its mode, hearthstone or teleport spell, else on foot.
+function Geo.MapMoveColor(st)
+  local task = st and st.task
+  if st and st.kind == "hearth" then return task and task.spell and K.MAP_MOVE.teleport or K.MAP_MOVE.hearth end
+  if st and st.kind == "travel" and task then return task.mode == "vol" and K.MAP_MOVE.vol or K.MAP_MOVE.ship end
+  return K.MAP_MOVE.walk
 end
 
 -- Draws the Roadbook holding the map: its steps not done yet (every one, or the current objective
 -- only when "Whole Roadbook on the map" is off), joined in order; a transport leg runs to its
--- arrival, a hearthstone is a jump (no line).
+-- arrival, a hearthstone or teleport a thin straight jump; colour by kind of move (K.MAP_MOVE).
 function Geo.MapDraw()
   Geo.MapClear()
   local owner = Geo.MapOwner()
@@ -264,12 +282,18 @@ function Geo.MapDraw()
       local u, v = Geo.MapUV(st.p)
       if u and not st.nopin then -- a step without a place is not drawn
         if whole then
-          if pu and not st.p.teleport then Geo.MapWalk(set.lines, pu, pv, pp, st.p, u, v) end
+          if pu then
+            if st.kind == "hearth" then -- a jump: straight line, thinner
+              S.AddLine(set.lines, pu, pv, u, v, K.MAP_JUMP_LINE, unpack(Geo.MapMoveColor(st)))
+            elseif not st.p.teleport then
+              Geo.MapWalk(set.lines, pu, pv, pp, st.p, u, v)
+            end
+          end
           pu, pv, pp = u, v, st.p
           local du, dv = nil, nil
           if st.kind == "travel" and st.task then du, dv = Geo.MapUV(st.task.destP) end
           if du then
-            S.AddLine(set.lines, u, v, du, dv, K.MAP_LINE, unpack(K.MAP_RIDE))
+            S.AddLine(set.lines, u, v, du, dv, K.MAP_LINE, unpack(Geo.MapMoveColor(st)))
             pu, pv, pp = du, dv, st.task.destP
           end
         end
@@ -282,6 +306,46 @@ function Geo.MapDraw()
     end
   end
   if curPin then AddStepPin(set.pins, curPin[1], curPin[2], curPin[3], curPin[4], true) end
+  Geo.MapDrawPlayer()
+end
+
+-- Line from the player to the next step (the focused one, else the first not done): a jump for a
+-- hearthstone or teleport, the walk through the zone passes otherwise (to the boarding point for a
+-- transport). Its own pin set: redrawn alone as the player moves.
+function Geo.MapDrawPlayer()
+  local set = sets
+  if not set then return end
+  OM.stitch.ClearPinSet(set.player)
+  local owner = Geo.MapOwner()
+  local fz = owner and Geo.Frozen()
+  if not (fz and OM.api.IsStitched()) then return end
+  local st = owner.mode == "track" and CP.CurrentFocus() or nil
+  for i = 2, #fz.route do
+    if st then break end
+    if not CP.StepDone(fz.route[i]) and not fz.route[i].nopin then st = fz.route[i] end
+  end
+  local pos = st and ns.PlayerPos()
+  if not pos then return end
+  local u1, v1 = Geo.MapUV(pos)
+  local u2, v2 = Geo.MapUV(st.p)
+  if not (u1 and u2) then return end
+  Geo.mapPlayerAt = { pos.c, pos.x, pos.y, st }
+  if st.kind == "hearth" then
+    OM.stitch.AddLine(set.player, u1, v1, u2, v2, K.MAP_JUMP_LINE, unpack(Geo.MapMoveColor(st)))
+  else
+    Geo.MapWalk(set.player, u1, v1, pos, st.p, u2, v2)
+  end
+end
+
+-- While the map is open: the player's line follows the player (every half second, once moved).
+function Geo.MapPlayerTick(_, elapsed)
+  Geo.mapTick = (Geo.mapTick or 0) + elapsed
+  if Geo.mapTick < 0.5 then return end
+  Geo.mapTick = 0
+  if not (sets and Geo.MapOwner()) then return end
+  local pos, last = ns.PlayerPos(), Geo.mapPlayerAt
+  if pos and last and last[1] == pos.c and math.abs(last[2] - pos.x) + math.abs(last[3] - pos.y) < 5 then return end
+  pcall(Geo.MapDrawPlayer)
 end
 
 -- Redraws when the map is open (otherwise at its next opening), with the steps panel beside it.
@@ -346,6 +410,7 @@ function Geo.MapHookWorldMap()
   if Geo.mapHooked or not WorldMapFrame then return end
   Geo.mapHooked = true
   WorldMapFrame:HookScript("OnShow", function() C_Timer.After(0, Geo.MapSync) end)
+  WorldMapFrame:HookScript("OnUpdate", Geo.MapPlayerTick)
   WorldMapFrame:HookScript("OnHide", function()
     local o = Geo.MapOwner()
     if o and o.mode == "preview" then Geo.MapRelease() end
