@@ -1138,14 +1138,14 @@ function Geo.ChainLines(id)
     if i >= K.MAX_CHAIN_LINES and #chain > K.MAX_CHAIN_LINES then
       local rest = {}
       for j = i, #chain do rest[#rest + 1] = title(chain[j]) end
-      text = text .. K.CHAIN_INDENT .. Color(D.chain, "> ") .. table.concat(rest, sep)
+      text = text .. K.CHAIN_INDENT .. table.concat(rest, sep)
       break
     end
     local parts = { title(c) }
     if c.reqLevel > plevel then parts[#parts + 1] = Color(D.meta, L["requires level "] .. c.reqLevel) end
     local xp = Geo.XPText(ns.DBXP(c.id, plevel), true)
     if xp then parts[#parts + 1] = xp end
-    text = text .. K.CHAIN_INDENT .. Color(D.chain, "> ") .. table.concat(parts, sep)
+    text = text .. K.CHAIN_INDENT .. StateIcons(c.id) .. table.concat(parts, sep)
   end
   return text
 end
