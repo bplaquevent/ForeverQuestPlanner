@@ -21,3 +21,40 @@ ns.TRANSPORT_SUPPLEMENT = {
   ["Alterac Mountains - Zephras Isle"] = { faction = "Alliance" },
   ["Mulgore - Zephras Isle"] = { faction = "Horde" },
 }
+
+-- Quest categories of QuestieDB (its "sort": negative = a category, positive = an area), by kind of quest.
+ns.SORT_CLASS = { [-395] = true, [-372] = true, [-263] = true, [-262] = true, [-261] = true, [-162] = true,
+  [-161] = true, [-141] = true, [-82] = true, [-81] = true, [-61] = true }
+-- Profession quest categories. Forever: -666 = "Camping" ("Camping 101: …"), 16941 = "Crafting"
+-- (a QuestieDB area grouping the "Craftsman's Writ" quests, no actual place).
+ns.SORT_PROFESSION = { [-398] = true, [-377] = true, [-373] = true, [-371] = true, [-324] = true, [-304] = true,
+  [-264] = true, [-201] = true, [-182] = true, [-181] = true, [-121] = true, [-101] = true, [-24] = true,
+  [-666] = true, [16941] = true }
+ns.SORT_EVENT = { [-1000] = true, [-404] = true, [-402] = true, [-378] = true, [-376] = true, [-375] = true,
+  [-374] = true, [-370] = true, [-369] = true, [-366] = true, [-364] = true, [-41] = true, [-22] = true,
+  [-21] = true, [-368] = true, [-365] = true, [-241] = true }
+-- Battleground quest areas: Alterac Valley, Warsong Gulch, Arathi Basin, Darkspear Islands (Forever).
+ns.SORT_PVP = { [-25] = true, [2597] = true, [3277] = true, [3358] = true, [16606] = true }
+
+-- Quest log headers that are professions' (the client's languages), besides the names of the character's skills.
+ns.PROFESSION_HEADERS = { ["Artisanat"] = true, ["Métiers"] = true, ["Professions"] = true, ["Crafting"] = true }
+
+-- uiMapID of the capitals.
+ns.CITY_MAPS = { [1453] = true, [1454] = true, [1455] = true, [1456] = true, [1457] = true, [1458] = true }
+
+-- Class spells that take the player somewhere: bind = back to the hearthstone's bind point; otherwise a
+-- fixed arrival (AreaID + 0-100 coordinates, approximate: replaced by the place really reached after the
+-- first cast). cast = cast + loading (s); cd = cooldown used to space two uses (the real remaining time is
+-- read); reagent = item id used up (17031: Rune of Teleportation).
+-- The mage portals are left out: alone, they lead to the same places as the teleports.
+local RUNE = 17031
+ns.RECALL_SPELLS = {
+  { spell = 556, bind = true, cast = 30, cd = 900 },                               -- Astral Recall (shaman)
+  { spell = 3561, area = 1519, x = 38.0, y = 79.0, cast = 30, reagent = RUNE },    -- Teleport: Stormwind
+  { spell = 3562, area = 1537, x = 25.5, y = 7.0, cast = 30, reagent = RUNE },     -- Teleport: Ironforge
+  { spell = 3565, area = 1657, x = 40.0, y = 82.0, cast = 30, reagent = RUNE },    -- Teleport: Darnassus
+  { spell = 3567, area = 1637, x = 38.5, y = 85.5, cast = 30, reagent = RUNE },    -- Teleport: Orgrimmar
+  { spell = 3563, area = 1497, x = 84.5, y = 17.0, cast = 30, reagent = RUNE },    -- Teleport: Undercity
+  { spell = 3566, area = 1638, x = 22.5, y = 16.5, cast = 30, reagent = RUNE },    -- Teleport: Thunder Bluff
+  { spell = 18960, area = 493, x = 44.0, y = 45.0, cast = 30 },                    -- Teleport: Moonglade (druid)
+}

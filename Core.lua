@@ -175,19 +175,9 @@ K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your le
 K.LOOKAHEAD_LEVELS = 5
 K.MAX_QUESTS = 40 -- quest log size on the Forever server
 
-local CLASS_SORTS = { [-395] = true, [-372] = true, [-263] = true, [-262] = true, [-261] = true, [-162] = true,
-  [-161] = true, [-141] = true, [-82] = true, [-81] = true, [-61] = true }
--- Profession quest categories. Forever: -666 = "Camping" ("Camping 101: …"), 16941 = "Crafting"
--- (a QuestieDB area grouping the "Craftsman's Writ" quests, no actual place).
-local PROF_SORTS = { [-398] = true, [-377] = true, [-373] = true, [-371] = true, [-324] = true, [-304] = true,
-  [-264] = true, [-201] = true, [-182] = true, [-181] = true, [-121] = true, [-101] = true, [-24] = true,
-  [-666] = true, [16941] = true }
-local EVENT_SORTS = { [-1000] = true, [-404] = true, [-402] = true, [-378] = true, [-376] = true, [-375] = true,
-  [-374] = true, [-370] = true, [-369] = true, [-366] = true, [-364] = true, [-41] = true, [-22] = true,
-  [-21] = true, [-368] = true, [-365] = true, [-241] = true }
--- Battleground quest areas: Alterac Valley, Warsong Gulch, Arathi Basin, Darkspear Islands (Forever).
-K.PVP_SORTS = { [-25] = true, [2597] = true, [3277] = true, [3358] = true, [16606] = true }
-local PROF_HEADERS = { ["Artisanat"] = true, ["Métiers"] = true, ["Professions"] = true, ["Crafting"] = true }
+-- Quest categories (QuestieDB sorts) and profession headers: Data/Supplements.lua.
+local CLASS_SORTS, PROF_SORTS, EVENT_SORTS = ns.SORT_CLASS, ns.SORT_PROFESSION, ns.SORT_EVENT
+local PROF_HEADERS = ns.PROFESSION_HEADERS
 
 local function QGet(entity, id, key)
   if not entity or not id then return nil end

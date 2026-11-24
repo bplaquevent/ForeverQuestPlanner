@@ -214,7 +214,7 @@ local function CheckAvailable(id, ctx)
     starterZone = starterZone,
     isClass = m and IsClassMeta(m) or false,
     isProf = m and IsProfMeta(m) or false,
-    pvp = K.PVP_SORTS[sort] or nil,
+    pvp = ns.SORT_PVP[sort] or nil,
     opensChain = m and #NextQuests(m) > 0 or false,
     repMissing = MissingReputation(QGet(Q, id, "requiredMinRep")),
     missing = #missing.texts > 0 and missing or nil,
