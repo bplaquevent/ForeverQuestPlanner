@@ -691,6 +691,11 @@ local function LogEntry(id)
   return nil
 end
 
+-- Complete in the game (ready to turn in).
+local function IsQuestComplete(id)
+  return C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) or false
+end
+
 local function Snapshot()
   if not (C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo) then
     Print(L["C_QuestLog API not found, cannot export."])
@@ -728,7 +733,7 @@ local function Snapshot()
             local ok, m = pcall(GetQuestLogRewardMoney, id)
             return ok and m or nil
           end)(),
-          complete = C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) or false,
+          complete = IsQuestComplete(id),
           failed = C_QuestLog.IsFailed and C_QuestLog.IsFailed(id) or false,
           objectives = GetObjectives(id),
           objectivesText = objText,
@@ -1022,3 +1027,4 @@ ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.QuestAllowed = AllIds, NpcFriend
 ns.WornItemLevel = WornItemLevel
 ns.QuestCategory = QuestCategory
 ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime
+ns.IsQuestComplete = IsQuestComplete

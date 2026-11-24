@@ -11,6 +11,7 @@ local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.
 local LogRecord = ns.LogRecord
 local LogQuests = ns.LogQuests
 local LogEntry = ns.LogEntry
+local IsQuestComplete = ns.IsQuestComplete
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -751,7 +752,7 @@ local function StateIcons(questId)
   if not questId then return "" end
   local icons = {}
   if IsInLog(questId) then
-    local done = C_QuestLog.IsComplete and C_QuestLog.IsComplete(questId)
+    local done = IsQuestComplete(questId)
     icons[#icons + 1] = done and ICON.turnin or ICON.inprogress
     if IsWatched(questId) then icons[#icons + 1] = ICON.watched end
   elseif IsCompleted(questId) then
@@ -969,7 +970,7 @@ local function QuestStates(questId)
   local st = {}
   if not questId then return st end
   if IsInLog(questId) then
-    if C_QuestLog.IsComplete and C_QuestLog.IsComplete(questId) then st.turnin = true else st.inprogress = true end
+    if IsQuestComplete(questId) then st.turnin = true else st.inprogress = true end
     if IsWatched(questId) then st.watched = true end
   else
     st.available = true

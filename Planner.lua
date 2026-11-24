@@ -236,6 +236,32 @@ function Geo.Yield()
   end
 end
 
+-- Runs a computation (coroutine calling Geo.Yield) over several frames: it replaces the running one.
+-- onDone(its results), onError(message), onReplaced() when a newer one took its place (optional).
+function Geo.RunSliced(co, onDone, onError, onReplaced)
+  State.co = co
+  local function handle(ok, ...)
+    if not ok then
+      State.co = nil
+      onError(...)
+    elseif coroutine.status(co) == "dead" then
+      State.co = nil
+      onDone(...)
+    else
+      return true
+    end
+  end
+  local function step()
+    if State.co ~= co then
+      if onReplaced then onReplaced() end
+      return
+    end
+    State.sliceStart = debugprofilestop()
+    if handle(coroutine.resume(co)) then C_Timer.After(0, step) end
+  end
+  step()
+end
+
 -- XP to go from the given level to the next one (Classic table, scaled to the game's actual value).
 function Geo.XPNeeded(level)
   local base = K.XP_TABLE[level]
@@ -243,6 +269,13 @@ function Geo.XPNeeded(level)
   local here = K.XP_TABLE[UnitLevel("player")]
   local real = UnitXPMax and UnitXPMax("player")
   return base * ((here and real and real > 0) and real / here or 1)
+end
+
+-- XP to go from each level to the next one: { [level] = XP }.
+function Geo.XPNeededTable()
+  local needed = {}
+  for lv = 1, Geo.MaxLevel() do needed[lv] = Geo.XPNeeded(lv) end
+  return needed
 end
 
 -- Monster XP (Classic formula: level difference, gray monsters, elites x2).

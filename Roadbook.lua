@@ -11,6 +11,8 @@ local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.Kn
 local IsWatched, SetWatched = ns.IsWatched, ns.SetWatched
 local OpenQuestDetails, scan = ns.OpenQuestDetails, ns.scan
 local LogEntry = ns.LogEntry
+local IsQuestComplete = ns.IsQuestComplete
+local WaitScan = ns.WaitScan
 
 ---------------------------------------------------------------------------
 -- Roadbook checkpoints: focus on the next step from a floating button
@@ -331,7 +333,7 @@ function CP.StepDone(st)
     if not id then return false end
     if IsCompleted(id) then return true end
     if not IsInLog(id) then return false end
-    if C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) then return true end
+    if IsQuestComplete(id) then return true end
     -- Source item (not a game objective): done once it is in the bags.
     local src = st.r and st.r.tg and st.r.tg.sourceItem
     if src then return Geo.ItemCount(src) > 0 end
@@ -366,7 +368,7 @@ function CP.StepReady(st, route)
   local id = st.task and st.task.id
   if not id or (st.kind ~= "turnin" and st.kind ~= "obj") then return true end
   if st.kind == "turnin" and Geo.SkillNeed(id, LogEntry(id)) then return false end -- profession level
-  if st.kind == "turnin" and IsInLog(id) and C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) then return true end
+  if st.kind == "turnin" and IsInLog(id) and IsQuestComplete(id) then return true end
   for i = 2, #route do
     local o = route[i]
     if o ~= st and o.task and o.task.id == id and not CP.StepDone(o)
@@ -397,7 +399,7 @@ function Geo.Recompute(goal, cb, keepDone, re)
     if not State.computing then return end -- deleted meanwhile
     State.computing = nil
     pcall(CP.RefreshButton) -- the Objective button can be clicked again
-    if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end -- the list can change again
+    Geo.SyncQuestLogButton() -- the list can change again
     if route and #route >= 2 and goal ~= "custom" then
       Geo.AcceptGenerated(route, info, function(ok)
         if cb then cb(ok and route or nil, not ok and L["Adaptation cancelled: the Roadbook and its list are unchanged."] or err, info) end
@@ -486,10 +488,7 @@ end
 -- Turns the tracking on ("Tracking" box of the steps panel, Objective button): the Objective button
 -- follows the Roadbook, which is computed again from here.
 function CP.TrackOn()
-  if State.computing then
-    Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
-    return
-  end
+  if CP.RefuseWhileComputing() then return end
   if not Geo.Frozen() then
     Print(L["This Roadbook has no step: add quests to its list or click \"Adapt\"."])
     return
@@ -558,10 +557,7 @@ function CP.Replan(msg, opts, manual)
   -- Never computed again by itself while not tracked (manual: the Recompute icon).
   if not (manual or Geo.Tracking() or CP.turningOn) then return false end
   if not GeoReady() then return false end
-  if State.computing then
-    Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
-    return false
-  end
+  if CP.RefuseWhileComputing() then return false end
   if not Geo.ServicePending() and (not Geo.HasRoadbook() or #Geo.CustomList() == 0) then return false end
   Print(msg .. string.format(L["Computing the Roadbook (up to %d s)…"], K.PLAN_TIME))
   Geo.Trace("replan", msg)
@@ -583,8 +579,7 @@ function CP.ScheduleRecallCheck(delay)
     if token ~= CP.recallToken then return end
     CP.recallAt = nil
     if not Geo.Frozen() or not Geo.Tracking() then return end
-    if CP.flying or State.computing or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
-      or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) or not PlayerPos() then
+    if State.computing or CP.Busy() or not PlayerPos() then
       CP.ScheduleRecallCheck(10)
       return
     end
@@ -597,16 +592,26 @@ function CP.ScheduleRecallCheck(delay)
   end)
 end
 
+-- One computation at a time: a request meanwhile is refused with a message. Returns true when refused.
+function CP.RefuseWhileComputing()
+  if not State.computing then return false end
+  Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
+  return true
+end
+
+-- Flying, on a taxi, fighting or dead: no change of the Roadbook now.
+function CP.Busy()
+  return CP.flying or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
+    or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) or false
+end
+
 -- Steps done ahead: a quest picked up, an objective done or a quest turned in before its place in
 -- the Roadbook. Right after the steps done, the route stays right (several quests from the same
 -- NPC…); further on, the steps to come are computed again without them (they join the history).
 -- A step that comes back after the computation it started does not start another one (it is
 -- forgotten when its quest leaves the log, CP.QuestRemoved). Returns true if a computation started.
 K.AHEAD_KINDS = { take = true, obj = true, turnin = true }
-CP.aheadSeen = {} -- key of a step done ahead (CP.AheadKey) -> quest id
-function CP.AheadKey(st)
-  return st.kind .. ":" .. st.task.id .. ":" .. tostring(st.r and st.r.tg and st.r.tg.name)
-end
+CP.aheadSeen = {} -- key of a step done ahead (Geo.StepKey) -> quest id
 function CP.AheadCheck()
   local fz = Geo.Frozen()
   if not fz or State.computing or CP.autoPending then return false end
@@ -617,12 +622,12 @@ function CP.AheadCheck()
     if not first then
       if not done then first = i end
     elseif done and not st.done and K.AHEAD_KINDS[st.kind] and not st.search and st.task and st.task.id
-      and not CP.aheadSeen[CP.AheadKey(st)] then
+      and not CP.aheadSeen[Geo.StepKey(st)] then
       ahead[#ahead + 1] = st
     end
   end
   if #ahead == 0 or not CP.Replan(L["Step done ahead: "] .. CP.StepText(ahead[1]) .. ". ") then return false end
-  for _, st in ipairs(ahead) do CP.aheadSeen[CP.AheadKey(st)] = st.task.id end -- only once started
+  for _, st in ipairs(ahead) do CP.aheadSeen[Geo.StepKey(st)] = st.task.id end -- only once started
   return true
 end
 
@@ -654,8 +659,7 @@ end
 function CP.NearbyCheck()
   local fz = Geo.Frozen()
   if not fz or not Geo.Tracking() or State.computing or CP.autoPending or Geo.ServicePending() then return end
-  if CP.flying or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
-    or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) then return end
+  if CP.Busy() then return end
   local pos = PlayerPos()
   if not pos then return end
   local plevel = UnitLevel("player")
@@ -810,7 +814,7 @@ function CP.DoEmpty()
   State.customUnplanned = nil
   State.customToken = (State.customToken or 0) + 1 -- no pending recompute
   Print(L["Roadbook emptied."])
-  if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
+  Geo.SyncQuestLogButton()
   CP.RefreshButton()
   if Refresh then Refresh() end
 end
@@ -886,32 +890,25 @@ function CP.Recompute(goal, keep, attempt, token, re)
       if not keep then Print(L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."]) end
       return
     end
-    if State.computing then -- one computation at a time: a request meanwhile is refused, not queued
-      Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
-      return
-    end
+    if CP.RefuseWhileComputing() then return end -- one computation at a time: a request meanwhile is refused, not queued
     CP.computeToken = (CP.computeToken or 0) + 1
     token = CP.computeToken
     State.computing, State.computeStart = true, GetTime and GetTime() or 0
-    if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end -- the list is locked
+    Geo.SyncQuestLogButton() -- the list is locked
     if not keep then Geo.ClearFrozen() end
     if Refresh then Refresh() end
     pcall(CP.RefreshButton) -- the Objective button waits
   end
   if token ~= CP.computeToken then return end -- deleted meanwhile
   -- Available quests change after a pick-up or turn-in: wait for their scan to finish.
-  if goal ~= "custom" and (scan.running or scan.dirty or not scan.entries) then
-    if not scan.running then StartScan() end
-    attempt = (attempt or 0) + 1
-    if attempt > 40 then
+  if goal ~= "custom" and WaitScan(attempt,
+    function(n) CP.Recompute(goal, keep, n, token, re) end,
+    function()
       State.computing = nil
       pcall(CP.RefreshButton)
-      if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
-      Print(L["Quest scan is taking too long: try again in a moment."])
+      Geo.SyncQuestLogButton()
       if Refresh then Refresh() end
-      return
-    end
-    C_Timer.After(0.5, function() CP.Recompute(goal, keep, attempt, token, re) end)
+    end) then
     return
   end
   local was = CP.CurrentFocus()
@@ -1043,7 +1040,7 @@ end
 -- Every objective of the quest done (or the quest complete).
 function CP.QuestObjectivesDone(qid)
   if not (qid and IsInLog(qid)) then return false end
-  if C_QuestLog.IsComplete and C_QuestLog.IsComplete(qid) then return true end
+  if IsQuestComplete(qid) then return true end
   local objs = GetObjectives(qid)
   for _, o in ipairs(objs) do if not o.finished then return false end end
   return #objs > 0
@@ -1053,7 +1050,7 @@ function CP.Progress(qid)
   if not (qid and IsInLog(qid)) then return 0 end
   local n = 0
   for _, o in ipairs(GetObjectives(qid)) do if o.finished then n = n + 1 end end
-  if C_QuestLog.IsComplete and C_QuestLog.IsComplete(qid) then n = n + 1 end
+  if IsQuestComplete(qid) then n = n + 1 end
   return n
 end
 
@@ -1084,23 +1081,11 @@ end
 -- Zeppelin / boat: arrived when near the destination dock (the continent change
 -- happens at sea, during the loading screen: it is not enough).
 K.ARRIVAL_RADIUS = 300
-function CP.CheckArrival(s)
-  local dest = s.task.destP
-  local pos = PlayerPos()
-  if not (dest and pos) then return end
-  local d = Dist(pos, dest)
-  if d and d < K.ARRIVAL_RADIUS then
-    if CP.transportTicker then CP.transportTicker:Cancel() CP.transportTicker = nil end
-    CP.AutoUpdate(L["Arrival of the "] .. (K.MODE_NAME[s.task.mode] or s.task.mode or L["transport"]))
-  end
-end
-
--- Hearthstone step: arrived at the bind point by any mean (hearthstone, Astral Recall, teleport,
--- on foot).
-function CP.CheckHearthArrival(s)
+-- Arrived where the followed boat, zeppelin or teleport goes: the step is done (msg: what to say).
+function CP.CheckArrival(s, msg)
   if not CP.TransportReached(s, PlayerPos()) then return end
   if CP.transportTicker then CP.transportTicker:Cancel() CP.transportTicker = nil end
-  CP.AutoUpdate(L["Arrived at the hearthstone destination"])
+  CP.AutoUpdate(msg)
 end
 
 -- Transport step whose destination is reached at `pos`: bind point of a hearthstone step, arrival
@@ -1361,15 +1346,15 @@ function CP.OnGameEvent(event, a1, a2)
     if event == "FQP_HEARTH_ARRIVED" and tostring(a1 or "hearth") == tostring(s.via or "hearth") then
       CP.AutoUpdate(a1 and a1 ~= "hearth" and L["Teleport done"] or L["Back by hearthstone"])
     elseif event == "FQP_HEARTH_ARRIVED" then
-      CP.CheckHearthArrival(s)
+      CP.CheckArrival(s, L["Arrived at the hearthstone destination"])
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK" then
-      CP.CheckHearthArrival(s)
+      CP.CheckArrival(s, L["Arrived at the hearthstone destination"])
     end
   elseif s.kind == "travel" then
     if event == "FQP_TAXI_TAKEOFF" then
       CP.TakeOff(s)
     elseif s.task.mode ~= "vol" and (event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK") then
-      CP.CheckArrival(s)
+      CP.CheckArrival(s, L["Arrival of the "] .. (K.MODE_NAME[s.task.mode] or s.task.mode or L["transport"]))
     end
   elseif s.kind == "fm" then
     if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
@@ -1743,10 +1728,7 @@ K.LOCKED_TIP = L["The Roadbook is being computed: it can be changed when it is r
 -- planned again (transport steps to reach it, then the rest). A second click on the pending
 -- service cancels it.
 function CP.ServiceClick(kind)
-  if State.computing then
-    Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
-    return
-  end
+  if CP.RefuseWhileComputing() then return end
   if not GeoReady() then
     Print(L["Unable to convert QuestieDB positions to this client's map."])
     return

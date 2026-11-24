@@ -378,9 +378,7 @@ function Geo.ChainLevelCheck(ids)
     quests[#quests + 1] = { id = q, row = QDB.xp[q], reqLevel = QGet(QDB.Quest, q, "requiredLevel") or 0,
       pres = pres, anyPres = not met and #anyPres > 0 and anyPres or nil, inLog = IsInLog(q) }
   end
-  local needed = {}
-  for lv = 1, Geo.MaxLevel() do needed[lv] = Geo.XPNeeded(lv) end
-  return ns.Solver.LevelReach({ level = UnitLevel("player"), xp = UnitXP("player"), xpNeeded = needed,
+  return ns.Solver.LevelReach({ level = UnitLevel("player"), xp = UnitXP("player"), xpNeeded = Geo.XPNeededTable(),
     maxLevel = Geo.MaxLevel() }, quests)
 end
 
@@ -440,7 +438,7 @@ function Geo.CustomChanged()
     end)
   end
   if ns.Refresh then ns.Refresh() end
-  if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
+  Geo.SyncQuestLogButton()
 end
 
 ---------------------------------------------------------------------------
@@ -764,7 +762,7 @@ function Geo.AcceptGenerated(route, info, done, prepare)
     State.customToken = (State.customToken or 0) + 1 -- no pending recompute of the former list
     State.customUnplanned = info.unplanned
     Geo.Freeze(prepare and prepare(route) or route, info)
-    if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
+    Geo.SyncQuestLogButton()
     done(true)
   end
   if dropped == 0 then

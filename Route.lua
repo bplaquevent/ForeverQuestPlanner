@@ -565,9 +565,7 @@ function Geo.RequestPlan(goal, cb, opts)
     if goal == "custom" then return Geo.PlanCustom(opts) end
     return Geo.PlanGenerate(goal, opts)
   end)
-  State.co = co
   local function finish(route, err, info)
-    State.co = nil
     State.lastPlanError = not route and err or nil
     local cbs = State.planCbs or {}
     State.planCbs = nil
@@ -576,20 +574,10 @@ function Geo.RequestPlan(goal, cb, opts)
       if not ok then Print(L["Error after computing the Roadbook: "] .. tostring(e)) end
     end
   end
-  local function step()
-    if State.co ~= co then return end -- replaced by a more recent computation
-    State.sliceStart = debugprofilestop and debugprofilestop() or 0
-    local ok, route, err, info = coroutine.resume(co)
-    if not ok then
-      Print(L["|cffff6060Roadbook computation error|r: "] .. tostring(route))
-      finish(nil, L["Computation error: "] .. tostring(route))
-    elseif coroutine.status(co) == "dead" then
-      finish(route, err, info)
-    else
-      C_Timer.After(0, step)
-    end
-  end
-  step()
+  Geo.RunSliced(co, finish, function(message)
+    Print(L["|cffff6060Roadbook computation error|r: "] .. tostring(message))
+    finish(nil, L["Computation error: "] .. tostring(message))
+  end)
 end
 
 -- Teleport step (kind "hearth"): icon, tag and what to do, for the lists and the Objective button.

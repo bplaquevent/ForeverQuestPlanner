@@ -10,6 +10,7 @@ local State, TrivialRange = ns.State, ns.TrivialRange
 local AllIds = ns.AllIds
 local PlayerFaction = ns.PlayerFaction
 local QuestAllowed = ns.QuestAllowed
+local Print = ns.Print
 
 ---------------------------------------------------------------------------
 -- Available quests (QuestieDB), scan spread over several frames
@@ -307,7 +308,25 @@ end
 
 local function Refresh() ns.Refresh() end -- the real one is in UI/Window.lua
 
-local function StartScan()
+local StartScan
+
+-- Is the scan of the available quests still to wait for? Then it is started if needed and retry(attempt)
+-- is called a little later; after K.SCAN_TRIES the wait is given up: a message, then giveUp().
+K.SCAN_TRIES, K.SCAN_WAIT = 40, 0.5
+local function WaitScan(attempt, retry, giveUp)
+  if not (scan.running or scan.dirty or not scan.entries) then return false end
+  if not scan.running then StartScan() end
+  attempt = (attempt or 0) + 1
+  if attempt > K.SCAN_TRIES then
+    Print(L["Quest scan is taking too long: try again in a moment."])
+    if giveUp then giveUp() end
+  else
+    C_Timer.After(K.SCAN_WAIT, function() retry(attempt) end)
+  end
+  return true
+end
+
+function StartScan()
   if scan.running then return end
   local ids = AllIds(QDB.Quest)
   if not ids then
@@ -379,7 +398,6 @@ end
 -- /fqp quest <id or part of a name>: what QuestieDB says about the quests that match, and why each is
 -- listed or not as available (debugging aid).
 local function QuestDiag(text)
-  local Print = ns.Print
   local _, race, raceID = UnitRace("player")
   local _, rbit = PlayerBits()
   Print(string.format("race %s (id %s), bit %s", tostring(race), tostring(raceID), tostring(rbit)))
@@ -432,3 +450,4 @@ end
 -- Shared with the next files.
 ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan, ns.QuestDiag = BuildScanContext, CheckAvailable, Refresh, StartScan, scan, QuestDiag
 ns.QuestDoubts = QuestDoubts
+ns.WaitScan = WaitScan

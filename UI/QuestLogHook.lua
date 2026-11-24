@@ -104,6 +104,7 @@ function Geo.QuestLogButtonSync()
 end
 
 local function Sync() pcall(Geo.QuestLogButtonSync) end
+Geo.SyncQuestLogButton = Sync -- after a change of the list or of a computation
 local function SyncNext() C_Timer.After(0, Sync) end
 
 -- Hooks (once each); the world map may load after this file.
