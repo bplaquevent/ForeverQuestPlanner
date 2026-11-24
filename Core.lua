@@ -179,6 +179,12 @@ K.MAX_QUESTS = 40 -- quest log size on the Forever server
 local CLASS_SORTS, PROF_SORTS, EVENT_SORTS = ns.SORT_CLASS, ns.SORT_PROFESSION, ns.SORT_EVENT
 local PROF_HEADERS = ns.PROFESSION_HEADERS
 
+-- QuestieDB codes: objective NPC icons meaning "talk to", creature ranks (1 elite, 2 rare elite, 3 boss,
+-- 4 rare) of the monsters that make a quest elite, and of the NPCs met once (to assassinate).
+K.TALK_ICONS = { [3] = true, [5] = true, [17] = true }
+K.ELITE_RANKS = { [1] = true, [2] = true, [3] = true }
+K.UNIQUE_RANKS = { [2] = true, [3] = true, [4] = true }
+
 local function QGet(entity, id, key)
   if not entity or not id then return nil end
   local ok, v = pcall(entity.Get, id, key)
@@ -280,6 +286,31 @@ local function PlayerBits()
   return classBit, raceBit
 end
 
+-- Ids of a QuestieDB table as a list (some versions give a set); nil if they cannot be read.
+local function AllIds(entity)
+  local ok, ids = pcall(entity.GetAllIds)
+  if not ok or type(ids) ~= "table" then return nil end
+  if #ids == 0 and next(ids) then
+    local list = {}
+    for k in pairs(ids) do list[#list + 1] = k end
+    ids = list
+  end
+  return ids
+end
+
+-- The character's faction as QuestieDB's friendlyToFaction: "A" (Alliance) or "H" (Horde); nil if unknown.
+local function PlayerFaction()
+  local f = UnitFactionGroup and UnitFactionGroup("player")
+  return (f == "Alliance" and "A") or (f == "Horde" and "H") or nil
+end
+
+-- Is the NPC friendly to the character's faction? nil when unknown (no data, or no faction).
+local function NpcFriendly(npcId)
+  local letter, friendly = PlayerFaction(), QGet(QDB.Npc, npcId, "friendlyToFaction")
+  if not letter or type(friendly) ~= "string" then return nil end
+  return friendly:find(letter, 1, true) ~= nil
+end
+
 -- Prerequisites of a quest in QuestieDB (its types, Types/Meta.t.lua): every one of preQuestGroup is
 -- required, one of the preQuestSingle alternatives is enough. Returns all, any (empty when none).
 local function QuestPrereqs(id)
@@ -346,6 +377,12 @@ local function AllowedForPlayer(m, classBit, raceBit)
   if m.races ~= 0 and raceBit and not HasBit(m.races, raceBit) then return false end
   if m.classes ~= 0 and classBit and not HasBit(m.classes, classBit) then return false end
   return true
+end
+
+-- Can this class and race (bits, PlayerBits) do the quest? A quest unknown to QuestieDB: yes.
+local function QuestAllowed(id, classBit, raceBit)
+  local m = QuestMeta(id)
+  return not m or AllowedForPlayer(m, classBit, raceBit)
 end
 
 -- Estimated XP at the current level (formula used by Questie, without temporary bonuses).
@@ -959,4 +996,4 @@ ns.SLOTS, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRan
 ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
 ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
 ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQuests, LogRecord
-ns.AllowedForPlayer = AllowedForPlayer
+ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.QuestAllowed = AllIds, NpcFriendly, PlayerFaction, QuestAllowed

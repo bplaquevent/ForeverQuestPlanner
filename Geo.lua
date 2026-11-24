@@ -4,6 +4,8 @@
 local ADDON_NAME, ns = ...
 local AreaName, CharKey, Color, HasBit, K, L = ns.AreaName, ns.CharKey, ns.Color, ns.HasBit, ns.K, ns.L
 local OM, QDB, QGet, Settings, SharedData = ns.OM, ns.QDB, ns.QGet, ns.Settings, ns.SharedData
+local PlayerFaction = ns.PlayerFaction
+local NpcFriendly = ns.NpcFriendly
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
@@ -13,6 +15,7 @@ K.CROSS_CONTINENT = 480 -- flat seconds to change continent
 K.PATH_FACTOR = 1.35    -- paths are never straight lines
 K.OVERHEAD = 20         -- dialogs, quest pick-up/turn-in
 K.INSTANCE_MATCH = 400  -- yards: an OpenMap dungeon entrance this close to QuestieDB's is the same one
+K.MAX_DROP_SOURCES = 6  -- monsters or objects looked at for an item to loot, at most
 
 local function LoadDataString(v)
   if type(v) == "table" then return v end
@@ -205,11 +208,11 @@ local function GiverPoints(givers)
   if ItemAndGiver(givers) then
     for _, itemId in ipairs(givers[3]) do
       local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
-      for i = 1, math.min(#npcs, 6) do
+      for i = 1, math.min(#npcs, K.MAX_DROP_SOURCES) do
         for _, p in ipairs(EntityPoints("npc", npcs[i])) do pts[#pts + 1] = p end
       end
       local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
-      for i = 1, math.min(#objs, 6) do
+      for i = 1, math.min(#objs, K.MAX_DROP_SOURCES) do
         for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
       end
     end
@@ -356,8 +359,8 @@ K.NODE_MATCH = 150      -- yards: a flight master this close to a flight node is
 K.TRANSPORT_MODE = { boat = "bateau", zeppelin = "zeppelin", airship = "airship" }
 
 local function PlayerFactionBit()
-  local f = UnitFactionGroup and UnitFactionGroup("player")
-  return (f == "Alliance" and 1) or (f == "Horde" and 2) or 0
+  local f = PlayerFaction()
+  return (f == "A" and 1) or (f == "H" and 2) or 0
 end
 
 -- A flight node the character can use: its faction, and its class when it flies only one (Nighthaven).
@@ -797,25 +800,22 @@ function Geo.AddItemTarget(add, itemId)
   -- Drop rate: average over the monsters, each weighted by its number of spawns (the ones met).
   local pts, rateSum, rateN = {}, 0, 0
   local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
-  for i = 1, math.min(#npcs, 6) do
+  for i = 1, math.min(#npcs, K.MAX_DROP_SOURCES) do
     local spawns = EntityPoints("npc", npcs[i])
     for _, p in ipairs(spawns) do pts[#pts + 1] = p end
     local r = DropRate(itemId, npcs[i])
     if r and #spawns > 0 then rateSum, rateN = rateSum + r * #spawns, rateN + #spawns end
   end
   local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
-  for i = 1, math.min(#objs, 6) do
+  for i = 1, math.min(#objs, K.MAX_DROP_SOURCES) do
     for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
   end
   local kind = (#npcs == 0 and #objs > 0) and "object" or "item"
   if #pts == 0 then
     -- Not dropped by anything located: sold by vendors (QuestieDB `vendors`): one purchase.
     -- Every vendor of the player's faction (a common item has many: the nearest one is chosen later).
-    local fac = UnitFactionGroup and UnitFactionGroup("player")
-    local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
     for _, vid in ipairs(QGet(QDB.Item, itemId, "vendors") or {}) do
-      local friendly = QGet(QDB.Npc, vid, "friendlyToFaction")
-      if not (letter and type(friendly) == "string" and not friendly:find(letter, 1, true)) then
+      if NpcFriendly(vid) ~= false then -- unknown: kept
         for _, p in ipairs(EntityPoints("npc", vid)) do
           if not p.instance then pts[#pts + 1] = p end
         end
@@ -824,7 +824,7 @@ function Geo.AddItemTarget(add, itemId)
     if #pts > 0 then kind = "buy" end
   end
   local ids = {}
-  for i = 1, math.min(#npcs, 6) do ids[#ids + 1] = npcs[i] end
+  for i = 1, math.min(#npcs, K.MAX_DROP_SOURCES) do ids[#ids + 1] = npcs[i] end
   add(kind, QGet(QDB.Item, itemId, "name"), pts, rateN > 0 and rateSum / rateN or nil, npcs[1], #ids > 0 and ids or nil)
 end
 
@@ -844,7 +844,7 @@ local function QuestTargets(id)
         if type(lo) == "number" and lo > 0 then
           tg.mobLevel = math.floor(((lo + (type(hi) == "number" and hi or lo)) / 2) + 0.5)
           local rank = QGet(QDB.Npc, mob, "rank")
-          tg.elite = rank == 1 or rank == 2 or rank == 3
+          tg.elite = K.ELITE_RANKS[rank] or false
         end
       end
       t[#t + 1] = tg
@@ -854,7 +854,7 @@ local function QuestTargets(id)
   if type(obj) == "table" then
     for _, o in ipairs(obj[1] or {}) do
       local icon = o[3] -- QuestieDB icon type: 3 event, 5 talk, 17 interact; otherwise a monster to kill
-      if icon == 3 or icon == 5 or icon == 17 then
+      if K.TALK_ICONS[icon] then
         -- One action at the NPC (speak, scripted event…): no monster to kill, no monster XP.
         add("talk", QGet(QDB.Npc, o[1], "name"), EntityPoints("npc", o[1]))
       else

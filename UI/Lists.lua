@@ -789,7 +789,7 @@ K.QUEST_TYPE_WORDS = {
 -- Unique NPC (to assassinate): rare, rare elite or boss, or a single known spawn point.
 function Geo.UniqueNpc(id)
   local rank = QGet(QDB.Npc, id, "rank")
-  if rank == 2 or rank == 3 or rank == 4 then return true end
+  if K.UNIQUE_RANKS[rank] then return true end
   local spawns, n = QGet(QDB.Npc, id, "spawns"), 0
   if type(spawns) == "table" then
     for _, pts in pairs(spawns) do n = n + (type(pts) == "table" and #pts or 0) end
@@ -808,7 +808,7 @@ function Geo.QuestTypes(id)
   if type(obj) == "table" then
     for _, o in ipairs(obj[1] or {}) do
       local icon = o[3]
-      if icon == 3 or icon == 5 or icon == 17 then has.talk = true
+      if K.TALK_ICONS[icon] then has.talk = true
       elseif Geo.UniqueNpc(o[1]) then has.assassination = true
       else has.slaying = true end
     end

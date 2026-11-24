@@ -9,9 +9,8 @@ local QGet, QuestTargets, RemainingTargets, Settings, TravelSpeed = ns.QGet, ns.
 local QuestPrereqs = ns.QuestPrereqs
 local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDoubts
 local State = ns.State
-local AllowedForPlayer = ns.AllowedForPlayer
 local PlayerBits = ns.PlayerBits
-local QuestMeta = ns.QuestMeta
+local QuestAllowed = ns.QuestAllowed
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.MAX_PREREQ_DEPTH = 15   -- safety: prerequisite chain added with a quest
@@ -129,9 +128,7 @@ end
 
 -- Quest that the character's class and race can do.
 function Geo.ForPlayer(id)
-  local m = QuestMeta(id)
-  if not m then return true end
-  return AllowedForPlayer(m, PlayerBits())
+  return QuestAllowed(id, PlayerBits())
 end
 
 -- Prerequisite quests still to turn in (QuestieDB), the first ones of the chain first.

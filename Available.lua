@@ -7,6 +7,9 @@ local IsCompleted, IsInLog, IsProfMeta, K, L, NextQuests = ns.IsCompleted, ns.Is
 local PROFESSION_SKILLS, PlayerBits, PlayerSkills, QDB, QGet, QuestMeta = ns.PROFESSION_SKILLS, ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta
 local QuestPrereqs = ns.QuestPrereqs
 local State, TrivialRange = ns.State, ns.TrivialRange
+local AllIds = ns.AllIds
+local PlayerFaction = ns.PlayerFaction
+local QuestAllowed = ns.QuestAllowed
 
 ---------------------------------------------------------------------------
 -- Available quests (QuestieDB), scan spread over several frames
@@ -20,12 +23,6 @@ local function ScanLookahead()
   local plevel = UnitLevel("player")
   if g and g.kind == "level" and g.value - plevel > K.LOOKAHEAD_LEVELS then return g.value - plevel end
   return K.LOOKAHEAD_LEVELS
-end
-
--- "A" (Alliance) or "H" (Horde), as QuestieDB's friendlyToFaction; nil if unknown.
-local function PlayerFaction()
-  local f = UnitFactionGroup and UnitFactionGroup("player")
-  return (f == "Alliance" and "A") or (f == "Horde" and "H") or nil
 end
 
 local function BuildScanContext()
@@ -173,14 +170,7 @@ local function CheckAvailable(id, ctx)
   if req > ctx.plevel + (ctx.lookahead or 0) then return nil end
   -- A prerequisite quest the player's race or class could never take (the quest of another race, flagged done
   -- through the exclusive classic chain) does not count as done: what follows it cannot be taken either.
-  local function reachableBy(q)
-    local r = QGet(Q, q, "requiredRaces") or 0
-    if r ~= 0 and ctx.raceBit and not HasBit(r, ctx.raceBit) then return false end
-    local c = QGet(Q, q, "requiredClasses") or 0
-    if c ~= 0 and ctx.classBit and not HasBit(c, ctx.classBit) then return false end
-    return true
-  end
-  local function done(q) return (IsCompleted(q) or (ctx.done and ctx.done[q]) or false) and reachableBy(q) end
+  local function done(q) return (IsCompleted(q) or (ctx.done and ctx.done[q]) or false) and QuestAllowed(q, ctx.classBit, ctx.raceBit) end
   -- Missing prerequisites (quests, professions): the quest is listed with what is missing.
   local missing = { texts = {}, quests = {} }
   local function questName(q) return string.format(L["\"%s\""], QGet(Q, q, "name") or ("#" .. q)) end
@@ -190,10 +180,7 @@ local function CheckAvailable(id, ctx)
   if maxL and maxL > 0 and ctx.plevel > maxL then return nil end
   if IsCompleted(id) or IsInLog(id) then return nil end
 
-  local races = QGet(Q, id, "requiredRaces") or 0
-  if races ~= 0 and ctx.raceBit and not HasBit(races, ctx.raceBit) then return nil end
-  local classes = QGet(Q, id, "requiredClasses") or 0
-  if classes ~= 0 and ctx.classBit and not HasBit(classes, ctx.classBit) then return nil end
+  if not QuestAllowed(id, ctx.classBit, ctx.raceBit) then return nil end
 
   local sort = QGet(Q, id, "zoneOrSort") or 0
   if EVENT_SORTS[sort] then return nil end
@@ -322,15 +309,10 @@ local function Refresh() ns.Refresh() end -- the real one is in UI/Window.lua
 
 local function StartScan()
   if scan.running then return end
-  local okIds, ids = pcall(QDB.Quest.GetAllIds)
-  if not okIds or type(ids) ~= "table" then
+  local ids = AllIds(QDB.Quest)
+  if not ids then
     scan.error = L["Unable to read the QuestieDB quest list."]
     return
-  end
-  if #ids == 0 and next(ids) then
-    local list = {}
-    for k in pairs(ids) do list[#list + 1] = k end
-    ids = list
   end
 
   local ctx = BuildScanContext()
@@ -402,8 +384,8 @@ local function QuestDiag(text)
   local _, rbit = PlayerBits()
   Print(string.format("race %s (id %s), bit %s", tostring(race), tostring(raceID), tostring(rbit)))
   local want, id = text:lower(), tonumber(text)
-  local ok, ids = pcall(QDB.Quest.GetAllIds)
-  if not ok or type(ids) ~= "table" then Print("QuestieDB quest list unavailable") return end
+  local ids = AllIds(QDB.Quest)
+  if not ids then Print("QuestieDB quest list unavailable") return end
   local ctx = BuildScanContext()
   local function list(v) return type(v) == "table" and table.concat(v, ",") or tostring(v) end
   local function bits(mask) -- 1-based positions of the bits set
@@ -449,4 +431,4 @@ end
 
 -- Shared with the next files.
 ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan, ns.QuestDiag = BuildScanContext, CheckAvailable, Refresh, StartScan, scan, QuestDiag
-ns.PlayerFaction, ns.QuestDoubts = PlayerFaction, QuestDoubts
+ns.QuestDoubts = QuestDoubts

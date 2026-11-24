@@ -11,6 +11,9 @@ local Refresh, RemainingTargets, SLOTS, Settings, StartPoints = ns.Refresh, ns.R
 local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
 local LogQuests = ns.LogQuests
+local AllIds = ns.AllIds
+local NpcFriendly = ns.NpcFriendly
+local PlayerFaction = ns.PlayerFaction
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -100,19 +103,10 @@ function Geo.SkillTrainers(skill)
   if Geo.skillTrainers[skill] then return Geo.skillTrainers[skill] end
   local out = {}
   Geo.skillTrainers[skill] = out
-  local fac = UnitFactionGroup and UnitFactionGroup("player")
-  local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
   local stems = K.SKILL_STEMS[skill]
-  if not (letter and stems) then return out end
+  if not (PlayerFaction() and stems) then return out end
   local npcs = QDB.Npc
-  local okIds, ids = pcall(npcs.GetAllIds)
-  if not okIds or type(ids) ~= "table" then return out end
-  if #ids == 0 and next(ids) then -- some versions give a set
-    local list = {}
-    for k in pairs(ids) do list[#list + 1] = k end
-    ids = list
-  end
-  for _, id in ipairs(ids) do
+  for _, id in ipairs(AllIds(npcs) or {}) do
     local flags = QGet(npcs, id, "npcFlags")
     if type(flags) == "number" and HasBit(flags, K.NPC_FLAG_TRAINER) then
       local sub = QGet(npcs, id, "subName")
@@ -121,8 +115,7 @@ function Geo.SkillTrainers(skill)
       for _, w in ipairs(low and stems or {}) do
         if low:find(w, 1, true) then match = true break end
       end
-      local friendly = match and QGet(npcs, id, "friendlyToFaction")
-      if match and type(friendly) == "string" and friendly:find(letter) then
+      if match and NpcFriendly(id) then
         local name = QGet(npcs, id, "name") or ("#" .. id)
         for _, pt in ipairs(EntityPoints("npc", id)) do
           if not pt.instance then out[#out + 1] = { id = id, name = name, p = pt } end
@@ -501,20 +494,12 @@ end
 function Geo.PreIndex()
   if Geo.pre then return Geo.pre end
   local pre = {}
-  local okIds, ids = pcall(QDB.Quest.GetAllIds)
-  if okIds and type(ids) == "table" then
-    if #ids == 0 and next(ids) then
-      local list = {}
-      for k in pairs(ids) do list[#list + 1] = k end
-      ids = list
+  for n, id in ipairs(AllIds(QDB.Quest) or {}) do
+    for _, p in ipairs(AllPrereqs(id)) do
+      pre[p] = pre[p] or {}
+      table.insert(pre[p], id)
     end
-    for n, id in ipairs(ids) do
-      for _, p in ipairs(AllPrereqs(id)) do
-        pre[p] = pre[p] or {}
-        table.insert(pre[p], id)
-      end
-      if n % 400 == 0 then Geo.Yield() end
-    end
+    if n % 400 == 0 then Geo.Yield() end
   end
   Geo.pre = pre
   return pre
@@ -602,18 +587,6 @@ function Geo.SpecIndex()
 end
 
 -- Index "quest -> reward items" (QuestieDB), built once per session.
-function Geo.ItemIdList()
-  local okIds, ids = false, nil
-  okIds, ids = pcall(QDB.Item.GetAllIds)
-  if not okIds or type(ids) ~= "table" then return {} end
-  if #ids == 0 and next(ids) then
-    local list = {}
-    for k in pairs(ids) do list[#list + 1] = k end
-    ids = list
-  end
-  return ids
-end
-
 function Geo.IndexItemRewards(idx, id)
   local qs = QGet(QDB.Item, id, "questRewards")
   if type(qs) == "table" then
@@ -628,7 +601,7 @@ end
 function Geo.RewardIndex()
   if Geo.rewards then return Geo.rewards end
   local idx = {}
-  for n, id in ipairs(Geo.ItemIdList()) do
+  for n, id in ipairs(AllIds(QDB.Item) or {}) do
     Geo.IndexItemRewards(idx, id)
     if n % 500 == 0 then Geo.Yield() end
   end
@@ -639,7 +612,7 @@ end
 -- Built in the background (500 items per frame) for the "Available" tab, then the list is refreshed.
 function Geo.BuildRewardIndexAsync()
   if Geo.rewards or Geo.rewardsBuilding then return end
-  local ids, idx, i = Geo.ItemIdList(), {}, 1
+  local ids, idx, i = AllIds(QDB.Item) or {}, {}, 1
   Geo.rewardsBuilding = true
   local function step()
     if Geo.rewards then -- built meanwhile by the Roadbook computation
@@ -809,7 +782,7 @@ function Geo.IsEliteQuest(id, tag)
   if type(obj) == "table" then
     for _, o in ipairs(obj[1] or {}) do
       local icon = o[3]
-      if not (icon == 3 or icon == 5 or icon == 17) then mobs[#mobs + 1] = o[1] end
+      if not K.TALK_ICONS[icon] then mobs[#mobs + 1] = o[1] end
     end
     for _, o in ipairs(obj[3] or {}) do
       local drops = QGet(QDB.Item, o[1], "npcDrops")
@@ -824,7 +797,7 @@ function Geo.IsEliteQuest(id, tag)
   local elites = 0
   for _, n in ipairs(mobs) do
     local rank = QGet(QDB.Npc, n, "rank")
-    if rank == 1 or rank == 2 or rank == 3 then elites = elites + 1 end
+    if K.ELITE_RANKS[rank] then elites = elites + 1 end
   end
   v = elites > 0 and elites * 2 >= #mobs
   Geo.elite[id] = v
@@ -935,17 +908,8 @@ K.FM_KNOWN_RADIUS = 150 -- yards: the QuestieDB flight master NPC standing at a 
 function Geo.ScanServices()
   if Geo.fm then return end
   Geo.fm, Geo.inn = {}, {}
-  local okIds, ids = pcall(QDB.Npc.GetAllIds)
-  if not okIds or type(ids) ~= "table" then return end
-  if #ids == 0 and next(ids) then
-    local list = {}
-    for k in pairs(ids) do list[#list + 1] = k end
-    ids = list
-  end
-  local fac = UnitFactionGroup and UnitFactionGroup("player")
-  local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
-  if not letter then return end
-  for _, id in ipairs(ids) do
+  if not PlayerFaction() then return end
+  for _, id in ipairs(AllIds(QDB.Npc) or {}) do
     local flags = QGet(QDB.Npc, id, "npcFlags")
     local isFM = type(flags) == "number" and HasBit(flags, 8)
     local isInn = type(flags) == "number" and HasBit(flags, 128)
@@ -958,8 +922,7 @@ function Geo.ScanServices()
       end
     end
     if isFM or isInn then
-      local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
-      if type(friendly) == "string" and friendly:find(letter) then
+      if NpcFriendly(id) then
         local p = EntityPoints("npc", id)[1]
         if p and not p.instance then
           local name = QGet(QDB.Npc, id, "name")
@@ -989,18 +952,6 @@ K.SERVICES = {
 -- Game event that ends the step of each service (the window of the NPC or mailbox opens).
 K.SERVICE_EVENTS = { vendor = "MERCHANT_SHOW", repair = "MERCHANT_SHOW", trainer = "TRAINER_SHOW",
   bank = "BANKFRAME_OPENED", mail = "MAIL_SHOW" }
-
--- Ids of a QuestieDB table as a list (some versions give a set).
-local function AllIds(entity)
-  local okIds, ids = pcall(entity.GetAllIds)
-  if not okIds or type(ids) ~= "table" then return {} end
-  if #ids == 0 and next(ids) then
-    local list = {}
-    for k in pairs(ids) do list[#list + 1] = k end
-    ids = list
-  end
-  return ids
-end
 
 -- Class trainers learned in game, by class token: QuestieDB gives some of them no class (sub title
 -- "Niveau 10"). Shared by the characters of the same class: { [npcId] = true }.
@@ -1067,12 +1018,10 @@ function Geo.ServiceNpcs()
   if Geo.svc then return Geo.svc end
   local svc = { vendor = {}, repair = {}, trainer = {}, bank = {}, mail = {} }
   Geo.svc = svc
-  local fac = UnitFactionGroup and UnitFactionGroup("player")
-  local letter = (fac == "Horde" and "H") or (fac == "Alliance" and "A") or nil
   local classLoc, token = UnitClass("player")
   local classEn = token and (token:sub(1, 1) .. token:sub(2):lower()) or nil
   local learned = Geo.LearnedTrainers()
-  for _, id in ipairs(letter and AllIds(QDB.Npc) or {}) do
+  for _, id in ipairs(PlayerFaction() and AllIds(QDB.Npc) or {}) do
     local flags = QGet(QDB.Npc, id, "npcFlags")
     if type(flags) == "number" and flags > 0 then
       local isVendor = HasBit(flags, K.NPC_FLAG_VENDOR)
@@ -1087,8 +1036,7 @@ function Geo.ServiceNpcs()
           or (classEn and low:find(classEn:lower(), 1, true))))) and true or false
       end
       if isVendor or isRepair or isTrainer or isBank then
-        local friendly = QGet(QDB.Npc, id, "friendlyToFaction")
-        if type(friendly) == "string" and friendly:find(letter) then
+        if NpcFriendly(id) then
           local name = QGet(QDB.Npc, id, "name") or ("#" .. id)
           for _, p in ipairs(EntityPoints("npc", id)) do -- one entry per place it stands
             if not p.instance then
