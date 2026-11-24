@@ -1038,6 +1038,50 @@ local function UnitTime(tg)
   return 10
 end
 
+-- Most useful point of a quest: nearest remaining objective, otherwise the turn-in NPC.
+function Geo.ObjectivePoint(q)
+  local pos = PlayerPos()
+  local t = QuestTargets(q.id)
+  if not q.complete then
+    local best, bd, label
+    for _, r in ipairs(RemainingTargets(q, t)) do
+      local p, d = Nearest(r.tg.points, pos)
+      if p and (not best or (d and (not bd or d < bd))) then best, bd, label = p, d, r.tg.name end
+    end
+    if best then return best, label end
+  end
+  local f = Nearest(t.finish, pos)
+  return f, L["turn in the quest"]
+end
+
+-- Where to pick up a quest: its giver, otherwise the monsters / objects dropping the item that
+-- starts it, otherwise its first located objective, otherwise its turn-in NPC.
+function Geo.GiverPoint(id, pos)
+  local p = Nearest(StartPoints(id), pos)
+  if p then return p, L["pick up the quest"] end
+  local by = QGet(QDB.Quest, id, "startedBy")
+  local items = type(by) == "table" and by[3]
+  for _, itemId in ipairs(type(items) == "table" and items or {}) do
+    local pts = {}
+    for _, n in ipairs(QGet(QDB.Item, itemId, "npcDrops") or {}) do
+      for _, w in ipairs(EntityPoints("npc", n)) do pts[#pts + 1] = w end
+    end
+    for _, o in ipairs(QGet(QDB.Item, itemId, "objectDrops") or {}) do
+      for _, w in ipairs(EntityPoints("object", o)) do pts[#pts + 1] = w end
+    end
+    local q = Nearest(pts, pos)
+    if q then return q, L["item that starts the quest"] end
+  end
+  local t = QuestTargets(id)
+  for _, tg in ipairs(t) do
+    local q = Nearest(tg.points, pos)
+    if q then return q, tg.name or L["objective"] end
+  end
+  local f = Nearest(t.finish, pos)
+  if f then return f, L["turn in the quest"] end
+  return nil
+end
+
 -- Shared with the next files.
 ns.AllInstance, ns.Dist, ns.EntityPoints, ns.Geo, ns.GeoReady = AllInstance, Dist, EntityPoints, Geo, GeoReady
 ns.Nearest, ns.PlayerPos, ns.PointText, ns.QuestTargets, ns.RemainingTargets = Nearest, PlayerPos, PointText, QuestTargets, RemainingTargets

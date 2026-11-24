@@ -650,23 +650,6 @@ local function WatchOnly(questID)
   if not IsWatched(questID) then SetWatched(questID, true) end
 end
 
--- Most useful point of a quest: nearest remaining objective, otherwise the turn-in NPC.
-local function ObjectivePoint(q)
-  local pos = PlayerPos()
-  local t = QuestTargets(q.id)
-  if not q.complete then
-    local best, bd, label
-    for _, r in ipairs(RemainingTargets(q, t)) do
-      local p, d = Nearest(r.tg.points, pos)
-      if p and (not best or (d and (not bd or d < bd))) then best, bd, label = p, d, r.tg.name end
-    end
-    if best then return best, label end
-  end
-  local f = Nearest(t.finish, pos)
-  return f, L["turn in the quest"]
-end
-Geo.ObjectivePoint = ObjectivePoint
-
 -- Pin placed by the addon (OpenMap's waypoint), remembered per character.
 local function PinStore()
   local s = Settings()
@@ -738,103 +721,14 @@ local ICON = {
   done = "|TInterface\\RaidFrame\\ReadyCheck-Ready:16:16|t",            -- green check: turned in (as the steps done)
 }
 
--- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
--- a quest event (Events.lua clears State.abandonIds).
-function Geo.ToAbandon(questId)
-  if not State.abandonIds then
-    pcall(ns.Analyze)
-    State.abandonIds = State.abandonIds or {} -- no new try on each line after an error
-  end
-  return State.abandonIds[questId] or false
-end
-
 ---------------------------------------------------------------------------
 -- Quest line shown the same way in every tab: title, level, elite, types
 ---------------------------------------------------------------------------
--- Quest types, deduced from the QuestieDB objectives (several per quest, in this order).
-K.QUEST_TYPES = { "escort", "assassination", "slaying", "collect", "gathering", "interaction", "exploration",
-  "talk", "reputation", "delivery" }
 K.QUEST_TYPE_LABEL = {
   escort = L["Escort"], assassination = L["Assassination"], slaying = L["Slaying"], collect = L["Collect"],
   gathering = L["Gathering"], interaction = L["Interaction"], exploration = L["Exploration"], talk = L["Talk"],
   reputation = L["Reputation"], delivery = L["Delivery"],
 }
-
--- Words of the objective text, for quests whose objectives QuestieDB does not know.
-K.QUEST_TYPE_WORDS = {
-  slaying = { "%f[%a]kill", "%f[%a]slay", "%f[%a]destroy", "%f[%a]defeat", "%f[%a]exterminate", "%f[%a]eliminate" },
-  collect = { "%f[%a]collect%f[%A]", "%f[%a]gather%f[%A]", "%f[%a]obtain%f[%A]", "%f[%a]recover%f[%A]",
-    "%f[%a]retrieve%f[%A]", "bring %d", "bring me %d" },
-  exploration = { "%f[%a]explore%f[%A]", "%f[%a]scout%f[%A]", "%f[%a]investigate%f[%A]", "%f[%a]locate%f[%A]" },
-  interaction = { "%f[%a]use%f[%A]", "%f[%a]place%f[%A]", "%f[%a]plant%f[%A]", "%f[%a]activate%f[%A]" },
-}
-
--- Unique NPC (to assassinate): rare, rare elite or boss, or a single known spawn point.
-function Geo.UniqueNpc(id)
-  local rank = QGet(QDB.Npc, id, "rank")
-  if K.UNIQUE_RANKS[rank] then return true end
-  local spawns, n = QGet(QDB.Npc, id, "spawns"), 0
-  if type(spawns) == "table" then
-    for _, pts in pairs(spawns) do n = n + (type(pts) == "table" and #pts or 0) end
-  end
-  return n == 1
-end
-
-Geo.qtypes = {}
-function Geo.QuestTypes(id)
-  if not id then return {} end
-  local cached = Geo.qtypes[id]
-  if cached then return cached end
-  local has = {}
-  if Geo.IsEscort(id) then has.escort = true end
-  local obj = QGet(QDB.Quest, id, "objectives")
-  if type(obj) == "table" then
-    for _, o in ipairs(obj[1] or {}) do
-      local icon = o[3]
-      if K.TALK_ICONS[icon] then has.talk = true
-      elseif Geo.UniqueNpc(o[1]) then has.assassination = true
-      else has.slaying = true end
-    end
-    if #(obj[2] or {}) > 0 then has.interaction = true end
-    for _, o in ipairs(obj[3] or {}) do
-      local npcs, objs = QGet(QDB.Item, o[1], "npcDrops"), QGet(QDB.Item, o[1], "objectDrops")
-      if type(npcs) == "table" and #npcs > 0 then has.collect = true
-      elseif type(objs) == "table" and #objs > 0 then has.gathering = true
-      else has.collect = true end -- bought, crafted…
-    end
-    if #(obj[4] or {}) > 0 then has.reputation = true end
-    local givesItem = (tonumber(QGet(QDB.Quest, id, "sourceItemId")) or 0) > 0 -- 0 = no item
-    for _, o in ipairs(obj[5] or {}) do
-      if givesItem then has.interaction = true -- credit for using the item given by the quest on them
-      elseif type(o) == "table" and o[2] and Geo.UniqueNpc(o[2]) then has.assassination = true
-      else has.slaying = true end
-    end
-    if #(obj[6] or {}) > 0 then has.interaction = true end
-  end
-  if not has.escort and type(QGet(QDB.Quest, id, "triggerEnd")) == "table" then has.exploration = true end
-  if not next(has) then
-    -- No objective known by QuestieDB (frequent for Forever quests): words of the English text.
-    local text = ""
-    local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
-    if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
-    for kind, words in pairs(K.QUEST_TYPE_WORDS) do
-      for _, w in ipairs(words) do
-        if text:find(w) then has[kind] = true break end
-      end
-    end
-    if not next(has) then has.delivery = true end -- bring something / someone, or talk to an NPC
-  end
-  local list = {}
-  for _, k in ipairs(K.QUEST_TYPES) do if has[k] then list[#list + 1] = k end end
-  Geo.qtypes[id] = list
-  return list
-end
-
--- Game tag of a quest of the log ("Elite", "Dungeon"…), "" if none, nil if not in the log.
-function Geo.LogTag(id)
-  local q = LogEntry(id)
-  return q and (q.tag or "") or nil
-end
 
 -- Quest level, colored like in the game's quest log (gray, green, yellow, orange, red).
 function Geo.LevelBadge(level)
@@ -862,11 +756,6 @@ end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
 -- isClass, isProf, dungeon, noTypes (types left out, shown apart with Geo.QuestTypesText) }.
--- A quest that follows another one (a quest prerequisite in QuestieDB).
-function Geo.IsFollowUp(id)
-  return id ~= nil and #AllPrereqs(id) > 0
-end
-
 function Geo.QuestBadges(o)
   local id = o.id
   local tag = o.tag
@@ -1031,34 +920,6 @@ function Geo.QuestZoneUi(id)
   local sort = QGet(QDB.Quest, id, "zoneOrSort") or 0
   if not (type(sort) == "number" and sort > 0 and GeoReady()) then return nil end
   return Geo.PointUi({ area = sort })
-end
-
--- Where to pick up a quest: its giver, otherwise the monsters / objects dropping the item that
--- starts it, otherwise its first located objective, otherwise its turn-in NPC.
-function Geo.GiverPoint(id, pos)
-  local p = Nearest(StartPoints(id), pos)
-  if p then return p, L["pick up the quest"] end
-  local by = QGet(QDB.Quest, id, "startedBy")
-  local items = type(by) == "table" and by[3]
-  for _, itemId in ipairs(type(items) == "table" and items or {}) do
-    local pts = {}
-    for _, n in ipairs(QGet(QDB.Item, itemId, "npcDrops") or {}) do
-      for _, w in ipairs(EntityPoints("npc", n)) do pts[#pts + 1] = w end
-    end
-    for _, o in ipairs(QGet(QDB.Item, itemId, "objectDrops") or {}) do
-      for _, w in ipairs(EntityPoints("object", o)) do pts[#pts + 1] = w end
-    end
-    local q = Nearest(pts, pos)
-    if q then return q, L["item that starts the quest"] end
-  end
-  local t = QuestTargets(id)
-  for _, tg in ipairs(t) do
-    local q = Nearest(tg.points, pos)
-    if q then return q, tg.name or L["objective"] end
-  end
-  local f = Nearest(t.finish, pos)
-  if f then return f, L["turn in the quest"] end
-  return nil
 end
 
 -- Opens the world map on a map (the addon window is closed so that it does not hide it).

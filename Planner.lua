@@ -16,6 +16,7 @@ local NpcFriendly = ns.NpcFriendly
 local PlayerFaction = ns.PlayerFaction
 local WornItemLevel = ns.WornItemLevel
 local SkillName = ns.SkillName
+local LogEntry = ns.LogEntry
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -737,6 +738,103 @@ end
 function Geo.RecordLater(list, task)
   for _, e in ipairs(list) do if e.id == task.id then return end end
   list[#list + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
+end
+
+---------------------------------------------------------------------------
+-- What a quest is: its types, whether it follows another, its tag, whether to abandon it
+---------------------------------------------------------------------------
+-- Quest types, deduced from the QuestieDB objectives (several per quest, in this order).
+K.QUEST_TYPES = { "escort", "assassination", "slaying", "collect", "gathering", "interaction", "exploration",
+  "talk", "reputation", "delivery" }
+-- Words of the objective text, for quests whose objectives QuestieDB does not know.
+K.QUEST_TYPE_WORDS = {
+  slaying = { "%f[%a]kill", "%f[%a]slay", "%f[%a]destroy", "%f[%a]defeat", "%f[%a]exterminate", "%f[%a]eliminate" },
+  collect = { "%f[%a]collect%f[%A]", "%f[%a]gather%f[%A]", "%f[%a]obtain%f[%A]", "%f[%a]recover%f[%A]",
+    "%f[%a]retrieve%f[%A]", "bring %d", "bring me %d" },
+  exploration = { "%f[%a]explore%f[%A]", "%f[%a]scout%f[%A]", "%f[%a]investigate%f[%A]", "%f[%a]locate%f[%A]" },
+  interaction = { "%f[%a]use%f[%A]", "%f[%a]place%f[%A]", "%f[%a]plant%f[%A]", "%f[%a]activate%f[%A]" },
+}
+
+-- Unique NPC (to assassinate): rare, rare elite or boss, or a single known spawn point.
+function Geo.UniqueNpc(id)
+  local rank = QGet(QDB.Npc, id, "rank")
+  if K.UNIQUE_RANKS[rank] then return true end
+  local spawns, n = QGet(QDB.Npc, id, "spawns"), 0
+  if type(spawns) == "table" then
+    for _, pts in pairs(spawns) do n = n + (type(pts) == "table" and #pts or 0) end
+  end
+  return n == 1
+end
+
+Geo.qtypes = {}
+function Geo.QuestTypes(id)
+  if not id then return {} end
+  local cached = Geo.qtypes[id]
+  if cached then return cached end
+  local has = {}
+  if Geo.IsEscort(id) then has.escort = true end
+  local obj = QGet(QDB.Quest, id, "objectives")
+  if type(obj) == "table" then
+    for _, o in ipairs(obj[1] or {}) do
+      local icon = o[3]
+      if K.TALK_ICONS[icon] then has.talk = true
+      elseif Geo.UniqueNpc(o[1]) then has.assassination = true
+      else has.slaying = true end
+    end
+    if #(obj[2] or {}) > 0 then has.interaction = true end
+    for _, o in ipairs(obj[3] or {}) do
+      local npcs, objs = QGet(QDB.Item, o[1], "npcDrops"), QGet(QDB.Item, o[1], "objectDrops")
+      if type(npcs) == "table" and #npcs > 0 then has.collect = true
+      elseif type(objs) == "table" and #objs > 0 then has.gathering = true
+      else has.collect = true end -- bought, crafted…
+    end
+    if #(obj[4] or {}) > 0 then has.reputation = true end
+    local givesItem = (tonumber(QGet(QDB.Quest, id, "sourceItemId")) or 0) > 0 -- 0 = no item
+    for _, o in ipairs(obj[5] or {}) do
+      if givesItem then has.interaction = true -- credit for using the item given by the quest on them
+      elseif type(o) == "table" and o[2] and Geo.UniqueNpc(o[2]) then has.assassination = true
+      else has.slaying = true end
+    end
+    if #(obj[6] or {}) > 0 then has.interaction = true end
+  end
+  if not has.escort and type(QGet(QDB.Quest, id, "triggerEnd")) == "table" then has.exploration = true end
+  if not next(has) then
+    -- No objective known by QuestieDB (frequent for Forever quests): words of the English text.
+    local text = ""
+    local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
+    if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
+    for kind, words in pairs(K.QUEST_TYPE_WORDS) do
+      for _, w in ipairs(words) do
+        if text:find(w) then has[kind] = true break end
+      end
+    end
+    if not next(has) then has.delivery = true end -- bring something / someone, or talk to an NPC
+  end
+  local list = {}
+  for _, k in ipairs(K.QUEST_TYPES) do if has[k] then list[#list + 1] = k end end
+  Geo.qtypes[id] = list
+  return list
+end
+
+-- A quest that follows another one (a quest prerequisite in QuestieDB).
+function Geo.IsFollowUp(id)
+  return id ~= nil and #AllPrereqs(id) > 0
+end
+
+-- Game tag of a quest of the log ("Elite", "Dungeon"…), "" if none, nil if not in the log.
+function Geo.LogTag(id)
+  local q = LogEntry(id)
+  return q and (q.tag or "") or nil
+end
+
+-- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
+-- a quest event (Events.lua clears State.abandonIds).
+function Geo.ToAbandon(questId)
+  if not State.abandonIds then
+    pcall(ns.Analyze)
+    State.abandonIds = State.abandonIds or {} -- no new try on each line after an error
+  end
+  return State.abandonIds[questId] or false
 end
 
 -- Dungeon / raid quest kept out of the Roadbook: anything but talking or delivering, even when its
