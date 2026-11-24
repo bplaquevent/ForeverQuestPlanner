@@ -240,7 +240,11 @@ function Geo.DropdownSync(dd)
 end
 -- Tab panel: search box centered at the top; single choice filter (dropdown) and option (check box) on
 -- the first row of the filter box below it.
-local function CreateFilterPanel(f, filters, getCurrent, setCurrent, onSearch, toggle, caption)
+-- A tab with a search box and, optionally, a dropdown (filters = { { key, label } }, current(),
+-- setCurrent(key), caption) and a check box (toggle = { label, get, set }). onSearch(text).
+local function CreateFilterPanel(f, o)
+  local filters, getCurrent, setCurrent = o.filters or {}, o.current, o.setCurrent
+  local onSearch, toggle, caption = o.onSearch, o.toggle, o.caption
   local c = CreateFrame("Frame", nil, f)
   c:SetAllPoints(f)
   if onSearch then
@@ -315,13 +319,11 @@ end
 local function SelectTab(name)
   if not panels[name] then name = "groups" end -- old tab removed (e.g. "To abandon")
   State.currentTab = name
-  if name ~= "settings" then Settings().lastTab = name end
+  Settings().lastTab = name
   for key, p in pairs(panels) do p:SetShown(key == name) end
   local highlighted = (name == "export") and "groups" or name -- the export is part of the Quest log tab
   if State.mainFrame.usesTabs and PanelTemplates_SetTab and tabButtons[highlighted] then
     pcall(PanelTemplates_SetTab, State.mainFrame, tabButtons[highlighted].tabIndex)
-  elseif State.mainFrame.usesTabs and PanelTemplates_SetTab then
-    pcall(PanelTemplates_SetTab, State.mainFrame, 0) -- settings: no tab selected
   else
     for key, b in pairs(tabButtons) do
       if key == highlighted then b:LockHighlight() else b:UnlockHighlight() end

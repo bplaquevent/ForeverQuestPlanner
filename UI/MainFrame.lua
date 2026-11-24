@@ -19,10 +19,10 @@ local journalStates, nearStates, panels, tabButtons = ns.journalStates, ns.nearS
 --   N quests (fixed header)
 --   (list of the quests, scrolling; the steps are in the panel of the map, RoadbookPanel.lua)
 local function CreateRoadbookPanel(f)
-  local xp = CreateFilterPanel(f, {}, function() return nil end, function() end, function(text)
+  local xp = CreateFilterPanel(f, { onSearch = function(text)
     State.xpQuery = ParseQuery(text)
     Refresh()
-  end)
+  end })
   local function Tooltip(widget, title, text)
     -- Hooked: the dropdowns keep their own hover scripts.
     widget:HookScript("OnEnter", function(self)
@@ -267,7 +267,7 @@ local function CreateMainFrame()
   glow:SetAlpha(0.5)
   gear:SetScript("OnClick", function() Geo.ToggleSettings() end)
   gear:SetScript("OnEnter", function(self)
-    Geo.ShowTip(self, L["Roadbook settings"], L["Quest priorities, look-ahead, time estimates."], "ANCHOR_BOTTOM")
+    Geo.ShowTip(self, L["Roadbook settings"], L["Difficulty, time estimates, Roadbook and Objective options."], "ANCHOR_BOTTOM")
   end)
   gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
@@ -299,10 +299,10 @@ local function CreateMainFrame()
   exportPanel.scroll = CreateScrollPanel(exportPanel, eb, -98)
   panels.export = exportPanel
 
-  panels.groups = CreateFilterPanel(f, {}, function() return nil end, function() end, function(text)
+  panels.groups = CreateFilterPanel(f, { onSearch = function(text)
     State.todoQuery = ParseQuery(text)
     Refresh()
-  end)
+  end })
   AddStateFilters(panels.groups, { turnin = true, inprogress = true, watched = true, pinned = true, abandon = true, custom = true }, journalStates)
   local exportButton = CreateFrame("Button", nil, panels.groups, "UIPanelButtonTemplate")
   exportButton:SetSize(150, 22)
@@ -313,33 +313,33 @@ local function CreateMainFrame()
   questCount:SetPoint("RIGHT", exportButton, "LEFT", -12, 0)
   panels.groups.questCount = questCount
 
-  panels.avail = CreateFilterPanel(f, {
+  panels.avail = CreateFilterPanel(f, { filters = {
     { key = "all", label = L["All"] },
     { key = "zone", label = L["Current zone"] },
     { key = "dungeon", label = L["Dungeons"] },
     { key = "pvp", label = L["PvP"] },
     { key = "class", label = L["Class & professions"] },
     { key = "custom", label = L["Roadbook list"] },
-  }, function() return State.availFilter end, function(v)
+  }, current = function() return State.availFilter end, setCurrent = function(v)
     State.availFilter = v
     Settings().availFilter = v
-  end, function(text)
+  end, onSearch = function(text)
     State.availQuery = ParseQuery(text)
     Refresh()
-  end, LOW_LEVEL_TOGGLE, L["Quests:"])
+  end, toggle = LOW_LEVEL_TOGGLE, caption = L["Quests:"] })
 
-  panels.near = CreateFilterPanel(f, {
+  panels.near = CreateFilterPanel(f, { filters = {
     { key = 200, label = "200 m" },
     { key = 500, label = "500 m" },
     { key = 1500, label = "1500 m" },
     { key = "zone", label = L["Current zone"] },
-  }, function() return State.nearRadius end, function(v)
+  }, current = function() return State.nearRadius end, setCurrent = function(v)
     State.nearRadius = v
     Settings().nearRadius = v
-  end, function(text)
+  end, onSearch = function(text)
     State.nearQuery = ParseQuery(text)
     Refresh()
-  end, LOW_LEVEL_TOGGLE, L["Radius:"])
+  end, toggle = LOW_LEVEL_TOGGLE, caption = L["Radius:"] })
   AddStateFilters(panels.near, { turnin = true, inprogress = true, watched = true, pinned = true, available = true, custom = true }, nearStates)
   panels.xp = CreateRoadbookPanel(f)
 

@@ -122,13 +122,6 @@ function CP.FocusStep(s)
   CP.WatchTransport(s)
 end
 
-function CP.FocusedStepIndex(plan)
-  for i, st in ipairs(plan or {}) do
-    if CP.IsStepFocused(st) then return i end
-  end
-  return nil
-end
-
 ---------------------------------------------------------------------------
 -- Saved Roadbook: once computed, the plan no longer changes until its end, or until a
 -- recompute request (duration change, Recalculate button).
@@ -215,12 +208,6 @@ Geo.frozen = nil -- { route, info } (loaded plan)
 
 function Geo.FrozenRec()
   return Geo.FrozenStore()[CharKey()]
-end
-
--- The saved Roadbook was computed for the custom quest list.
-function Geo.IsCustom()
-  local rec = Geo.FrozenRec()
-  return (rec and rec.info and rec.info.custom) and true or false
 end
 
 local function SerializeRoute(route)
@@ -587,7 +574,7 @@ function CP.ScheduleRecallCheck(delay)
     if not okA then Print(L["Roadbook update error: "] .. tostring(started)) end
     if okA and started then return end
     if not Geo.Tracking() then return end
-    local ok, err = pcall(CP.RecallCheck, false)
+    local ok, err = pcall(CP.RecallCheck)
     if not ok then Print(L["Roadbook update error: "] .. tostring(err)) end
   end)
 end
@@ -756,11 +743,6 @@ function CP.QuestRemoved(id)
   StaticPopup_Show("FQP_QUEST_ABANDONED", text, nil, { id = id, title = title })
 end
 
--- Roadbook adapted (refused with a message while a computation is running).
-function CP.ReplanSoon(msg)
-  CP.Replan(msg)
-end
-
 StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
   text = "%s",
   button1 = L["Remove from the list"],
@@ -769,7 +751,7 @@ StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
     if data then CP.SkipQuest({ task = { id = data.id, title = data.title } }) end
   end,
   OnCancel = function(_, data) -- also Escape: the quest stays planned
-    if data then CP.ReplanSoon(L["Quest abandoned, to pick up again: "] .. data.title .. ". ") end
+    if data then CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ") end
   end,
   timeout = 0,
   whileDead = true,

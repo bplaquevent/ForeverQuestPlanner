@@ -631,6 +631,7 @@ OpenQuestDetails = function(questID)
   if C_QuestLog.SetSelectedQuest then pcall(C_QuestLog.SetSelectedQuest, questID) end
   local logFrame = rawget(_G, "QuestLogFrame")
   if logFrame then
+    if InCombatLockdown() then return end -- opening a game panel from an addon is refused in combat
     if not logFrame:IsShown() then
       if ShowUIPanel then pcall(ShowUIPanel, logFrame) else logFrame:Show() end
     end
@@ -822,14 +823,6 @@ end
 function Geo.XPText(xp, approx, suffix)
   if not (xp and xp > 0) then return nil end
   return Color(K.DESC.xp, (approx and "~" or "+") .. FormatNumber(xp) .. " XP" .. (suffix or ""))
-end
-
--- Kind of step, the same labels and colors in the Roadbook and the Nearby tab.
-function Geo.KindTag(kind)
-  if kind == "take" then return Color("80c0ff", L["[Pick up]"]) end
-  if kind == "obj" then return Color("ffd100", L["[Objective]"]) end
-  if kind == "turnin" then return Color("40ff40", L["[Turn in]"]) end
-  return ""
 end
 
 local function IconLegend(withAvailable)
@@ -1185,7 +1178,7 @@ end
 
 -- Shared with the next files.
 ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSearchBox, ns.EntryHaystack = ActivePin, CONTENT_WIDTH, ClearPin, CreateScrollPanel, CreateSearchBox, EntryHaystack
-ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, OnWaypointChanged
+ns.ICON, ns.MatchWords, ns.OnWaypointChanged = ICON, MatchWords, OnWaypointChanged
 ns.ParseQuery, ns.PassStates, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinIcon, PinPoint, Plural
 ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetWatched = QuestHaystack, RenderExport, RenderList, SetWatched
 ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.IsWatched, ns.SetWatched, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, IsWatched, SetWatched, expandedCategories, journalStates

@@ -45,130 +45,164 @@ if f.RegisterUnitEvent then
 else
   pcall(f.RegisterEvent, f, "UNIT_SPELLCAST_SUCCEEDED")
 end
-f:SetScript("OnEvent", function(_, event, ...)
-  if event == "PLAYER_LOGIN" then
-    -- QuestieDB and OpenMap are required: without them (or with an unsupported version) the addon stays off.
-    local okD, err = pcall(InitDeps)
-    if not okD or err then
-      f.disabled = tostring(err)
-      f:UnregisterAllEvents()
-      Print(Color("ff4040", f.disabled))
-      return
-    end
-    Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
-    -- Options saved from the settings window or the tabs.
-    local st = Settings()
-    Geo.MigrateRoadbooks()
-    Geo.MigrateAutoRoadbook()
-    if type(st.goal) == "table" and (st.goal.kind == "time" or st.goal.kind == "level") and st.goal.value then
-      State.xpGoal = { kind = st.goal.kind, value = st.goal.value }
-    end
-    if st.nearRadius then State.nearRadius = st.nearRadius end
-    if st.availFilter then State.availFilter = st.availFilter end
-    pcall(Geo.ApplyParams)
-    local okM, errM = pcall(Geo.MapInit) -- the Roadbook on OpenMap's map (RoadbookMap.lua)
-    if not okM then Print(L["Map drawing error: "] .. tostring(errM)) end
-    CreateMinimapButton()
-    pcall(Geo.QuestLogButtonInit) -- "+ Roadbook" in the game's quest log (UI/QuestLogHook.lua)
-    C_Timer.NewTicker(K.PASS_TICK, function()
-      pcall(Geo.PassTick) -- zone passes learned on foot
-      pcall(Geo.LearnMountSpeed)
-    end)
-    C_Timer.NewTicker(3, function() pcall(CP.NearbyCheck) end) -- steps on the spot first (Roadbook.lua)
-    if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
-    ScheduleSnapshot()
-  elseif event == "PLAYER_LOGOUT" then
-    Snapshot()
-  elseif event == "SPELL_UPDATE_COOLDOWN" or event == "BAG_UPDATE_COOLDOWN" or event == "BAG_UPDATE_DELAYED"
-    or event == "SPELLS_CHANGED" then
-    Geo.recallDest = nil
-    pcall(CP.ScheduleRecallCheck, 3)
-    if event == "BAG_UPDATE_DELAYED" then pcall(CP.OnGameEvent, event) end -- source item looted
-  elseif event == "HEARTHSTONE_BOUND" then
-    -- New inn: position of the innkeeper targeted by the Roadbook, otherwise ours.
-    local s = CP.focused
-    local planned = s and s.kind == "bind" and CP.IsStepFocused(s)
-    local p = planned and s.p or PlayerPos()
-    pcall(Geo.RecordBind, p)
-    if planned then
-      C_Timer.After(0.5, function() pcall(Geo.RestampRecalls) end)
-    else
-      pcall(CP.ScheduleRecallCheck, 3) -- another bind location: the route is adapted
-    end
-    pcall(CP.OnGameEvent, event)
-    if State.mainFrame and State.mainFrame:IsShown() then C_Timer.After(0.5, Refresh) end
-  elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
-    local unit, _, spellID = ...
-    local e = K.RECALL_BY_SPELL[spellID]
-    if unit == "player" and (spellID == K.HEARTH_SPELL or e) then
-      local key = e and spellID or "hearth"
-      pcall(CP.RecallCast, key)
-      C_Timer.After(5, function()
-        if e and not e.bind then
-          pcall(Geo.RecordTeleport, spellID, PlayerPos()) -- the real arrival of this teleport
-        else
-          local name = GetBindLocation and GetBindLocation()
-          local st = Geo.BindStore()[CharKey()]
-          if not (st and st.name == name) then pcall(Geo.RecordBind, PlayerPos()) end
-        end
-        pcall(CP.OnGameEvent, "FQP_HEARTH_ARRIVED", key)
-      end)
-    end
-  elseif event == "PLAYER_CONTROL_LOST" then
-    C_Timer.After(0.5, function()
-      if UnitOnTaxi and UnitOnTaxi("player") and not f.onTaxi then
-        f.onTaxi = true
-        pcall(CP.OnGameEvent, "FQP_TAXI_TAKEOFF")
-      end
-    end)
-  elseif event == "UPDATE_FACTION" or event == "SKILL_LINES_CHANGED" then
-    if event == "SKILL_LINES_CHANGED" then
-      pcall(ns.PlayerSkills, true) -- read again: a "raise the skill" step may be done
-      pcall(CP.OnGameEvent, event)
-    end
-    if not f.rescanPending then
-      f.rescanPending = true
-      C_Timer.After(10, function()
-        f.rescanPending = nil
-        scan.dirty = true
-        if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "xp" then Refresh() end
-      end)
-    end
-  elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_ENTERING_WORLD" then
-    pcall(CP.OnGameEvent, "ZONE_CHANGED_NEW_AREA")
-  elseif event == "PLAYER_CONTROL_GAINED" then
-    if f.onTaxi then
-      f.onTaxi = nil
-      C_Timer.After(1, function() pcall(CP.OnGameEvent, "FQP_TAXI_LANDED") end)
-    end
-  elseif event == "USER_WAYPOINT_UPDATED" then
-    OnWaypointChanged()
-    C_Timer.After(0.2, function() pcall(CP.RefreshButton) end)
-    if State.mainFrame and State.mainFrame:IsShown() then C_Timer.After(0.1, Refresh) end
-  elseif event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_MOUSEOVER_UNIT" then
-    pcall(Geo.TrainerSeen, event == "PLAYER_TARGET_CHANGED" and "target" or "mouseover")
-  elseif event == "TAXIMAP_OPENED" or event == "MERCHANT_SHOW" or event == "TRAINER_SHOW"
-    or event == "BANKFRAME_OPENED" or event == "MAIL_SHOW" then
-    if event == "TRAINER_SHOW" then pcall(Geo.TrainerOpened) end
-    pcall(CP.OnGameEvent, event, ...)
+-- Event -> handler(event, ...).
+local handlers = {}
+
+local function On(events, handler)
+  for _, event in ipairs(events) do handlers[event] = handler end
+end
+
+-- The window is shown, on a tab other than `except` (if given).
+local function WindowShown(except)
+  return State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= except
+end
+
+On({ "PLAYER_LOGIN" }, function()
+  -- QuestieDB and OpenMap are required: without them (or with an unsupported version) the addon stays off.
+  local okD, err = pcall(InitDeps)
+  if not okD or err then
+    f.disabled = tostring(err)
+    f:UnregisterAllEvents()
+    Print(Color("ff4040", f.disabled))
+    return
+  end
+  Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
+  -- Options saved from the settings window or the tabs.
+  local st = Settings()
+  Geo.MigrateRoadbooks()
+  Geo.MigrateAutoRoadbook()
+  if type(st.goal) == "table" and (st.goal.kind == "time" or st.goal.kind == "level") and st.goal.value then
+    State.xpGoal = { kind = st.goal.kind, value = st.goal.value }
+  end
+  if st.nearRadius then State.nearRadius = st.nearRadius end
+  if st.availFilter then State.availFilter = st.availFilter end
+  pcall(Geo.ApplyParams)
+  local okM, errM = pcall(Geo.MapInit) -- the Roadbook on OpenMap's map (RoadbookMap.lua)
+  if not okM then Print(L["Map drawing error: "] .. tostring(errM)) end
+  CreateMinimapButton()
+  pcall(Geo.QuestLogButtonInit) -- "+ Roadbook" in the game's quest log (UI/QuestLogHook.lua)
+  C_Timer.NewTicker(K.PASS_TICK, function()
+    pcall(Geo.PassTick) -- zone passes learned on foot
+    pcall(Geo.LearnMountSpeed)
+  end)
+  C_Timer.NewTicker(3, function() pcall(CP.NearbyCheck) end) -- steps on the spot first (Roadbook.lua)
+  if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
+  ScheduleSnapshot()
+end)
+
+On({ "PLAYER_LOGOUT" }, function() Snapshot() end)
+
+On({ "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "SPELLS_CHANGED" }, function(event)
+  Geo.recallDest = nil
+  pcall(CP.ScheduleRecallCheck, 3)
+  if event == "BAG_UPDATE_DELAYED" then pcall(CP.OnGameEvent, event) end -- source item looted
+end)
+
+On({ "HEARTHSTONE_BOUND" }, function(event)
+  -- New inn: position of the innkeeper targeted by the Roadbook, otherwise ours.
+  local s = CP.focused
+  local planned = s and s.kind == "bind" and CP.IsStepFocused(s)
+  local p = planned and s.p or PlayerPos()
+  pcall(Geo.RecordBind, p)
+  if planned then
+    C_Timer.After(0.5, function() pcall(Geo.RestampRecalls) end)
   else
-    ScheduleSnapshot()
-    State.abandonIds = nil -- recommendations for abandoning computed again on the next display
-    pcall(CP.OnGameEvent, event, ...)
-    if event == "QUEST_LOG_UPDATE" and State.mainFrame and State.mainFrame:IsShown() and State.currentTab == "groups" and not f.pendingRefresh then
+    pcall(CP.ScheduleRecallCheck, 3) -- another bind location: the route is adapted
+  end
+  pcall(CP.OnGameEvent, event)
+  if WindowShown() then C_Timer.After(0.5, Refresh) end
+end)
+
+On({ "UNIT_SPELLCAST_SUCCEEDED" }, function(_, unit, _, spellID)
+  local e = K.RECALL_BY_SPELL[spellID]
+  if unit == "player" and (spellID == K.HEARTH_SPELL or e) then
+    local key = e and spellID or "hearth"
+    pcall(CP.RecallCast, key)
+    C_Timer.After(5, function()
+      if e and not e.bind then
+        pcall(Geo.RecordTeleport, spellID, PlayerPos()) -- the real arrival of this teleport
+      else
+        local name = GetBindLocation and GetBindLocation()
+        local st = Geo.BindStore()[CharKey()]
+        if not (st and st.name == name) then pcall(Geo.RecordBind, PlayerPos()) end
+      end
+      pcall(CP.OnGameEvent, "FQP_HEARTH_ARRIVED", key)
+    end)
+  end
+end)
+
+On({ "PLAYER_CONTROL_LOST" }, function()
+  C_Timer.After(0.5, function()
+    if UnitOnTaxi and UnitOnTaxi("player") and not f.onTaxi then
+      f.onTaxi = true
+      pcall(CP.OnGameEvent, "FQP_TAXI_TAKEOFF")
+    end
+  end)
+end)
+
+On({ "PLAYER_CONTROL_GAINED" }, function()
+  if f.onTaxi then
+    f.onTaxi = nil
+    C_Timer.After(1, function() pcall(CP.OnGameEvent, "FQP_TAXI_LANDED") end)
+  end
+end)
+
+On({ "UPDATE_FACTION", "SKILL_LINES_CHANGED" }, function(event)
+  if event == "SKILL_LINES_CHANGED" then
+    pcall(ns.PlayerSkills, true) -- read again: a "raise the skill" step may be done
+    pcall(CP.OnGameEvent, event)
+  end
+  if not f.rescanPending then
+    f.rescanPending = true
+    C_Timer.After(10, function()
+      f.rescanPending = nil
+      scan.dirty = true
+      if WindowShown("xp") then Refresh() end
+    end)
+  end
+end)
+
+On({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD" }, function()
+  pcall(CP.OnGameEvent, "ZONE_CHANGED_NEW_AREA")
+end)
+
+On({ "USER_WAYPOINT_UPDATED" }, function()
+  OnWaypointChanged()
+  C_Timer.After(0.2, function() pcall(CP.RefreshButton) end)
+  if WindowShown() then C_Timer.After(0.1, Refresh) end
+end)
+
+On({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }, function(event)
+  pcall(Geo.TrainerSeen, event == "PLAYER_TARGET_CHANGED" and "target" or "mouseover")
+end)
+
+On({ "TAXIMAP_OPENED", "MERCHANT_SHOW", "TRAINER_SHOW", "BANKFRAME_OPENED", "MAIL_SHOW" }, function(event, ...)
+  if event == "TRAINER_SHOW" then pcall(Geo.TrainerOpened) end
+  pcall(CP.OnGameEvent, event, ...)
+end)
+
+-- The quest log or the level changed.
+On({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "PLAYER_LEVEL_UP" }, function(event, ...)
+  ScheduleSnapshot()
+  State.abandonIds = nil -- recommendations for abandoning computed again on the next display
+  pcall(CP.OnGameEvent, event, ...)
+  if event == "QUEST_LOG_UPDATE" then
+    if State.mainFrame and State.mainFrame:IsShown() and State.currentTab == "groups" and not f.pendingRefresh then
       f.pendingRefresh = true
       C_Timer.After(1, function()
         f.pendingRefresh = nil
         Refresh()
       end)
     end
-    if event ~= "QUEST_LOG_UPDATE" then
-      scan.dirty = true
-      if State.mainFrame and State.mainFrame:IsShown() and State.currentTab ~= "export" then
-        C_Timer.After(0.5, Refresh)
-      end
-    end
+    return
   end
+  scan.dirty = true
+  if WindowShown("export") then C_Timer.After(0.5, Refresh) end
+end)
+
+f:SetScript("OnEvent", function(_, event, ...)
+  local handler = handlers[event]
+  if handler then handler(event, ...) end
 end)
 
 ---------------------------------------------------------------------------
