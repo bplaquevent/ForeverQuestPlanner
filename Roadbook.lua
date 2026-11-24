@@ -1736,6 +1736,8 @@ end
 -- Service shortcuts under the Objective button: vendor, repair, class trainer
 ---------------------------------------------------------------------------
 K.SERVICE_ICON_SIZE = 26
+-- While the Roadbook is computed, what would change it is greyed (consulting stays): why.
+K.LOCKED_TIP = L["The Roadbook is being computed: it can be changed when it is ready."]
 
 -- Click: the nearest NPC of the service becomes the priority objective and the Roadbook is
 -- planned again (transport steps to reach it, then the rest). A second click on the pending
@@ -1779,13 +1781,15 @@ function CP.ServiceClick(kind)
   end
 end
 
--- Highlight of the pending service.
+-- Highlight of the pending service; icons greyed while the Roadbook is computed.
 function CP.ServiceBarSync()
   local bar = CP.serviceBar
   if not bar then return end
   local cur = Geo.ServicePending()
   for _, ib in ipairs(bar.buttons) do
     ib.glow:SetShown(cur ~= nil and cur.kind == ib.key)
+    ib.icon:SetDesaturated(State.computing and true or false)
+    ib.icon:SetAlpha(State.computing and 0.5 or 1)
   end
 end
 
@@ -1814,7 +1818,7 @@ function CP.CreateServiceBar(b)
     hl:SetAllPoints(tex)
     hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
     hl:SetBlendMode("ADD")
-    ib.key, ib.glow = def.key, glow
+    ib.key, ib.glow, ib.icon = def.key, glow, tex
     ib:RegisterForClicks("LeftButtonUp")
     ib:SetScript("OnClick", function() CP.ServiceClick(def.key) end)
     ib:SetScript("OnEnter", function(self)
@@ -1827,8 +1831,12 @@ function CP.CreateServiceBar(b)
         GameTooltip:AddLine(L["No such place found."], 1, 0.4, 0.4)
       end
       local cur = Geo.ServicePending()
-      GameTooltip:AddLine((cur and cur.kind == def.key) and L["Click: cancel this priority"]
-        or L["Click: go there first, then carry on with the Roadbook"], 0.75, 0.75, 0.75)
+      if State.computing then
+        GameTooltip:AddLine(K.LOCKED_TIP, 1, 0.82, 0, true)
+      else
+        GameTooltip:AddLine((cur and cur.kind == def.key) and L["Click: cancel this priority"]
+          or L["Click: go there first, then carry on with the Roadbook"], 0.75, 0.75, 0.75)
+      end
       GameTooltip:Show()
     end)
     ib:SetScript("OnLeave", function() GameTooltip:Hide() end)

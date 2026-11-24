@@ -145,7 +145,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   local sep = Color("777777", " - ")
   local value = function(t) return Color("dddddd", t) end
   local lines = {}
-  if State.computing then lines[1] = Color("ffd100", L["Recomputing…"]) end
+  if State.computing then lines[1] = Color("ffd100", L["Recomputing… the Roadbook cannot be changed"]) end
   -- Size and progress.
   local total = #route - 1
   local finished = total > 0 and doneCount >= total
@@ -262,12 +262,16 @@ local function RowClick(self, button)
     GameTooltip:Hide()
     MenuUtil.CreateContextMenu(self, function(_, root)
       root:CreateTitle(st.task and st.task.title or L["Roadbook step"])
+      local locked = State.computing -- every action of a step changes the Roadbook
+      if locked then root:CreateTitle(Color("ffd100", L["Recomputing…"])) end
       for _, a in ipairs(acts) do
         local d = root:CreateButton(a[1], a[2])
+        if locked then d:SetEnabled(false) end
         if d and d.SetTooltip then
           d:SetTooltip(function(tip)
             tip:AddLine(a[1], 1, 1, 1)
             tip:AddLine(a[3], 0.85, 0.85, 0.85, true)
+            if locked then tip:AddLine(K.LOCKED_TIP, 1, 0.82, 0, true) end
           end)
         end
       end
