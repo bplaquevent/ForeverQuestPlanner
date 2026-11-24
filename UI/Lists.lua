@@ -12,6 +12,7 @@ local LogRecord = ns.LogRecord
 local LogQuests = ns.LogQuests
 local LogEntry = ns.LogEntry
 local IsQuestComplete = ns.IsQuestComplete
+local Normalize = ns.Normalize
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -1059,25 +1060,6 @@ function Geo.CustomBulkButtons(list)
       tip = { L["Remove every quest of this category from the Roadbook list"], K.CUSTOM_TIP } }
 end
 
----------------------------------------------------------------------------
--- Search (accent and case insensitive, every word must be present)
----------------------------------------------------------------------------
-local ACCENTS = {
-  ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["á"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a",
-  ["ç"] = "c", ["Ç"] = "c",
-  ["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e", ["É"] = "e", ["È"] = "e", ["Ê"] = "e", ["Ë"] = "e",
-  ["î"] = "i", ["ï"] = "i", ["í"] = "i", ["Î"] = "i", ["Ï"] = "i",
-  ["ô"] = "o", ["ö"] = "o", ["ó"] = "o", ["Ô"] = "o", ["Ö"] = "o",
-  ["ù"] = "u", ["û"] = "u", ["ü"] = "u", ["ú"] = "u", ["Ù"] = "u", ["Û"] = "u", ["Ü"] = "u",
-  ["œ"] = "oe", ["Œ"] = "oe", ["’"] = "'",
-}
-
-local function Normalize(s)
-  s = tostring(s or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-  s = s:gsub("[\1-\127\194-\244][\128-\191]*", function(c) return ACCENTS[c] or c end)
-  return s:lower()
-end
-
 local function ParseQuery(text)
   local words = {}
   for w in Normalize(text):gmatch("%S+") do words[#words + 1] = w end
@@ -1203,7 +1185,7 @@ end
 
 -- Shared with the next files.
 ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSearchBox, ns.EntryHaystack = ActivePin, CONTENT_WIDTH, ClearPin, CreateScrollPanel, CreateSearchBox, EntryHaystack
-ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.Normalize, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, Normalize, OnWaypointChanged
+ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, OnWaypointChanged
 ns.ParseQuery, ns.PassStates, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinIcon, PinPoint, Plural
 ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetWatched = QuestHaystack, RenderExport, RenderList, SetWatched
 ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.IsWatched, ns.SetWatched, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, IsWatched, SetWatched, expandedCategories, journalStates

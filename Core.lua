@@ -145,6 +145,25 @@ end
 
 local function Color(hex, s) return "|cff" .. hex .. tostring(s) .. "|r" end
 
+---------------------------------------------------------------------------
+-- Search (accent and case insensitive, every word must be present)
+---------------------------------------------------------------------------
+local ACCENTS = {
+  ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["á"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a",
+  ["ç"] = "c", ["Ç"] = "c",
+  ["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e", ["É"] = "e", ["È"] = "e", ["Ê"] = "e", ["Ë"] = "e",
+  ["î"] = "i", ["ï"] = "i", ["í"] = "i", ["Î"] = "i", ["Ï"] = "i",
+  ["ô"] = "o", ["ö"] = "o", ["ó"] = "o", ["Ô"] = "o", ["Ö"] = "o",
+  ["ù"] = "u", ["û"] = "u", ["ü"] = "u", ["ú"] = "u", ["Ù"] = "u", ["Û"] = "u", ["Ü"] = "u",
+  ["œ"] = "oe", ["Œ"] = "oe", ["’"] = "'",
+}
+
+local function Normalize(s)
+  s = tostring(s or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+  s = s:gsub("[\1-\127\194-\244][\128-\191]*", function(c) return ACCENTS[c] or c end)
+  return s:lower()
+end
+
 -- Resolves WoW plural codes "|4singular:plural;" and strips color codes.
 local function CleanText(text, plural)
   if not text then return nil end
@@ -1045,3 +1064,4 @@ ns.QuestCategory = QuestCategory
 ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime
 ns.IsQuestComplete = IsQuestComplete
 ns.SkillName = SkillName
+ns.Normalize = Normalize
