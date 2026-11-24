@@ -5,6 +5,7 @@ local ADDON_NAME, ns = ...
 local ChainInfo, ChainText, CharKey, Color, FormatNumber, Geo = ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color, ns.FormatNumber, ns.Geo
 local GeoReady, IsClassMeta, IsCompleted, IsInLog, K, L, Nearest = ns.GeoReady, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
 local PlayerPos, PointText, Print, QDB, QGet, QuestMeta = ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta
+local AllPrereqs = ns.AllPrereqs
 local QuestTargets, Refresh, RemainingTargets, Settings, Snapshot, State = ns.QuestTargets, ns.Refresh, ns.RemainingTargets, ns.Settings, ns.Snapshot, ns.State
 local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.TurnInText, ns.StartPoints, ns.EntityPoints
 
@@ -881,12 +882,7 @@ end
 -- isClass, isProf, dungeon, noTypes (types left out, shown apart with Geo.QuestTypesText) }.
 -- A quest that follows another one (a quest prerequisite in QuestieDB).
 function Geo.IsFollowUp(id)
-  if not id then return false end
-  for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
-    local t = QGet(QDB.Quest, id, key)
-    if type(t) == "table" and #t > 0 then return true end
-  end
-  return false
+  return id ~= nil and #AllPrereqs(id) > 0
 end
 
 function Geo.QuestBadges(o)
@@ -1107,26 +1103,35 @@ end
 
 -- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.
 K.CUSTOM_TIP = "Roadbook list: the quests the Roadbook does, along the fastest route."
+
+-- Tooltip (title, text) of an add / remove button of the quest id.
+function Geo.CustomTip(id)
+  return id and Geo.InCustom(id) and L["Remove from the Roadbook list"] or L["Add to the Roadbook list"], L[K.CUSTOM_TIP]
+end
+
+-- Adds the quest to the list or removes it; a quest with follow-ups asks whether its whole chain goes with it.
+function Geo.CustomToggle(id, title, level)
+  if not id or Geo.ListLocked() then return end
+  local name = title or QGet(QDB.Quest, id, "name") or "?"
+  local chain = Geo.ChainQuests(id)
+  if Geo.InCustom(id) then
+    local inChain = 0
+    for _, c in ipairs(chain) do if Geo.InCustom(c.id) then inChain = inChain + 1 end end
+    if inChain == 0 then Geo.CustomRemove(id) return end
+    StaticPopup_Show("FQP_REMOVE_CHAIN", name, inChain, { id = id })
+  elseif #chain == 0 then
+    Geo.CustomAdd(id, title, level)
+  else
+    StaticPopup_Show("FQP_ADD_CHAIN", name, #chain, { id = id, title = title, level = level })
+  end
+end
+
 function Geo.CustomButton(id, title, level)
   if not id then return nil end
-  local inList = Geo.InCustom(id)
-  return { text = inList and L["Remove"] or L["Add"],
-    tip = { inList and L["Remove from the Roadbook list"] or L["Add to the Roadbook list"], L[K.CUSTOM_TIP] },
+  return { text = Geo.InCustom(id) and L["Remove"] or L["Add"],
+    tip = { Geo.CustomTip(id) },
     disabled = Geo.computing and true or nil, -- the list is locked while the Roadbook is computed
-    fn = function()
-      if Geo.ListLocked() then return end
-      local chain = Geo.ChainQuests(id)
-      if Geo.InCustom(id) then
-        local inChain = 0
-        for _, c in ipairs(chain) do if Geo.InCustom(c.id) then inChain = inChain + 1 end end
-        if inChain == 0 then Geo.CustomRemove(id) return end
-        StaticPopup_Show("FQP_REMOVE_CHAIN", title or "?", inChain, { id = id })
-      elseif #chain == 0 then
-        Geo.CustomAdd(id, title, level)
-      else
-        StaticPopup_Show("FQP_ADD_CHAIN", title or "?", #chain, { id = id, title = title, level = level })
-      end
-    end }
+    fn = function() Geo.CustomToggle(id, title, level) end }
 end
 
 -- A quest with follow-ups: added or removed alone, or with its whole chain (Geo.CustomAddChain / CustomRemoveChain).

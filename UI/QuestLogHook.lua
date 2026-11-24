@@ -4,7 +4,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local Geo, K, L = ns.Geo, ns.K, ns.L
+local Geo, L = ns.Geo, ns.L
 
 local buttons = {} -- host frame -> button
 local hooked = {}  -- what is already hooked
@@ -33,12 +33,6 @@ local function LogSelectedQuest()
   end
 end
 
-local function Toggle(id)
-  if not id or Geo.ListLocked() then return end
-  if Geo.InCustom(id) then Geo.CustomRemove(id) else Geo.CustomAdd(id) end
-  Geo.QuestLogButtonSync()
-end
-
 -- host: frame the button belongs to; getQuest: the quest it acts on; place(button): its anchor.
 local function CreateButton(host, getQuest, place)
   local b = CreateFrame("Button", nil, host, "UIPanelButtonTemplate")
@@ -46,12 +40,12 @@ local function CreateButton(host, getQuest, place)
   b:SetFrameLevel(host:GetFrameLevel() + 10)
   place(b)
   b.getQuest = getQuest
-  b:SetScript("OnClick", function(self) Toggle(self.getQuest()) end)
+  b:SetScript("OnClick", function(self) Geo.CustomToggle(self.getQuest()) end)
   b:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    local id = self.getQuest()
-    GameTooltip:AddLine(id and Geo.InCustom(id) and L["Remove from the Roadbook list"] or L["Add to the Roadbook list"])
-    GameTooltip:AddLine(L[K.CUSTOM_TIP], 0.8, 0.8, 0.8, true)
+    local title, text = Geo.CustomTip(self.getQuest())
+    GameTooltip:AddLine(title)
+    GameTooltip:AddLine(text, 0.8, 0.8, 0.8, true)
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -134,8 +128,20 @@ local function Install()
   end
 end
 
-Install()
-local events = CreateFrame("Frame")
-events:RegisterEvent("PLAYER_LOGIN")
-events:RegisterEvent("ADDON_LOADED")
-events:SetScript("OnEvent", function() Install() end)
+-- Called at login once the dependencies are there (Events.lua): nothing is hooked while the addon is off.
+function Geo.QuestLogButtonInit()
+  Install()
+  local events = CreateFrame("Frame")
+  local function Wait()
+    if hooked.details and hooked.log then
+      events:UnregisterAllEvents()
+    else
+      events:RegisterEvent("ADDON_LOADED")
+    end
+  end
+  events:SetScript("OnEvent", function()
+    Install()
+    Wait()
+  end)
+  Wait()
+end

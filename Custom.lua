@@ -6,6 +6,7 @@ local AreaName, BuildNetwork, BuildScanContext, CharKey, DBXP = ns.AreaName, ns.
 local Geo, GiverText, HasBit, IsCompleted, IsInLog, K = ns.Geo, ns.GiverText, ns.HasBit, ns.IsCompleted, ns.IsInLog, ns.K
 local L, MakeStops, MakeTravel, PlayerPos, Print, QDB = ns.L, ns.MakeStops, ns.MakeTravel, ns.PlayerPos, ns.Print, ns.QDB
 local QGet, QuestTargets, RemainingTargets, Settings, TravelSpeed = ns.QGet, ns.QuestTargets, ns.RemainingTargets, ns.Settings, ns.TravelSpeed
+local QuestPrereqs = ns.QuestPrereqs
 local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDoubts
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
@@ -143,14 +144,11 @@ function Geo.MissingPrereqs(id, out, seen, depth)
     Geo.MissingPrereqs(q, out, seen, depth + 1)
     out[#out + 1] = q
   end
-  local group = QGet(QDB.Quest, id, "preQuestGroup")
-  if type(group) == "table" then
-    for _, p in ipairs(group) do
-      if not (IsCompleted(p) or seen[p]) then add(p) end
-    end
+  local group, single = QuestPrereqs(id)
+  for _, p in ipairs(group) do
+    if not (IsCompleted(p) or seen[p]) then add(p) end
   end
-  local single = QGet(QDB.Quest, id, "preQuestSingle")
-  if type(single) == "table" and #single > 0 then
+  if #single > 0 then
     local ok = false
     for _, p in ipairs(single) do
       if IsCompleted(p) or seen[p] then ok = true break end
@@ -374,15 +372,15 @@ function Geo.ChainLevelCheck(ids)
   end
   local quests = {}
   for _, q in ipairs(order) do
-    local pres = {}
-    for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
-      local lst = QGet(QDB.Quest, q, key)
-      if type(lst) == "table" then
-        for _, p in ipairs(lst) do if set[p] and p ~= q then pres[#pres + 1] = p end end
-      end
+    local all, any = QuestPrereqs(q)
+    local pres, anyPres, met = {}, {}, false
+    for _, p in ipairs(all) do if set[p] and p ~= q then pres[#pres + 1] = p end end
+    for _, p in ipairs(any) do
+      if IsCompleted(p) then met = true
+      elseif set[p] and p ~= q then anyPres[#anyPres + 1] = p end
     end
     quests[#quests + 1] = { id = q, row = QDB.xp[q], reqLevel = QGet(QDB.Quest, q, "requiredLevel") or 0,
-      pres = pres, inLog = IsInLog(q) }
+      pres = pres, anyPres = not met and #anyPres > 0 and anyPres or nil, inLog = IsInLog(q) }
   end
   local needed = {}
   for lv = 1, Geo.MaxLevel() do needed[lv] = Geo.XPNeeded(lv) end

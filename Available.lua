@@ -5,6 +5,7 @@ local ADDON_NAME, ns = ...
 local AreaName, DBXP, EVENT_SORTS, GiverText, HasBit, IsClassMeta = ns.AreaName, ns.DBXP, ns.EVENT_SORTS, ns.GiverText, ns.HasBit, ns.IsClassMeta
 local IsCompleted, IsInLog, IsProfMeta, K, L, NextQuests = ns.IsCompleted, ns.IsInLog, ns.IsProfMeta, ns.K, ns.L, ns.NextQuests
 local PROFESSION_SKILLS, PlayerBits, PlayerSkills, QDB, QGet, QuestMeta = ns.PROFESSION_SKILLS, ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta
+local QuestPrereqs = ns.QuestPrereqs
 local State, TrivialRange = ns.State, ns.TrivialRange
 
 ---------------------------------------------------------------------------
@@ -197,17 +198,14 @@ local function CheckAvailable(id, ctx)
   local sort = QGet(Q, id, "zoneOrSort") or 0
   if EVENT_SORTS[sort] then return nil end
 
-  local group = QGet(Q, id, "preQuestGroup")
-  if type(group) == "table" then
-    for _, p in ipairs(group) do
-      if not done(p) then
-        missing.texts[#missing.texts + 1] = questName(p)
-        missing.quests[#missing.quests + 1] = { p }
-      end
+  local group, single = QuestPrereqs(id)
+  for _, p in ipairs(group) do
+    if not done(p) then
+      missing.texts[#missing.texts + 1] = questName(p)
+      missing.quests[#missing.quests + 1] = { p }
     end
   end
-  local single = QGet(Q, id, "preQuestSingle")
-  if type(single) == "table" and #single > 0 then
+  if #single > 0 then
     local ok = false
     for _, p in ipairs(single) do if done(p) then ok = true break end end
     if not ok then

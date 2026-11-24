@@ -8,6 +8,7 @@
 local ADDON_NAME, ns = ...
 local BuildScanContext, BuildTasks, CharKey, Geo, K, L = ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.Geo, ns.K, ns.L
 local OM, PlayerPos, Print, QDB, QGet, Settings = ns.OM, ns.PlayerPos, ns.Print, ns.QDB, ns.QGet, ns.Settings
+local AllPrereqs = ns.AllPrereqs
 local StartScan, State, TravelSpeed, UnitTime, scan = ns.StartScan, ns.State, ns.TravelSpeed, ns.UnitTime, ns.scan
 
 local Pb = {}
@@ -124,13 +125,8 @@ function Geo.CustomPlanSteps(pos, plevel, near)
   if #tasks == 0 and not svc then return nil, L["No quest of the list can be located."], unplanned end
   for _, task in ipairs(tasks) do
     task.pres = {}
-    for _, key in ipairs({ "preQuestGroup", "preQuestSingle" }) do
-      local lst = QGet(QDB.Quest, task.id, key)
-      if type(lst) == "table" then
-        for _, p in ipairs(lst) do
-          if byId[p] and byId[p] ~= task then task.pres[#task.pres + 1] = byId[p] end
-        end
-      end
+    for _, p in ipairs(AllPrereqs(task.id)) do
+      if byId[p] and byId[p] ~= task then task.pres[#task.pres + 1] = byId[p] end
     end
   end
   local dungeons = Geo.GroupDungeons(tasks)

@@ -280,6 +280,22 @@ local function PlayerBits()
   return classBit, raceBit
 end
 
+-- Prerequisites of a quest in QuestieDB (its types, Types/Meta.t.lua): every one of preQuestGroup is
+-- required, one of the preQuestSingle alternatives is enough. Returns all, any (empty when none).
+local function QuestPrereqs(id)
+  local all, any = QGet(QDB.Quest, id, "preQuestGroup"), QGet(QDB.Quest, id, "preQuestSingle")
+  return type(all) == "table" and all or {}, type(any) == "table" and any or {}
+end
+
+-- Every prerequisite of both kinds, in one list (order of the steps, "follows a quest").
+local function AllPrereqs(id)
+  local all, any = QuestPrereqs(id)
+  local out = {}
+  for _, p in ipairs(all) do out[#out + 1] = p end
+  for _, p in ipairs(any) do out[#out + 1] = p end
+  return out
+end
+
 -- Static quest data, cached.
 local metaCache = {}
 local function QuestMeta(id)
@@ -915,3 +931,4 @@ ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PROFESSION_SKILLS, ns.PlayerBits = K
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.SLOTS, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = SLOTS, ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
 ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
+ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
