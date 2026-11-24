@@ -327,11 +327,12 @@ local function RenderAvailable()
     for _, e in ipairs(g.list) do
       local D = K.DESC
       local text = "  " .. StateIcons(e.id) ..
-        Geo.QuestTitle(e.name, { id = e.id, level = e.level, isClass = e.isClass, isProf = e.isProf, dungeon = e.dungeon }) ..
+        Geo.QuestTitle(e.name, { id = e.id, level = e.level, isClass = e.isClass, isProf = e.isProf, dungeon = e.dungeon, doubts = e.doubts }) ..
         Geo.DescLine(e.starter and Color(D.action, L["Given by: "] .. e.starter) or nil) ..
         Geo.DescLine(Geo.XPText(e.xp, true), Color(D.meta, L["requires level "] .. e.reqLevel),
           e.lowLevel and Color(D.meta, L["low level"]) or nil, e.repeatable and Color(D.meta, L["repeatable"]) or nil,
           e.opensChain and Color(D.chain, L["opens a chain"]) or nil)
+      text = text .. Geo.DoubtLine(e.doubts)
       if e.repMissing then text = text .. Geo.DescLine(Color(D.bad, e.repMissing)) end
       if e.missing then
         text = text .. Geo.DescLine(Color(D.bad, L["Missing prerequisites: "] .. table.concat(e.missing.texts, ", ")))

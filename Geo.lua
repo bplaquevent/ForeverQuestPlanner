@@ -192,9 +192,29 @@ local function EntityPoints(kind, id)
   return pts
 end
 
+-- Quest started by an item that an NPC or an object is listed with too (QuestieDB data conflict).
+local function ItemAndGiver(givers)
+  return type(givers) == "table" and type(givers[3]) == "table" and #givers[3] > 0
+    and (#(givers[1] or {}) > 0 or #(givers[2] or {}) > 0)
+end
+
 local function GiverPoints(givers)
   local pts = {}
   if type(givers) ~= "table" then return pts end
+  -- The item gives the quest: where it drops (monsters, objects), not the giver listed with it.
+  if ItemAndGiver(givers) then
+    for _, itemId in ipairs(givers[3]) do
+      local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
+      for i = 1, math.min(#npcs, 6) do
+        for _, p in ipairs(EntityPoints("npc", npcs[i])) do pts[#pts + 1] = p end
+      end
+      local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
+      for i = 1, math.min(#objs, 6) do
+        for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
+      end
+    end
+    if #pts > 0 then return pts end
+  end
   for _, id in ipairs(givers[1] or {}) do
     for _, p in ipairs(EntityPoints("npc", id)) do pts[#pts + 1] = p end
   end
@@ -220,7 +240,7 @@ K.START_MERGE = 150     -- yards: spawns this close are the same place
 K.START_PLACES_MAX = 5  -- places checked, at most (the nearest to `from`)
 function Geo.StartPlaces(id, from)
   local by = QGet(QDB.Quest, id, "startedBy")
-  if type(by) ~= "table" or #(by[2] or {}) > 0 or #(by[1] or {}) ~= 1 then return nil end
+  if type(by) ~= "table" or #(by[2] or {}) > 0 or #(by[1] or {}) ~= 1 or ItemAndGiver(by) then return nil end
   Geo.startPlaces = Geo.startPlaces or {}
   local places = Geo.startPlaces[id]
   if places == nil then

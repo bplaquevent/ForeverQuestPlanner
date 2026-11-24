@@ -905,6 +905,7 @@ function Geo.QuestBadges(o)
   end
   if isClass then parts[#parts + 1] = L["Class"] end
   if o.isProf then parts[#parts + 1] = L["Profession"] end
+  if o.doubts then parts[#parts + 1] = Color(K.DESC.warn, L["Doubtful"]) end
   local types = o.noTypes and {} or Geo.QuestTypes(id)
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = K.QUEST_TYPE_LABEL[types[i]] end
   local badge = Geo.LevelBadge(o.level)
@@ -941,6 +942,12 @@ function Geo.DescLine(...)
   end
   if #kept == 0 then return "" end
   return K.DESC_LINE .. table.concat(kept, Color(K.DESC.meta, K.DESC_SEP))
+end
+
+-- Warning line of a quest whose QuestieDB data contradict each other (ns.QuestDoubts), or "".
+function Geo.DoubtLine(doubts)
+  if not doubts then return "" end
+  return Geo.DescLine(Color(K.DESC.warn, L["QuestieDB data in doubt: "] .. table.concat(doubts, " ; ")))
 end
 
 -- XP of a quest or a step: "+1 200 XP" (exact) or "~1 200 XP" (estimate).
