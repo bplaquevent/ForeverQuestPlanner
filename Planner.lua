@@ -6,6 +6,7 @@ local AllInstance, AreaName, ChainInfo, CharKey, CheckAvailable, DBXP = ns.AllIn
 local Dist, EntityPoints, EquippedItemLevel, Geo, GetItemInfoCompat, HasBit = ns.Dist, ns.EntityPoints, ns.EquippedItemLevel, ns.Geo, ns.GetItemInfoCompat, ns.HasBit
 local IsClassMeta, IsCompleted, K, L, Nearest, NextQuests = ns.IsClassMeta, ns.IsCompleted, ns.K, ns.L, ns.Nearest, ns.NextQuests
 local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta, ns.QuestTargets
+local AllPrereqs = ns.AllPrereqs
 local Refresh, RemainingTargets, Route, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Route, ns.SLOTS, ns.Settings, ns.StartPoints
 local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
@@ -538,14 +539,9 @@ function Geo.PreIndex()
       ids = list
     end
     for n, id in ipairs(ids) do
-      for _, key in ipairs({ "preQuestSingle", "preQuestGroup" }) do
-        local lst = QGet(QDB.Quest, id, key)
-        if type(lst) == "table" then
-          for _, p in ipairs(lst) do
-            pre[p] = pre[p] or {}
-            table.insert(pre[p], id)
-          end
-        end
+      for _, p in ipairs(AllPrereqs(id)) do
+        pre[p] = pre[p] or {}
+        table.insert(pre[p], id)
       end
       if n % 400 == 0 then Geo.Yield() end
     end

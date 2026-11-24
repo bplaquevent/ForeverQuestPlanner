@@ -558,6 +558,12 @@ function S.LevelReach(player, quests)
       for _, p in ipairs(q.pres or {}) do
         if not done[p] then ready = false end
       end
+      if ready and q.anyPres then -- one of the alternatives is enough
+        ready = false
+        for _, p in ipairs(q.anyPres) do
+          if done[p] then ready = true break end
+        end
+      end
       if ready and (not pick or (q.reqLevel or 0) < (left[pick].reqLevel or 0)) then pick = i end
     end
     if not pick then break end

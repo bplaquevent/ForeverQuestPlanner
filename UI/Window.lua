@@ -449,7 +449,7 @@ local function SelectTab(name)
   if name == "near" and C_Timer.NewTicker then
     nearTicker = C_Timer.NewTicker(3, function()
       if State.mainFrame and State.mainFrame:IsShown() and State.currentTab == "near" then
-        RenderNear()
+        Refresh()
       else
         StopNearTicker()
       end

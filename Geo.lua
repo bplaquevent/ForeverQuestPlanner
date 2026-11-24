@@ -1219,7 +1219,7 @@ local function RemainingTargets(q, t)
     -- completes once the player has spoken to the turn-in NPC). Planned once every listed objective is done.
     if not match and tg.kind == "talk" and #objs > 0 then
       if not allDone then count = 0 end
-    elseif match == -1 then    elseif match == -1 then
+    elseif match == -1 then
       if Geo.ItemCount(tg.sourceItem) > 0 then count = 0 end
     elseif match then
       local o = objs[match]
