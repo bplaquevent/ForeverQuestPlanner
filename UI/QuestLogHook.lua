@@ -43,11 +43,7 @@ local function CreateButton(host, getQuest, place)
   b.getQuest = getQuest
   b:SetScript("OnClick", function(self) Geo.CustomToggle(self.getQuest()) end)
   b:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    local title, text = Geo.CustomTip(self.getQuest())
-    GameTooltip:AddLine(title)
-    GameTooltip:AddLine(text, 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    Geo.ShowTip(self, Geo.CustomTip(self.getQuest()))
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
   buttons[host] = b

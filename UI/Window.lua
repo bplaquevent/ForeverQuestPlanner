@@ -265,8 +265,8 @@ local STATE_DEFS = {
   { key = "watched", label = L["Tracked"], icon = function() return ICON.watched end },
   { key = "pinned", label = L["Pin"], icon = function() return PinIcon() end },
   { key = "available", label = L["To pick up"], icon = function() return ICON.available end },
-  { key = "abandon", label = L["To abandon"], icon = function() return "|TInterface\\RaidFrame\\ReadyCheck-NotReady:16:16|t" end },
-  { key = "custom", label = L["Roadbook list"], icon = function() return "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:16:16|t" end },
+  { key = "abandon", label = L["To abandon"], icon = function() return ICON.abandon end },
+  { key = "custom", label = L["Roadbook list"], icon = function() return ICON.custom end },
 }
 
 -- Filter box, under the search box (same frame as the goal box of the automatic Roadbook): one row

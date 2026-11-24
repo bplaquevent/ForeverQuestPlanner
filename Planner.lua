@@ -160,8 +160,7 @@ local function CurrentMapSet()
 end
 
 local function PointInMaps(p, set)
-  if not p or not p.area then return false end
-  local ui = Geo.areaToUi[p.area] or (Geo.parent[p.area] and Geo.areaToUi[Geo.parent[p.area]])
+  local ui = p and Geo.AreaUi(p.area)
   return ui and set[ui] or false
 end
 
@@ -1217,3 +1216,4 @@ end
 
 -- Shared with the next files.
 ns.BuildTasks, ns.CurrentMapSet, ns.MakeStops, ns.NearItems = BuildTasks, CurrentMapSet, MakeStops, NearItems
+ns.PointInMaps = PointInMaps
