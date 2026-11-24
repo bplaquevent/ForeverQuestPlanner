@@ -421,9 +421,32 @@ local function PlaceText(name, zone, x, y)
   return s
 end
 
--- givers = {npcIds?, objectIds?, itemIds?}
+-- Where an item that starts a quest drops: monster or object, with its zone (name, zone), or nil.
+local function ItemSource(itemId)
+  local drops = QGet(QDB.Item, itemId, "npcDrops")
+  local entity, id = QDB.Npc, type(drops) == "table" and drops[1] or nil
+  if not id then
+    drops = QGet(QDB.Item, itemId, "objectDrops")
+    entity, id = QDB.Object, type(drops) == "table" and drops[1] or nil
+  end
+  if not id then return nil, nil end
+  local name, zone = SpawnPlace(entity, id)
+  return name, zone
+end
+
+-- givers = {npcIds?, objectIds?, itemIds?}. An item that starts the quest comes first: it is what
+-- gives it, with where it drops (a quest also listing an NPC is a data conflict, the item wins).
 local function GiverText(givers)
   if type(givers) ~= "table" then return nil, nil end
+  if type(givers[3]) == "table" and givers[3][1] then
+    local name = QGet(QDB.Item, givers[3][1], "name")
+    if name then
+      local src, zone = ItemSource(givers[3][1])
+      local also = (type(givers[1]) == "table" and givers[1][1]) or (type(givers[2]) == "table" and givers[2][1])
+      -- The zone of the quest follows the drop only when an NPC was listed too (it was that NPC's zone).
+      return L["object: "] .. name .. (src and (" (" .. src .. (zone and (" - " .. zone) or "") .. ")") or ""), also and zone or nil
+    end
+  end
   if type(givers[1]) == "table" and givers[1][1] then
     local name, zone, x, y = SpawnPlace(QDB.Npc, givers[1][1])
     return PlaceText(name, zone, x, y), zone
@@ -431,10 +454,6 @@ local function GiverText(givers)
   if type(givers[2]) == "table" and givers[2][1] then
     local name, zone, x, y = SpawnPlace(QDB.Object, givers[2][1])
     return PlaceText(name, zone, x, y), zone
-  end
-  if type(givers[3]) == "table" and givers[3][1] then
-    local name = QGet(QDB.Item, givers[3][1], "name")
-    return name and (L["object: "] .. name) or nil, nil
   end
   return nil, nil
 end

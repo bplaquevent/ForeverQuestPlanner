@@ -6,6 +6,7 @@ local AreaName, BuildNetwork, BuildScanContext, CharKey, DBXP = ns.AreaName, ns.
 local Geo, GiverText, HasBit, IsCompleted, IsInLog, K = ns.Geo, ns.GiverText, ns.HasBit, ns.IsCompleted, ns.IsInLog, ns.K
 local L, MakeStops, MakeTravel, PlayerPos, Print, QDB = ns.L, ns.MakeStops, ns.MakeTravel, ns.PlayerPos, ns.Print, ns.QDB
 local QGet, QuestTargets, RemainingTargets, Settings, TravelSpeed = ns.QGet, ns.QuestTargets, ns.RemainingTargets, ns.Settings, ns.TravelSpeed
+local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDoubts
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.MAX_PREREQ_DEPTH = 15   -- safety: prerequisite chain added with a quest
@@ -95,7 +96,7 @@ function Geo.MigrateAutoRoadbook()
     if s.kind == "take" or s.kind == "obj" or s.kind == "turnin" then add(t.id, t.title, t.level) end
     for _, m in ipairs(s.members or {}) do add(m.id, m.title, m.level) end
   end
-  Geo.CustomRec().list = list
+  Geo.CustomSetList(list, true)
   rec.info.custom = true
   rec.info.goal, rec.info.goalStage, rec.info.generated, rec.excluded = nil, nil, nil, nil
 end
@@ -172,6 +173,39 @@ function Geo.QuestLevelOf(id)
   return (type(lvl) == "number" and lvl > 0) and lvl or nil
 end
 
+-- The only place that puts quests into the list: the new list replaces the old one. A quest that is new in
+-- it and whose QuestieDB data contradict each other (QuestDoubts) is announced, once for everything added
+-- by the same action (one quest and its prerequisites, "Add all", a chain, a generated Roadbook).
+-- silent: no announcement (lists rebuilt, not added to).
+function Geo.CustomSetList(list, silent)
+  local rec = Geo.CustomRec()
+  if not silent then
+    local old = {}
+    for _, e in ipairs(rec.list) do old[e.id] = true end
+    local faction = PlayerFaction()
+    for _, e in ipairs(list) do
+      local why = not old[e.id] and QuestDoubts(e.id, faction)
+      if why then
+        Geo.doubtPending = Geo.doubtPending or {}
+        Geo.doubtPending[#Geo.doubtPending + 1] = (e.title or QGet(QDB.Quest, e.id, "name") or ("#" .. e.id)) ..
+          " (" .. table.concat(why, " ; ") .. ")"
+      end
+    end
+    if Geo.doubtPending and not Geo.doubtScheduled then
+      Geo.doubtScheduled = true
+      C_Timer.After(0, function()
+        local pending = Geo.doubtPending
+        Geo.doubtPending, Geo.doubtScheduled = nil, nil
+        if pending then
+          Print(Color(K.DESC and K.DESC.warn or "ffb060", L["Warning: the QuestieDB data of these quests contradict each other: "]) ..
+            table.concat(pending, " | "))
+        end
+      end)
+    end
+  end
+  rec.list = list
+end
+
 -- Adds a quest (and the prerequisites it still needs) to the custom Roadbook.
 -- quiet: no message and no update (adding in bulk). Returns true, number of prerequisites added.
 function Geo.CustomAdd(id, title, level, quiet)
@@ -181,15 +215,18 @@ function Geo.CustomAdd(id, title, level, quiet)
     if not quiet then Print(L["Quest already done: "] .. title) end
     return false, 0
   end
-  local rec = Geo.CustomRec()
-  local pre = 0
+  local list, pre = {}, 0
+  for _, e in ipairs(Geo.CustomRec().list) do list[#list + 1] = e end
+  local added = {}
   for _, p in ipairs(Geo.MissingPrereqs(id)) do
-    if not Geo.InCustom(p) then
-      rec.list[#rec.list + 1] = { id = p, title = QGet(QDB.Quest, p, "name") or ("#" .. p), level = Geo.QuestLevelOf(p), pre = id }
+    if not Geo.InCustom(p) and not added[p] then
+      added[p] = true
+      list[#list + 1] = { id = p, title = QGet(QDB.Quest, p, "name") or ("#" .. p), level = Geo.QuestLevelOf(p), pre = id }
       pre = pre + 1
     end
   end
-  rec.list[#rec.list + 1] = { id = id, title = title, level = level or Geo.QuestLevelOf(id) }
+  list[#list + 1] = { id = id, title = title, level = level or Geo.QuestLevelOf(id) }
+  Geo.CustomSetList(list)
   Geo.Trace("list", "added " .. id .. " " .. title .. (pre > 0 and (" (+" .. pre .. " prerequisite)") or ""))
   if quiet then return true, pre end
   Print(L["Added to the Roadbook list: "] .. title ..
@@ -768,7 +805,7 @@ function Geo.AcceptGenerated(route, info, done, prepare)
     if not keep[e.id] then dropped = dropped + 1 end
   end
   local function apply()
-    Geo.CustomRec().list = list
+    Geo.CustomSetList(list)
     Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute of the former list
     Geo.customCache, Geo.customUnplanned = nil, info.unplanned
     Geo.Freeze(prepare and prepare(route) or route, info)

@@ -21,6 +21,12 @@ local function ScanLookahead()
   return K.LOOKAHEAD_LEVELS
 end
 
+-- "A" (Alliance) or "H" (Horde), as QuestieDB's friendlyToFaction; nil if unknown.
+local function PlayerFaction()
+  local f = UnitFactionGroup and UnitFactionGroup("player")
+  return (f == "Alliance" and "A") or (f == "Horde" and "H") or nil
+end
+
 local function BuildScanContext()
   local classBit, raceBit = PlayerBits()
   local skills, _, skillsKnown = PlayerSkills()
@@ -32,6 +38,7 @@ local function BuildScanContext()
     skills = skills,
     skillsKnown = skillsKnown,
     lookahead = ScanLookahead(),
+    faction = PlayerFaction(),
   }
 end
 
@@ -76,6 +83,83 @@ local function AnyNonEmpty(t)
     if type(v) == "table" and v[1] then return true end
   end
   return false
+end
+
+-- Every bit set in mask is also set in allowed.
+local function OnlyBits(mask, allowed)
+  for i = 0, 40 do
+    local b = 2 ^ i
+    if HasBit(mask, b) and not HasBit(allowed, b) then return false end
+  end
+  return mask ~= 0
+end
+
+-- Starters (NPCs, objects, items) of a quest, as three lists.
+local function StartLists(id)
+  local by = QGet(QDB.Quest, id, "startedBy")
+  if type(by) ~= "table" then return {}, {}, {} end
+  return type(by[1]) == "table" and by[1] or {}, type(by[2]) == "table" and by[2] or {}, type(by[3]) == "table" and by[3] or {}
+end
+
+-- A quest that an NPC or an object AND an item start: QuestieDB's data conflict (the Forever quests
+-- "Grant's Shield", "Silvia's Sword"...). Returns the items, or nil.
+local function StartedByItem(id)
+  local npcs, objects, items = StartLists(id)
+  if #items > 0 and (#npcs > 0 or #objects > 0) then return items end
+  return nil
+end
+
+-- Data of a quest that contradict each other (QuestieDB errors): the quest is kept, with a list of
+-- texts telling what does not add up (nil when nothing does). faction: "A" or "H", the player's.
+local function QuestDoubts(id, faction)
+  local Q = QDB.Quest
+  local out = {}
+  local masks = QDB.lib.Enum.factionRaceMasks
+  local races = QGet(Q, id, "requiredRaces") or 0
+  local questFaction = (races ~= 0 and masks) and ((OnlyBits(races, masks.Alliance) and "A") or (OnlyBits(races, masks.Horde) and "H")) or nil
+  local npcsStart = StartLists(id)
+  local finish = QGet(Q, id, "finishedBy")
+  local npcsEnd = type(finish) == "table" and type(finish[1]) == "table" and finish[1] or {}
+  local function friendly(n)
+    local f = QGet(QDB.Npc, n, "friendlyToFaction")
+    return type(f) == "string" and f or nil
+  end
+  -- Quest of one faction (races), NPC friendly to the other one only.
+  if questFaction then
+    local names, seen = {}, {}
+    for _, list in ipairs({ npcsStart, npcsEnd }) do
+      for _, n in ipairs(list) do
+        local f = friendly(n)
+        if f and f ~= "AH" and f ~= questFaction and not seen[n] then
+          seen[n] = true
+          names[#names + 1] = QGet(QDB.Npc, n, "name") or ("#" .. n)
+        end
+      end
+    end
+    if #names > 0 then out[#out + 1] = L["NPC of the other faction: "] .. table.concat(names, ", ") end
+  end
+  -- No NPC of the player's faction to take or turn in the quest (an NPC without data gives no verdict).
+  local function noFriend(list)
+    if #list == 0 then return false end
+    for _, n in ipairs(list) do
+      local f = friendly(n)
+      if not f or f:find(faction, 1, true) then return false end
+    end
+    return true
+  end
+  if faction then
+    local _, objects, items = StartLists(id)
+    if #objects == 0 and #items == 0 and noFriend(npcsStart) then out[#out + 1] = L["no quest giver of your faction"] end
+    if not (type(finish) == "table" and type(finish[2]) == "table" and #finish[2] > 0) and noFriend(npcsEnd) then
+      out[#out + 1] = L["no turn-in NPC of your faction"]
+    end
+  end
+  -- Started by an item and an NPC.
+  local items = StartedByItem(id)
+  if items then
+    out[#out + 1] = string.format(L["started by an item (%s): the giver listed may not give it"], QGet(QDB.Item, items[1], "name") or ("#" .. items[1]))
+  end
+  return #out > 0 and out or nil
 end
 
 local function CheckAvailable(id, ctx)
@@ -195,6 +279,18 @@ local function CheckAvailable(id, ctx)
   local starters = QGet(Q, id, "startedBy")
   if not AnyNonEmpty(starters) then return nil end
 
+  -- The item that starts the quest (also given by an NPC in the data) is needed: listed with it missing.
+  local startItems = StartedByItem(id)
+  if startItems then
+    local have = false
+    for _, itemId in ipairs(startItems) do
+      if ns.Geo.ItemCount(itemId) > 0 then have = true break end
+    end
+    if not have then
+      missing.texts[#missing.texts + 1] = L["object: "] .. (QGet(QDB.Item, startItems[1], "name") or ("#" .. startItems[1]))
+    end
+  end
+
   local name = QGet(Q, id, "name")
   if not name then return nil end
 
@@ -218,6 +314,7 @@ local function CheckAvailable(id, ctx)
     opensChain = m and #NextQuests(m) > 0 or false,
     repMissing = MissingReputation(QGet(Q, id, "requiredMinRep")),
     missing = #missing.texts > 0 and missing or nil,
+    doubts = QuestDoubts(id, ctx.faction),
     repeatable = HasBit(QGet(Q, id, "specialFlags") or 0, 1),
     lowLevel = lowLevel,
   }
@@ -316,6 +413,20 @@ local function QuestDiag(text)
     for i = 0, 40 do if math.floor((mask or 0) / 2 ^ i) % 2 == 1 then t[#t + 1] = i + 1 end end
     return #t > 0 and table.concat(t, ",") or "all"
   end
+  -- {npcIds?, objectIds?, itemIds?} as "npc 123 Name, object 45 Name, item 67 Name".
+  local function givers(t)
+    if type(t) ~= "table" then return "-" end
+    local out = {}
+    for i, kind in ipairs({ "npc", "object", "item" }) do
+      local db = ({ QDB.Npc, QDB.Object, QDB.Item })[i]
+      if type(t[i]) == "table" then
+        for _, gid in ipairs(t[i]) do
+          out[#out + 1] = string.format("%s %s %s", kind, tostring(gid), tostring(QGet(db, gid, "name")))
+        end
+      end
+    end
+    return #out > 0 and table.concat(out, ", ") or "-"
+  end
   local found = 0
   for k, v in pairs(ids) do
     local q = type(v) == "number" and v or k
@@ -330,6 +441,9 @@ local function QuestDiag(text)
         tostring(g("zoneOrSort")), list(g("requiredMinRep")), list(g("preQuestSingle")), list(g("preQuestGroup")),
         list(g("exclusiveTo")), tostring(g("nextQuestInChain")), tostring(g("parentQuest")),
         tostring(IsCompleted(q)), tostring(IsInLog(q)), (okc and entry) and "AVAILABLE" or "hidden"))
+      Print("   startedBy " .. givers(g("startedBy")) .. " | finishedBy " .. givers(g("finishedBy")))
+      local doubts = QuestDoubts(q, ctx.faction)
+      if doubts then Print("   doubts: " .. table.concat(doubts, " ; ")) end
     end
   end
   if found == 0 then Print("no quest matches") end
@@ -337,3 +451,4 @@ end
 
 -- Shared with the next files.
 ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan, ns.QuestDiag = BuildScanContext, CheckAvailable, Refresh, StartScan, scan, QuestDiag
+ns.PlayerFaction, ns.QuestDoubts = PlayerFaction, QuestDoubts

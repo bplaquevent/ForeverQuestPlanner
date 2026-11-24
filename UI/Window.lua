@@ -104,10 +104,12 @@ function Geo.RoadbookQuestItems(items, fz, query)
     local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
     local dg = sort > 0 and QDB.dungeonOf[sort]
     if dg then notes[#notes + 1] = Geo.WithLevel(Color(D.meta, L["dungeon: "] .. (AreaName(dg) or "?")), AreaName(dg)) end
-    local text = "  " .. StateIcons(it.id) .. Geo.QuestTitle(it.title, { id = it.id, level = it.level }) ..
+    local doubts = ns.QuestDoubts(it.id, ns.PlayerFaction())
+    local text = "  " .. StateIcons(it.id) .. Geo.QuestTitle(it.title, { id = it.id, level = it.level, doubts = doubts }) ..
       Geo.DescLine(status, unpack(notes))
     local rest = q and not q.complete and RemainingObjectives(q) or ""
     if rest ~= "" then text = text .. Geo.DescLine(Color(D.action, rest)) end
+    text = text .. Geo.DoubtLine(doubts)
     if not Geo.ForPlayer(it.id) then text = text .. Geo.DescLine(Color(D.bad, L["not for your class or race"])) end
     if it.unplanned then
       text = text .. Geo.DescLine(Color(D.bad, why[it.id] and (L["Cannot be planned: "] .. why[it.id]) or L["not planned yet"]))

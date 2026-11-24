@@ -806,7 +806,7 @@ function CP.DoEmpty()
   if Geo.MapOwner() then Geo.MapRelease() end -- its preview ends
   Geo.ClearFrozen()
   Geo.ServiceClear()
-  Geo.CustomRec().list = {}
+  Geo.CustomSetList({}, true)
   Geo.customUnplanned = nil
   Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute
   Print(L["Roadbook emptied."])
