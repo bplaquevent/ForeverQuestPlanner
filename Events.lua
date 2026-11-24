@@ -188,7 +188,6 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
   elseif msg == "teleport" or msg == "teleports" or msg == "tp" then
     local st = Settings()
     st.noRecallSpells = not st.noRecallSpells or nil
-    Geo.planCache, Geo.customCache = nil, nil
     Print(st.noRecallSpells and L["Class teleports ignored by the Roadbook."] or L["Class teleports used by the Roadbook."])
     if Refresh then Refresh() end
   elseif msg == "icon" then

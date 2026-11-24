@@ -183,22 +183,23 @@ end
 local function WalkShape(W, a, b)
   local d, way = S.WalkWay(W, a, b)
   if not d then return nil end
-  local worst, p = nil, a
+  local worst, worstZone, p = nil, nil, a
   for m = 1, (way and #way or 0) + 1 do
     local q = way and way[m] or b
     if S.Dist(p, q) > 300 then
       for _, f in ipairs({ 0.25, 0.5, 0.75, 1 }) do
-        local z = W.zones[S.ZoneId(W, { c = p.c, x = p.x + (q.x - p.x) * f, y = p.y + (q.y - p.y) * f }) or 0]
-        if z and z.min and (not worst or z.min > worst) then worst = z.min end
+        local id = S.ZoneId(W, { c = p.c, x = p.x + (q.x - p.x) * f, y = p.y + (q.y - p.y) * f })
+        local z = W.zones[id or 0]
+        if z and z.min and (not worst or z.min > worst) then worst, worstZone = z.min, id end
       end
     end
     p = q
   end
-  return d * (way and W.k.PASS_PATH_FACTOR or W.k.PATH_FACTOR), worst
+  return d * (way and W.k.PASS_PATH_FACTOR or W.k.PATH_FACTOR), worst, worstZone
 end
 
 -- Walking time with the dangerous zones crossed (minimum level > plevel + margin: slower).
--- Also returns the highest zone minimum level crossed (any level), for reports.
+-- Also returns the highest zone minimum level crossed (any level) and that zone, for reports and directions.
 -- The shape of each walk is cached by pair of points (shared objects): the same pair comes back for
 -- every network and player level, only the speed and the danger penalty change.
 function S.WalkCost(W, a, b, speed, plevel)
@@ -210,14 +211,14 @@ function S.WalkCost(W, a, b, speed, plevel)
   end
   local e = row[b]
   if not e then
-    local len, worst = WalkShape(W, a, b)
-    e = { len or false, worst }
+    local len, worst, zone = WalkShape(W, a, b)
+    e = { len or false, worst, zone }
     row[b] = e
   end
   if not e[1] then return math.huge end
   local t, worst = e[1] / speed, e[2]
   if worst and worst > plevel + W.k.DANGER_MARGIN then t = t * W.k.DANGER_FACTOR end
-  return t, worst
+  return t, worst, e[3]
 end
 
 -- Flight lengths from node `from` to every node reachable over `known` nodes only (Dijkstra).
@@ -263,6 +264,8 @@ function S.BanKey(ban)
   local function pt(p) return p and string.format("%s:%.0f:%.0f", tostring(p.c), p.x or 0, p.y or 0) or "-" end
   return "#" .. tostring(ban.mode) .. pt(ban.from) .. pt(ban.to)
 end
+
+local WEAK = { __mode = "k" }
 
 -- Transport network with the flight nodes `known`: hubs (flight masters, docks) and shortest
 -- paths between them (Floyd-Warshall). Cached by set of known nodes, speed and banned transport.
@@ -327,7 +330,8 @@ function S.Network(W, known, speed, ban)
       end
     end
   end
-  net = { key = key, hubs = hubs, D = D, nxt = nxt, via = via, speed = speed, near = {}, travel = {} }
+  -- (weak keys: in game a network outlives the computations, points like the player's place do not)
+  net = { key = key, hubs = hubs, D = D, nxt = nxt, via = via, speed = speed, near = setmetatable({}, WEAK), travel = {} }
   W.nets[key] = net
   return net
 end
@@ -376,7 +380,7 @@ function S.Travel(W, net, plevel, a, b)
   if a == b then return 0 end
   local byLevel = net.travel[plevel]
   if not byLevel then
-    byLevel = {}
+    byLevel = setmetatable({}, WEAK)
     net.travel[plevel] = byLevel
   end
   local row = byLevel[a]
@@ -405,6 +409,17 @@ end
 -- XP needed to go from a level to the next one.
 local function Needed(P, level)
   return P.player.xpNeeded[level] or math.huge
+end
+
+-- XP gained: the level, the XP in it and its XP to the next one. need: the current level's, when the game
+-- gives it (else xpNeeded).
+function S.LevelUp(level, xp, maxLevel, xpNeeded, need)
+  need = need or xpNeeded[level] or math.huge
+  while level < maxLevel and xp >= need do
+    xp, level = xp - need, level + 1
+    need = xpNeeded[level] or math.huge
+  end
+  return level, xp, need
 end
 
 -- XP the game gives now for each quest (quest log, available quests): the reference. It can differ
@@ -458,7 +473,8 @@ end
 -- starting level; teleports without cooldown).
 -- Returns { time, xp, questXP, mobXP, level, xpLeft, at = {}, levels = {}, travel = {}, stepXP = {} (rested
 --           bonus included), rawXP = {},
---           nets = {} (network of each leg), binds = {} (bind point before each step), wait,
+--           nets = {} (network of each leg), legs = { [i] = { from, to, net, level } } (travelled legs, not
+--           teleports: the way the game shows, S.Route with these is the one costed), binds = {} (bind point before each step), wait,
 --           violations = { { i, kind ("recall", "level"), what } }, reach = time the goal level is reached }.
 function S.Evaluate(P, route, opts)
   opts = opts or {}
@@ -477,7 +493,7 @@ function S.Evaluate(P, route, opts)
   for _, s in ipairs(P.world.recall or {}) do
     sources[tostring(s.key)] = { ready = s.ready or 0, cd = s.cd or 0, charges = s.charges, src = s }
   end
-  local res = { at = { 0 }, levels = { level }, travel = { 0 }, stepXP = { 0 }, rawXP = { 0 }, nets = {}, binds = {}, violations = {},
+  local res = { at = { 0 }, levels = { level }, travel = { 0 }, stepXP = { 0 }, rawXP = { 0 }, nets = {}, legs = {}, binds = {}, violations = {},
     wait = 0, questXP = 0, mobXP = 0 }
   local t, pos = 0, route[1].p
   local target = opts.targetLevel
@@ -511,7 +527,9 @@ function S.Evaluate(P, route, opts)
         end
       end
     else
-      move = S.Travel(W, (i == 2 and banNet) or net, lvNow, pos, st.p)
+      local legNet = (i == 2 and banNet) or net
+      res.legs[i] = { from = pos, to = st.p, net = legNet, level = lvNow }
+      move = S.Travel(W, legNet, lvNow, pos, st.p)
     end
     t = t + move + (st.work or 0)
     pos = dest
@@ -528,11 +546,7 @@ function S.Evaluate(P, route, opts)
       local b = math.min(rested, gain)
       rested, gain = rested - b, gain + b
     end
-    xp = xp + gain
-    while level < pl.maxLevel and xp >= need do
-      xp, level = xp - need, level + 1
-      need = Needed(P, level)
-    end
+    level, xp, need = S.LevelUp(level, xp + gain, pl.maxLevel, pl.xpNeeded, need)
     if target and not res.reach and level >= target then res.reach = t end
     res.at[i], res.levels[i], res.travel[i], res.stepXP[i] = t, level, move, gain
   end
@@ -569,10 +583,8 @@ function S.LevelReach(player, quests)
     if not pick then break end
     local q = table.remove(left, pick)
     done[q.id] = true
-    xp = xp + (q.row and S.QuestXP(q.row[1], q.row[2], level, player.maxLevel) or 0)
-    while level < player.maxLevel and xp >= (player.xpNeeded[level] or math.huge) do
-      xp, level = xp - player.xpNeeded[level], level + 1
-    end
+    local gain = q.row and S.QuestXP(q.row[1], q.row[2], level, player.maxLevel) or 0
+    level, xp = S.LevelUp(level, xp + gain, player.maxLevel, player.xpNeeded)
   end
   if #left == 0 then return nil end
   local worst
@@ -598,6 +610,15 @@ function S.Goal(P, goal)
   local g = { kind = goal.kind, value = goal.value }
   if g.kind == "level" then g.target = math.max(g.value, P.player.level + 1) end
   return g
+end
+
+-- XP an evaluated route gains within a time (s).
+function S.XPWithin(res, time)
+  local xp = 0
+  for i = 2, #res.at do
+    if res.at[i] <= time then xp = xp + res.stepXP[i] end
+  end
+  return xp
 end
 
 -- Goal value of an evaluated route (lower is better); a route breaking a rule (quest picked up below
@@ -626,11 +647,7 @@ function S.Objective(P, res, goal)
     local rate = math.max(res.xp / math.max(res.time, 60), 0.5)
     return 1e7 + res.time + missing / rate + eps + soft * S.LEVEL_PENALTY
   end
-  local xp = 0
-  for i = 2, #res.at do
-    if res.at[i] <= goal.value then xp = xp + res.stepXP[i] end
-  end
-  return -xp + eps + soft * S.LIST_LEVEL_PENALTY
+  return -S.XPWithin(res, goal.value) + eps + soft * S.LIST_LEVEL_PENALTY
 end
 
 -- Rules broken by a route that no order of its steps can excuse (every violation but a quest of the
@@ -774,6 +791,19 @@ function S.Ranks(stops)
       if o.rank < st.rank then below = below + 1 end
     end
     st.below = below
+  end
+end
+
+-- Order rules of those ranks, added to pred (by step index ci): every step of a lower rank comes first.
+function S.RankPreds(stops, pred)
+  S.Ranks(stops)
+  for _, a in ipairs(stops) do
+    for _, b in ipairs(stops) do
+      if b.rank < a.rank then
+        pred[a.ci] = pred[a.ci] or {}
+        table.insert(pred[a.ci], b.ci)
+      end
+    end
   end
 end
 

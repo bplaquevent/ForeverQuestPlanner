@@ -38,8 +38,6 @@ function Geo.ApplyParams()
       K[d.key] = (type(v) == "number") and math.min(d.max, math.max(d.min, v)) or d.default
     end
   end
-  Geo.paramsVersion = (Geo.paramsVersion or 0) + 1
-  Geo.planCache = nil
 end
 
 function Geo.SetParam(d, v)
@@ -150,19 +148,16 @@ function Geo.CreateSettingsPanel(f)
     function() return not Settings().noHearth end,
     function(v)
       Settings().noHearth = not v or nil
-      Geo.planCache, Geo.customCache = nil, nil
     end, panel)
   Geo.SettingsCheck(rb, L["Use class teleports"], 210, -28,
     function() return not Settings().noRecallSpells end,
     function(v)
       Settings().noRecallSpells = not v or nil
-      Geo.planCache, Geo.customCache = nil, nil
     end, panel)
   Geo.SettingsCheck(rb, L["Activate nearby flight masters"], 405, -28,
     function() return not Settings().noFMDetour end,
     function(v)
       Settings().noFMDetour = not v or nil
-      Geo.planCache, Geo.customCache = nil, nil
     end, panel)
   Geo.SettingsCheck(rb, L["Whole Roadbook on the map"], 600, -28, Geo.MapWholeGet, Geo.MapWholeSet, panel)
   -- Objective button: shown, compass, centered.
@@ -205,7 +200,6 @@ function Geo.CreateSettingsPanel(f)
     function() return not Settings().noElite end,
     function(v)
       Settings().noElite = not v or nil
-      Geo.planCache = nil
       UpdateEliteSlider()
     end, panel)
   panel.updaters[#panel.updaters + 1] = UpdateEliteSlider

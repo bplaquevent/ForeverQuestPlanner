@@ -122,11 +122,9 @@ function Geo.StepDetailLines(st)
   for k = 2, route and #route or 0 do if route[k] == st then i = k break end end
   if i then
     if st.kind ~= "hearth" then
-      info.netCache = info.netCache or { [""] = { net = info.net } }
-      local okN, nets = pcall(Geo.RouteNets, route, info.speed or 7, info.plevel, info.netCache)
-      local net = okN and nets and (nets[i] or nets[1])
-      local okW, way = false, nil
-      if net then okW, way = pcall(RouteText, route[i - 1].p, st.p, net.net, info.plevel) end
+      local okW, way = pcall(function()
+        return RouteText(route[i - 1].p, st.p, Geo.NetFor(route, i, info.speed or 7), info.plevel)
+      end)
       if okW and way and way ~= L["right here"] then lines[#lines + 1] = Color("ffffff", L["Route: "]) .. way end
     end
     local lvs = info.levels
@@ -189,7 +187,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   if unplanned > 0 then
     lines[#lines + 1] = Color("ff6060", Plural(unplanned, L["quest"]) .. L[" cannot be planned"])
   end
-  if info.net and info.net.taxi == 0 then
+  if info.taxi == 0 then
     lines[#lines + 1] = Color("ff8040", CP.Capitalize(L["no flight master recorded (open a flight map)"]))
   end
   if (info.discovered or 0) > 0 then

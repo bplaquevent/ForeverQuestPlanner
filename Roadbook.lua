@@ -2,11 +2,11 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local ActivePin, AllInstance, BuildNetwork, CharKey, ClearPin, Color = ns.ActivePin, ns.AllInstance, ns.BuildNetwork, ns.CharKey, ns.ClearPin, ns.Color
+local ActivePin, AllInstance, CharKey, ClearPin, Color = ns.ActivePin, ns.AllInstance, ns.CharKey, ns.ClearPin, ns.Color
 local DBXP, Dist, FormatTime, Geo, GeoReady, GetObjectives = ns.DBXP, ns.Dist, ns.FormatTime, ns.Geo, ns.GeoReady, ns.GetObjectives
 local ICON, IsCompleted, IsInLog, K, L, Nearest = ns.ICON, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
 local PinPoint, PlayerPos, PointText, Print, QDB, QGet = ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet
-local QuestTargets, Refresh, Route, Settings, Snapshot, StartScan = ns.QuestTargets, ns.Refresh, ns.Route, ns.Settings, ns.Snapshot, ns.StartScan
+local QuestTargets, Refresh, Settings, Snapshot, StartScan = ns.QuestTargets, ns.Refresh, ns.Settings, ns.Snapshot, ns.StartScan
 local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.KnownFlights, ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
 local IsWatched, SetWatched = ns.IsWatched, ns.SetWatched
 local OpenQuestDetails, scan = ns.OpenQuestDetails, ns.scan
@@ -222,7 +222,7 @@ function Geo.Freeze(route, info)
   local steps = {}
   for i = 2, #route do steps[#steps + 1] = Geo.SerializeStep(route[i]) end
   local slim = { count = info.count, xp = info.xp, total = info.total, mobXP = info.mobXP, levels = info.levels,
-    speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.net and info.net.taxi,
+    speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.taxi,
     custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered }
   Geo.FrozenStore()[CharKey()] = { saved = date and date("%H:%M") or "",
     start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, recall = Geo.RecallState() }
@@ -244,8 +244,7 @@ function Geo.Frozen()
   for _, r in ipairs(rec.steps) do route[#route + 1] = Geo.DeserializeStep(r, tasks) end
   local info = {}
   for k, v in pairs(rec.info or {}) do info[k] = v end
-  info.net = BuildNetwork(info.speed or TravelSpeed())
-  info.net.taxi = TaxiCount()
+  info.taxi = TaxiCount()
   Geo.frozen = { route = route, info = info }
   return Geo.frozen
 end
@@ -255,7 +254,7 @@ function Geo.ClearFrozen()
   if Geo.frozen or Geo.FrozenRec() then Geo.Trace("clear", "plan emptied") end
   Geo.frozen = nil
   Geo.FrozenStore()[CharKey()] = nil
-  Geo.planCache, Geo.customCache = nil, nil
+  Geo.lastPlanError = nil
 end
 
 -- Steps to come removed, the steps done kept (history): the custom Roadbook whose list was emptied.
@@ -419,7 +418,7 @@ function Geo.Recompute(goal, cb, keepDone, re)
     end
     if cb then cb(route, err, info) end
     if Refresh then C_Timer.After(0.1, Refresh) end
-  end, true, re and re.opts)
+  end, re and re.opts)
 end
 
 -- Focuses the first step of the active Roadbook that is not done yet.
@@ -799,7 +798,7 @@ end
 
 function CP.DoEmpty()
   if Geo.computing then -- computation in progress: cancelled
-    Geo.co, Geo.runningKey, Geo.planCbs, Geo.computing = nil, nil, nil, nil
+    Geo.co, Geo.planCbs, Geo.computing = nil, nil, nil
     CP.computeToken = (CP.computeToken or 0) + 1
   end
   CP.TrackOff(true)
@@ -1190,17 +1189,8 @@ function CP.Reroute(st, pos, msg)
   for _ = fi, ti - 1 do table.remove(route, fi) end
   local legs = {}
   if target and target.kind ~= "hearth" and not target.glue then
-    local net = BuildNetwork(TravelSpeed()) -- flight paths known now (some may have been activated on the way)
-    local _, choice = Route(pos, target.p, net, UnitLevel("player"))
-    if choice then
-      for _, b in ipairs(Geo.Boardings(choice, net)) do
-        local what = (b.mode == "vol" and L["Take the flight"]) or (L["Take the "] .. (K.MODE_NAME[b.mode] or b.mode))
-        legs[#legs + 1] = { kind = "travel", p = Geo.MapPoint(b.hub.p), work = 0, at = st.at,
-          task = { title = what .. L[": "] .. (b.hub.name or "?") .. " -> " .. (b.dest and b.dest.name or "?"),
-            mode = b.mode, from = b.hub.name, dest = b.dest and b.dest.name, destP = b.dest and b.dest.p,
-            xp = 0, travel = true } }
-      end
-    end
+    -- flight paths known now (some may have been activated on the way)
+    legs = Geo.LegSteps(Geo.World(), pos, target.p, Geo.Net(TravelSpeed()), UnitLevel("player"), st.at)
   end
   for k, leg in ipairs(legs) do table.insert(route, fi + k - 1, leg) end
   local rec = Geo.FrozenRec()
