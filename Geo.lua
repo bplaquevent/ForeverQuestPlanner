@@ -332,6 +332,9 @@ K.NODE_MATCH = 150      -- yards: a flight master this close to a flight node is
 -- Boat and zeppelin lines OpenMap gives no faction to: the same rule as its Map/Routes.lua
 -- (zeppelins are the Horde's, these two goblin lines everyone's, every other boat the Alliance's).
 K.TRANSPORT_NEUTRAL = { ["Booty Bay - Ratchet"] = true, ["Steamwheedle Port - Powderfuse Port"] = true }
+-- Zephras Isle's airships: neutral island, but each line is one faction's (Warcraft Wiki, Zephras Isle,
+-- "Getting there"); OpenMap gives them no faction.
+K.TRANSPORT_FACTION = { ["Alterac Mountains - Zephras Isle"] = "Alliance", ["Mulgore - Zephras Isle"] = "Horde" }
 K.TRANSPORT_MODE = { boat = "bateau", zeppelin = "zeppelin", airship = "airship" }
 
 local function PlayerFactionBit()
@@ -460,6 +463,7 @@ end
 -- Faction allowed on a boat/zeppelin/airship line (nil: everyone).
 function Geo.TransportFaction(t)
   if t.faction then return t.faction end
+  if K.TRANSPORT_FACTION[t[2]] then return K.TRANSPORT_FACTION[t[2]] end
   if t[1] == "zeppelin" then return "Horde" end
   if t[1] == "airship" or K.TRANSPORT_NEUTRAL[t[2]] then return nil end
   return "Alliance"
