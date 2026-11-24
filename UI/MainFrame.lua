@@ -116,7 +116,7 @@ local function CreateRoadbookPanel(f)
     tick = tick + elapsed
     if tick < 0.5 then return end
     tick = 0
-    local sec = math.floor(t - (Geo.computeStart or t))
+    local sec = math.floor(t - (State.computeStart or t))
     busySub:SetText(string.format(L["%d s (up to %d s) · you can keep playing meanwhile"], sec, K.PLAN_TIME))
   end)
   busy:SetScript("OnShow", function() tick = 1 end) -- elapsed time set at once
@@ -127,8 +127,8 @@ local function CreateRoadbookPanel(f)
   function xp.UpdateMode()
     updateLeft()
     auto:SetChecked(Settings().autoAdd and true or false)
-    empty:SetEnabled(not Geo.computing and (Geo.HasRoadbook() or #Geo.CustomRec().list > 0))
-    adapt:SetEnabled(not Geo.computing and UnitLevel("player") < Geo.MaxLevel()) -- max level: no XP to earn
+    empty:SetEnabled(not State.computing and (Geo.HasRoadbook() or #Geo.CustomRec().list > 0))
+    adapt:SetEnabled(not State.computing and UnitLevel("player") < Geo.MaxLevel()) -- max level: no XP to earn
   end
   return xp
 end

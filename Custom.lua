@@ -8,6 +8,10 @@ local L, MakeStops, PlayerPos, Print, QDB = ns.L, ns.MakeStops, ns.PlayerPos, ns
 local QGet, QuestTargets, RemainingTargets, Settings, TravelSpeed = ns.QGet, ns.QuestTargets, ns.RemainingTargets, ns.Settings, ns.TravelSpeed
 local QuestPrereqs = ns.QuestPrereqs
 local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDoubts
+local State = ns.State
+local AllowedForPlayer = ns.AllowedForPlayer
+local PlayerBits = ns.PlayerBits
+local QuestMeta = ns.QuestMeta
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.MAX_PREREQ_DEPTH = 15   -- safety: prerequisite chain added with a quest
@@ -125,13 +129,9 @@ end
 
 -- Quest that the character's class and race can do.
 function Geo.ForPlayer(id)
-  Geo.customCtx = Geo.customCtx or BuildScanContext()
-  local ctx = Geo.customCtx
-  local races = QGet(QDB.Quest, id, "requiredRaces") or 0
-  if races ~= 0 and ctx.raceBit and not HasBit(races, ctx.raceBit) then return false end
-  local classes = QGet(QDB.Quest, id, "requiredClasses") or 0
-  if classes ~= 0 and ctx.classBit and not HasBit(classes, ctx.classBit) then return false end
-  return true
+  local m = QuestMeta(id)
+  if not m then return true end
+  return AllowedForPlayer(m, PlayerBits())
 end
 
 -- Prerequisite quests still to turn in (QuestieDB), the first ones of the chain first.
@@ -421,7 +421,7 @@ end
 -- The list cannot change while the Roadbook is computed (the computation would be on a list that no
 -- longer exists): the user's changes are refused with a message. Returns true when locked.
 function Geo.ListLocked()
-  if not Geo.computing then return false end
+  if not State.computing then return false end
   Print(L["The Roadbook is being computed: its list can be changed when it is ready."])
   return true
 end
@@ -430,16 +430,16 @@ end
 -- steps done and its tracking kept (tracked or not); empty list: the steps to come
 -- are removed and its tracking stops, the steps done stay (only "Empty" empties them).
 function Geo.CustomChanged()
-  Geo.customToken = (Geo.customToken or 0) + 1
-  local token = Geo.customToken
+  State.customToken = (State.customToken or 0) + 1
+  local token = State.customToken
   if #Geo.CustomList() == 0 then
-    Geo.customUnplanned = nil
+    State.customUnplanned = nil
     Geo.ServiceClear()
     if ns.CP then ns.CP.TrackOff(true) end
     if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
   else
     C_Timer.After(0.6, function()
-      if token == Geo.customToken and ns.CP then ns.CP.Recompute("custom", true) end
+      if token == State.customToken and ns.CP then ns.CP.Recompute("custom", true) end
     end)
   end
   if ns.Refresh then ns.Refresh() end
@@ -653,11 +653,8 @@ end
 function Geo.PlanCustom(opts)
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
-  Geo.xpScale, Geo.customCtx = nil, nil
-  Geo.laterList = {}
-  Geo.planSpeed = TravelSpeed()
   local cp, err, unplanned = Geo.CustomPlanSteps(pos, UnitLevel("player"), opts and opts.near)
-  Geo.customUnplanned = cp and cp.unplanned or unplanned or {}
+  State.customUnplanned = cp and cp.unplanned or unplanned or {}
   if not cp then return nil, err end
   local P = Geo.Problem("custom", pos, cp)
   P.ban = opts and opts.ban
@@ -715,8 +712,6 @@ function Geo.PlanGenerate(goal, opts)
   if plevel >= Geo.MaxLevel() then
     return nil, L["Max level reached: no more XP to earn."]
   end
-  Geo.xpScale, Geo.customCtx = nil, nil
-  Geo.planSpeed = TravelSpeed()
   local cp, unplanned
   if #Geo.CustomList() > 0 or Geo.ServicePending() then
     local _, u
@@ -769,8 +764,8 @@ function Geo.AcceptGenerated(route, info, done, prepare)
   end
   local function apply()
     Geo.CustomSetList(list)
-    Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute of the former list
-    Geo.customUnplanned = info.unplanned
+    State.customToken = (State.customToken or 0) + 1 -- no pending recompute of the former list
+    State.customUnplanned = info.unplanned
     Geo.Freeze(prepare and prepare(route) or route, info)
     if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
     done(true)

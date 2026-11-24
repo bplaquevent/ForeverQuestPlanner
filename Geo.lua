@@ -303,14 +303,26 @@ local function PlayerPos()
   return { c = cont, x = x, y = y }
 end
 
--- Travel speed: running, or the mount speed remembered the last time you were mounted.
-local function TravelSpeed()
-  local s = Settings()
+K.RUN_SPEED = 7 -- yards/s on foot
+
+-- Remembers the mount speed while you are mounted (every K.PASS_TICK seconds, Events.lua).
+function Geo.LearnMountSpeed()
   if GetUnitSpeed and IsMounted and IsMounted() then
     local _, run = GetUnitSpeed("player")
-    if run and run > 7 then s.mountSpeed = run end
+    if run and run > K.RUN_SPEED then Settings().mountSpeed = run end
   end
-  return math.max(7, s.mountSpeed or 7)
+end
+
+-- Travel speed: running, or the mount speed remembered the last time you were mounted.
+local function TravelSpeed()
+  return math.max(K.RUN_SPEED, Settings().mountSpeed or K.RUN_SPEED)
+end
+
+-- A point's own fields, in a new table (saved data, solver problem).
+function Geo.CopyPoint(p)
+  if not p then return nil end
+  return { c = p.c, x = p.x, y = p.y, area = p.area, ui = p.ui, mx = p.mx, my = p.my, zoneName = p.zoneName,
+    teleport = p.teleport, cast = p.cast, instance = p.instance, lmin = p.lmin, lmax = p.lmax }
 end
 
 local function PointText(p)

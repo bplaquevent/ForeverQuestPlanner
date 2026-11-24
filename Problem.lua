@@ -10,18 +10,13 @@ local BuildScanContext, BuildTasks, CharKey, Geo, K, L = ns.BuildScanContext, ns
 local OM, PlayerPos, Print, QDB, QGet, Settings = ns.OM, ns.PlayerPos, ns.Print, ns.QDB, ns.QGet, ns.Settings
 local AllPrereqs = ns.AllPrereqs
 local StartScan, State, TravelSpeed, UnitTime, scan = ns.StartScan, ns.State, ns.TravelSpeed, ns.UnitTime, ns.scan
+local LogById = ns.LogById
 
 local Pb = {}
 K.BENCH_VERSION = 2
 K.BENCH_MAX_TASKS = 2000 -- safety: candidate quests and follow-ups, at most
 K.BENCH_MARGIN = 2       -- capture: map cells added around the points
 K.SPOT_ALTS = 8          -- hunting spots offered to the solver for an objective (the densest ones)
-
-function Pb.Point(p)
-  if not p then return nil end
-  return { c = p.c, x = p.x, y = p.y, area = p.area, ui = p.ui, mx = p.mx, my = p.my, zoneName = p.zoneName,
-    instance = p.instance, teleport = p.teleport, cast = p.cast }
-end
 
 -- Hunting spots of an objective step (monsters to kill or to loot): the densest ones, each with the
 -- time it takes there (density: less walking between fights). The solver picks the one costing the
@@ -35,7 +30,7 @@ function Pb.Spots(st, live)
   local out = {}
   for i = 1, math.min(#spots, K.SPOT_ALTS) do
     local sp = spots[i]
-    out[i] = { p = Pb.Point(sp.p), n = sp.n, work = r.count * UnitTime(r.tg) * Geo.SpotFactor(sp, kills),
+    out[i] = { p = Geo.CopyPoint(sp.p), n = sp.n, work = r.count * UnitTime(r.tg) * Geo.SpotFactor(sp, kills),
       spot = live and sp or nil }
   end
   return out
@@ -56,7 +51,7 @@ function Pb.Step(st, live)
     members = {}
     for _, m in ipairs(t.members) do members[#members + 1] = Pb.Step(m) end
   end
-  return { kind = st.kind, p = Pb.Point(st.p), work = st.work, xp = st.xp, id = t.id, title = t.title, obj = o,
+  return { kind = st.kind, p = Geo.CopyPoint(st.p), work = st.work, xp = st.xp, id = t.id, title = t.title, obj = o,
     glue = st.glue or nil, escort = st.escort or nil, via = st.via, bindDest = st.bindDest,
     fmNode = st.fmNode or (st.fmHub and st.fmHub.node) or nil, legacyFM = st.fmHub and true or nil,
     spotN = st.spot and st.spot.n, at = st.at, search = st.search, mode = t.mode, members = members, inside = st.inside and true or nil,
@@ -84,9 +79,11 @@ end
 -- follow-up they unlock (dep = number of the quest it follows).
 function Pb.Tasks(P, pos, plevel, live)
   local t0 = debugprofilestop()
-  Geo.laterList, Geo.laterCache = {}, {}
-  local tasks, skipped = BuildTasks(pos, plevel)
+  Geo.laterCache = {}
+  local later = {} -- quests kept for max level
+  local tasks, skipped = BuildTasks(pos, plevel, later)
   local ctx = BuildScanContext()
+  ctx.later = later
   local list = {}
   local function add(task, dep)
     if #list >= K.BENCH_MAX_TASKS then return end
@@ -97,7 +94,7 @@ function Pb.Tasks(P, pos, plevel, live)
     Geo.Yield()
   end
   for _, task in ipairs(tasks) do add(task, nil) end
-  P.tasks, P.skipped, P.later = list, skipped, Geo.laterList
+  P.tasks, P.skipped, P.later = list, skipped, later
   P.buildSeconds = (debugprofilestop() - t0) / 1000 -- wall time, frames included
 end
 
@@ -108,9 +105,7 @@ function Geo.CustomPlanSteps(pos, plevel, near)
   local list = Geo.CustomList()
   local svc = Geo.ServiceStep()
   if #list == 0 and not svc then return nil, L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] end
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  local logById = {}
-  for _, q in ipairs(e and e.quests or {}) do logById[q.id] = q end
+  local logById = LogById()
   local tasks, byId, unplanned = {}, {}, {}
   for _, it in ipairs(list) do
     local ok, task, why = pcall(Geo.CustomTask, it, pos, plevel, logById)
@@ -215,7 +210,7 @@ function Pb.Network(w, live)
   end
   local dk = Geo.Docks()
   w.docks, w.links = {}, {}
-  for _, d in ipairs(dk.docks) do w.docks[#w.docks + 1] = { name = d.name, p = Pb.Point(d.p) } end
+  for _, d in ipairs(dk.docks) do w.docks[#w.docks + 1] = { name = d.name, p = Geo.CopyPoint(d.p) } end
   for _, l in ipairs(dk.links) do w.links[#w.links + 1] = { l[1], l[2], l[3] } end
   if live then
     w.passes = Geo.Passes()
@@ -241,18 +236,18 @@ function Pb.World(P, live)
   local w = {}
   Pb.Network(w, live)
   w.inns = {}
-  for _, inn in ipairs(Geo.Innkeepers()) do w.inns[#w.inns + 1] = { id = inn.id, name = inn.name, p = Pb.Point(inn.p) } end
+  for _, inn in ipairs(Geo.Innkeepers()) do w.inns[#w.inns + 1] = { id = inn.id, name = inn.name, p = Geo.CopyPoint(inn.p) } end
   w.fms = {}
   for _, fm in ipairs(Geo.FlightMasters()) do
-    w.fms[#w.fms + 1] = { id = fm.id, node = fm.node, name = fm.name, p = Pb.Point(fm.p) }
+    w.fms[#w.fms + 1] = { id = fm.id, node = fm.node, name = fm.name, p = Geo.CopyPoint(fm.p) }
   end
   w.recall = {}
   for _, s in ipairs(Geo.RecallSources()) do
-    w.recall[#w.recall + 1] = { key = s.key, bind = s.bind or nil, p = Pb.Point(s.p), cast = s.cast, cd = s.cd,
+    w.recall[#w.recall + 1] = { key = s.key, bind = s.bind or nil, p = Geo.CopyPoint(s.p), cast = s.cast, cd = s.cd,
       ready = s.ready, charges = s.charges, spell = s.spell, name = s.name }
   end
   local bind, bindName = Geo.CurrentBind()
-  w.bind, w.bindName = Pb.Point(bind), bindName
+  w.bind, w.bindName = Geo.CopyPoint(bind), bindName
   P.world = w
 end
 
@@ -354,7 +349,7 @@ function Pb.Player(P, pos)
   local g = State.xpGoal
   P.player = { level = plevel, xp = UnitXP("player"), xpMax = UnitXPMax("player"),
     rested = GetXPExhaustion and GetXPExhaustion() or 0, maxLevel = maxLevel, xpNeeded = needed,
-    speed = TravelSpeed(), pos = Pb.Point(pos), faction = UnitFactionGroup("player"),
+    speed = TravelSpeed(), pos = Geo.CopyPoint(pos), faction = UnitFactionGroup("player"),
     class = select(2, UnitClass("player")), race = select(2, UnitRace("player")),
     goal = g and { kind = g.kind, value = g.value } or nil,
     settings = { noHearth = st.noHearth, noRecallSpells = st.noRecallSpells, noFMDetour = st.noFMDetour,
@@ -402,19 +397,19 @@ end
 
 function Pb.Run(P)
   local co = coroutine.create(function() Pb.Capture(P) end)
-  Geo.co = co
+  State.co = co
   local function step()
-    if Geo.co ~= co then
+    if State.co ~= co then
       Print(L["Capture interrupted by a Roadbook computation: try again."])
       return
     end
-    Geo.sliceStart = debugprofilestop()
+    State.sliceStart = debugprofilestop()
     local ok, err = coroutine.resume(co)
     if not ok then
-      Geo.co = nil
+      State.co = nil
       Print(L["Capture error: "] .. tostring(err))
     elseif coroutine.status(co) == "dead" then
-      Geo.co = nil
+      State.co = nil
       P.later = nil -- game objects
       ForeverQuestPlannerBench = ForeverQuestPlannerBench or {}
       ForeverQuestPlannerBench[P.char] = P
@@ -440,7 +435,7 @@ function Pb.Baselines(P, done)
     Geo.RequestPlan(b.goal, function(route, err, info)
       local out = { err = err, goal = b.goal }
       if route then
-        out.route = { { kind = "start", p = Pb.Point(route[1].p), work = 0 } }
+        out.route = { { kind = "start", p = Geo.CopyPoint(route[1].p), work = 0 } }
         for k = 2, #route do out.route[k] = Pb.Step(route[k]) end
       end
       if info then
@@ -455,7 +450,7 @@ function Pb.Baselines(P, done)
 end
 
 function Geo.BenchDump(attempt)
-  if Geo.co then
+  if State.co then
     Print(L["A Roadbook computation is running: try again in a moment."])
     return
   end

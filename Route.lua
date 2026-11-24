@@ -5,6 +5,8 @@ local ADDON_NAME, ns = ...
 local AreaName, CharKey, Dist, Geo, GetItemInfoCompat = ns.AreaName, ns.CharKey, ns.Dist, ns.Geo, ns.GetItemInfoCompat
 local K, L, PlayerPos, Print, Settings = ns.K, ns.L, ns.PlayerPos, ns.Print, ns.Settings
 local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData, ns.Solver, ns.TaxiCount, ns.TravelSpeed, ns.WorldPos, ns.scan
+local LogQuests = ns.LogQuests
+local State = ns.State
 
 ---------------------------------------------------------------------------
 -- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
@@ -157,11 +159,18 @@ function Geo.BindStore()
 end
 
 -- Remembers the bind location (inn position) for this character.
+-- A place reached (bind point, teleport arrival), as saved: with its map position.
+local function StoredPoint(p)
+  local mp = Geo.MapPoint({ c = p.c, x = p.x, y = p.y })
+  return { c = p.c, x = p.x, y = p.y, area = p.area, mx = p.mx or mp.mx, my = p.my or mp.my,
+    ui = (not p.area) and mp.ui or nil, zoneName = mp.zoneName }
+end
+
 function Geo.RecordBind(p)
   if not p then return end
-  local mp = Geo.MapPoint({ c = p.c, x = p.x, y = p.y })
-  Geo.BindStore()[CharKey()] = { c = p.c, x = p.x, y = p.y, area = p.area, mx = p.mx or mp.mx, my = p.my or mp.my,
-    ui = (not p.area) and mp.ui or nil, zoneName = mp.zoneName, name = GetBindLocation and GetBindLocation() or nil }
+  local stored = StoredPoint(p)
+  stored.name = GetBindLocation and GetBindLocation() or nil
+  Geo.BindStore()[CharKey()] = stored
 end
 
 -- Zones (zone ids) with this name (value true), or containing the subzone with this name (value "sub").
@@ -309,9 +318,7 @@ function Geo.RecordTeleport(spell, p)
   -- Still before the loading screen (or somewhere else): not the arrival.
   local d = Dist(p, WorldPos(e.area, e.x, e.y) or {})
   if not d or d > K.TELEPORT_MAX_GAP then return end
-  local mp = Geo.MapPoint({ c = p.c, x = p.x, y = p.y })
-  Geo.TeleportStore()[spell] = { c = p.c, x = p.x, y = p.y, area = p.area, mx = p.mx or mp.mx, my = p.my or mp.my,
-    ui = (not p.area) and mp.ui or nil, zoneName = mp.zoneName }
+  Geo.TeleportStore()[spell] = StoredPoint(p)
   Geo.recallDest = nil
 end
 
@@ -420,11 +427,10 @@ function Geo.PreloadRewardItems()
       end
     end
   end
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  for _, q in ipairs(e and e.quests or {}) do want(q.id) end
+  for _, q in ipairs(LogQuests()) do want(q.id) end
   for _, en in ipairs(scan.entries or {}) do want(en.id) end
   local start = GetTime and GetTime() or 0
-  while #missing > 0 and Geo.co and coroutine.running() == Geo.co and (GetTime() - start) < K.ITEM_WAIT do
+  while #missing > 0 and State.co and coroutine.running() == State.co and (GetTime() - start) < K.ITEM_WAIT do
     coroutine.yield() -- next frame
     local still = {}
     for _, itemId in ipairs(missing) do
@@ -503,7 +509,7 @@ function Geo.KeepDone(fz, isDone, rest, restInfo, info)
   local old = fz.route
   local oldLv = fz.info.levels or {}
   local restLv, restTotal = restInfo.levels or {}, restInfo.total or 0
-  local route, levels = { old[1] }, { oldLv[1] or restLv[1] or UnitLevel("player") }
+  local route, levels = { old[1] }, { oldLv[1] or restLv[1] }
   local t0, kept, dropped = 0, 0, {}
   for i = 2, #old do
     local st = old[i]
@@ -549,29 +555,29 @@ end
 -- the callbacks of both. opts: a Roadbook adapted (Geo.PlanCustom).
 function Geo.RequestPlan(goal, cb, opts)
   if cb then
-    Geo.planCbs = Geo.planCbs or {}
+    State.planCbs = State.planCbs or {}
     local dup = false
-    for _, f in ipairs(Geo.planCbs) do if f == cb then dup = true break end end
-    if not dup then table.insert(Geo.planCbs, cb) end
+    for _, f in ipairs(State.planCbs) do if f == cb then dup = true break end end
+    if not dup then table.insert(State.planCbs, cb) end
   end
   local co = coroutine.create(function()
     if goal == "custom" then return Geo.PlanCustom(opts) end
     return Geo.PlanGenerate(goal, opts)
   end)
-  Geo.co = co
+  State.co = co
   local function finish(route, err, info)
-    Geo.co = nil
-    Geo.lastPlanError = not route and err or nil
-    local cbs = Geo.planCbs or {}
-    Geo.planCbs = nil
+    State.co = nil
+    State.lastPlanError = not route and err or nil
+    local cbs = State.planCbs or {}
+    State.planCbs = nil
     for _, f in ipairs(cbs) do
       local ok, e = pcall(f, route, err, info)
       if not ok then Print(L["Error after computing the Roadbook: "] .. tostring(e)) end
     end
   end
   local function step()
-    if Geo.co ~= co then return end -- replaced by a more recent computation
-    Geo.sliceStart = debugprofilestop and debugprofilestop() or 0
+    if State.co ~= co then return end -- replaced by a more recent computation
+    State.sliceStart = debugprofilestop and debugprofilestop() or 0
     local ok, route, err, info = coroutine.resume(co)
     if not ok then
       Print(L["|cffff6060Roadbook computation error|r: "] .. tostring(route))

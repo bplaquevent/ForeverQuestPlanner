@@ -629,6 +629,31 @@ local function GetQuestPlace(questID)
   return mapZone, isInstance, tagName, instanceName
 end
 
+-- The character's last quest log capture (Snapshot), or nil.
+local function LogRecord()
+  return ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
+end
+
+local function LogQuests()
+  local e = LogRecord()
+  return e and e.quests or {}
+end
+
+-- Captured quests by id.
+local function LogById()
+  local out = {}
+  for _, q in ipairs(LogQuests()) do out[q.id] = q end
+  return out
+end
+
+-- Captured quest, or nil.
+local function LogEntry(id)
+  for _, q in ipairs(LogQuests()) do
+    if q.id == id then return q end
+  end
+  return nil
+end
+
 local function Snapshot()
   if not (C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo) then
     Print(L["C_QuestLog API not found, cannot export."])
@@ -678,9 +703,7 @@ local function Snapshot()
 
   -- The game can return no objectives (and level 0) for a while, at logout for instance: the ones of
   -- the last capture stay, otherwise the next plans would take every objective as still to do.
-  local prev = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  local before = {}
-  for _, q in ipairs(prev and prev.quests or {}) do before[q.id] = q end
+  local before = LogById()
   for _, q in ipairs(quests) do
     local b = before[q.id]
     if b then
@@ -825,7 +848,7 @@ end
 
 local function Analyze()
   Snapshot()
-  local e = ForeverQuestPlannerDB[CharKey()]
+  local e = LogRecord()
   local result = { abandon = {}, turnIn = {}, groups = {}, later = {}, dungeons = {} }
   State.abandonIds = {} -- for the icon in front of the titles (Geo.ToAbandon)
   local byDungeon = {}
@@ -837,7 +860,10 @@ local function Analyze()
   local range = TrivialRange()
   local byZone = {}
 
-  for _, q in ipairs(e.quests) do
+  for _, captured in ipairs(e.quests) do
+    -- a copy: what the analysis adds (_chain, _abandon…) never goes into the saved data
+    local q = {}
+    for k, v in pairs(captured) do q[k] = v end
     local level = q.level or 0
     local m = QuestMeta(q.id)
     local isClass = (q.zone == className) or (m and IsClassMeta(m)) or false
@@ -932,3 +958,5 @@ ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives
 ns.SLOTS, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = SLOTS, ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
 ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
 ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
+ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQuests, LogRecord
+ns.AllowedForPlayer = AllowedForPlayer

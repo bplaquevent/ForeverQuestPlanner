@@ -70,7 +70,10 @@ f:SetScript("OnEvent", function(_, event, ...)
     if not okM then Print(L["Map drawing error: "] .. tostring(errM)) end
     CreateMinimapButton()
     pcall(Geo.QuestLogButtonInit) -- "+ Roadbook" in the game's quest log (UI/QuestLogHook.lua)
-    C_Timer.NewTicker(K.PASS_TICK, function() pcall(Geo.PassTick) end) -- zone passes learned on foot
+    C_Timer.NewTicker(K.PASS_TICK, function()
+      pcall(Geo.PassTick) -- zone passes learned on foot
+      pcall(Geo.LearnMountSpeed)
+    end)
     C_Timer.NewTicker(3, function() pcall(CP.NearbyCheck) end) -- steps on the spot first (Roadbook.lua)
     if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
     ScheduleSnapshot()

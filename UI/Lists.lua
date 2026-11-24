@@ -8,6 +8,9 @@ local PlayerPos, PointText, Print, QDB, QGet, QuestMeta = ns.PlayerPos, ns.Point
 local AllPrereqs = ns.AllPrereqs
 local QuestTargets, Refresh, RemainingTargets, Settings, Snapshot, State = ns.QuestTargets, ns.Refresh, ns.RemainingTargets, ns.Settings, ns.Snapshot, ns.State
 local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.TurnInText, ns.StartPoints, ns.EntityPoints
+local LogRecord = ns.LogRecord
+local LogQuests = ns.LogQuests
+local LogEntry = ns.LogEntry
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -49,7 +52,7 @@ local FREQ = { [1] = L["daily"], [2] = L["weekly"] }
 
 local function BuildText()
   Snapshot()
-  local e = ForeverQuestPlannerDB[CharKey()]
+  local e = LogRecord()
   if not e then return L["No data."] end
   local plevel, range = UnitLevel("player"), TrivialRange()
 
@@ -640,8 +643,7 @@ end
 -- Tracks a single quest: removes every other one from tracking. Only when the tracking really changes:
 -- each change made by the addon taints Blizzard's objective tracker (blocked aura reads afterwards).
 local function WatchOnly(questID)
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  for _, q in ipairs(e and e.quests or {}) do
+  for _, q in ipairs(LogQuests()) do
     if q.id ~= questID and IsWatched(q.id) then SetWatched(q.id, false) end
   end
   if not IsWatched(questID) then SetWatched(questID, true) end
@@ -847,11 +849,8 @@ end
 
 -- Game tag of a quest of the log ("Elite", "Dungeon"…), "" if none, nil if not in the log.
 function Geo.LogTag(id)
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  for _, q in ipairs(e and e.quests or {}) do
-    if q.id == id then return q.tag or "" end
-  end
-  return nil
+  local q = LogEntry(id)
+  return q and (q.tag or "") or nil
 end
 
 -- Quest level, colored like in the game's quest log (gray, green, yellow, orange, red).
@@ -1130,7 +1129,7 @@ function Geo.CustomButton(id, title, level)
   if not id then return nil end
   return { text = Geo.InCustom(id) and L["Remove"] or L["Add"],
     tip = { Geo.CustomTip(id) },
-    disabled = Geo.computing and true or nil, -- the list is locked while the Roadbook is computed
+    disabled = State.computing and true or nil, -- the list is locked while the Roadbook is computed
     fn = function() Geo.CustomToggle(id, title, level) end }
 end
 
@@ -1195,7 +1194,7 @@ end
 
 -- list: { { id, title, level } }; returns the b1 / b2 buttons of a category bar.
 function Geo.CustomBulkButtons(list)
-  local locked = Geo.computing and true or nil
+  local locked = State.computing and true or nil
   return { text = L["Add all"], disabled = locked, fn = function() if not Geo.ListLocked() then Geo.CustomAddList(list) end end,
       tip = { L["Add every quest of this category to the Roadbook list"], L[K.CUSTOM_TIP] } },
     { text = L["Remove all"], disabled = locked, fn = function() if not Geo.ListLocked() then Geo.CustomRemoveList(list) end end,

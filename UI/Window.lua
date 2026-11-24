@@ -11,10 +11,12 @@ local Refresh, RemainingObjectives = ns.Refresh, ns.RemainingObjectives
 local RenderAvailable, RenderExport, RenderList, RenderNear, RenderTodo = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear, ns.RenderTodo
 local Settings, ShowMessage, State, StateIcons = ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons
 local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
+local LogById = ns.LogById
+local LogQuests = ns.LogQuests
 
 -- Roadbook being computed: the list is emptied and the waiting animation is shown instead.
 function Geo.RenderBusy(panel)
-  local busy = Geo.computing and true or false
+  local busy = State.computing and true or false
   if panel.busy then panel.busy:SetShown(busy) end
   if busy then
     Geo.PaneHeader(panel.quests, L["Quests"])
@@ -73,16 +75,14 @@ function Geo.RoadbookQuestItems(items, fz, query)
   end
   local list, entry, why = Geo.CustomList(), {}, {}
   for _, it in ipairs(list) do entry[it.id] = it end
-  for _, u in ipairs((fz and fz.info.unplanned) or Geo.customUnplanned or {}) do why[u.id] = u.reason end
+  for _, u in ipairs((fz and fz.info.unplanned) or State.customUnplanned or {}) do why[u.id] = u.reason end
   for _, it in ipairs(list) do
     if not seen[it.id] then
       seen[it.id] = true
       quests[#quests + 1] = { id = it.id, title = it.title, level = it.level, unplanned = fz ~= nil }
     end
   end
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  local logById = {}
-  for _, q in ipairs(e and e.quests or {}) do logById[q.id] = q end
+  local logById = LogById()
   local plevel = UnitLevel("player")
   local lines = {}
   for qi, it in ipairs(quests) do
@@ -126,7 +126,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
   -- Categories of the log (Analyze), and the order of its quests.
   local a = Analyze()
   local byLog, logIndex = {}, {}
-  for i, q in ipairs(e and e.quests or {}) do logIndex[q.id] = i end
+  for i, q in ipairs(LogQuests()) do logIndex[q.id] = i end
   for _, q in ipairs(a.turnIn) do byLog[q.id] = { kind = "turnin" } end
   for _, g in ipairs(a.groups) do
     for _, q in ipairs(g.quests) do byLog[q.id] = { kind = "zone", name = g.name } end
@@ -222,7 +222,7 @@ local function RenderXP()
   local qItems = {}
   -- No Roadbook: how to make one (and why the last computation failed).
   if not fz and not searching then
-    if Geo.lastPlanError then qItems[#qItems + 1] = { text = Color("ff6060", Geo.lastPlanError) } end
+    if State.lastPlanError then qItems[#qItems + 1] = { text = Color("ff6060", State.lastPlanError) } end
     qItems[#qItems + 1] = { text = Color("ffd100", L["No Roadbook. Fill the list with the \"Add\" button (or \"Add all\" on a category) of the Around me, Quest log and Available tabs, and/or let \"Adapt\" fill it: for a play session (the most XP within that time) or a level (reached the fastest), the list is completed or trimmed. The Roadbook is computed at each change of the list: it does every quest of the list in the least time, and the Objective button follows it."]) }
   end
   local before = #qItems

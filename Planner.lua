@@ -10,6 +10,7 @@ local AllPrereqs = ns.AllPrereqs
 local Refresh, RemainingTargets, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.SLOTS, ns.Settings, ns.StartPoints
 local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
+local LogQuests = ns.LogQuests
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -184,8 +185,7 @@ local function NearItems(radius)
     end
   end
 
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  for _, q in ipairs(e and e.quests or {}) do
+  for _, q in ipairs(LogQuests()) do
     local t = QuestTargets(q.id)
     if q.complete then
       local p, d = Nearest(t.finish, pos)
@@ -237,8 +237,8 @@ K.XP_TABLE = { 400, 900, 1400, 2100, 2800, 3600, 4500, 5400, 6500, 7600, 8800, 1
 
 -- Spread computation: yields back to the game when the time slice is used up.
 function Geo.Yield()
-  if Geo.co and debugprofilestop and coroutine.running() == Geo.co then
-    if debugprofilestop() - (Geo.sliceStart or 0) > K.SLICE_MS then coroutine.yield() end
+  if State.co and debugprofilestop and coroutine.running() == State.co then
+    if debugprofilestop() - (State.sliceStart or 0) > K.SLICE_MS then coroutine.yield() end
   end
 end
 
@@ -246,12 +246,9 @@ end
 function Geo.XPNeeded(level)
   local base = K.XP_TABLE[level]
   if not base then return nil end
-  if not Geo.xpScale then
-    local b = K.XP_TABLE[UnitLevel("player")]
-    local real = UnitXPMax and UnitXPMax("player")
-    Geo.xpScale = (b and real and real > 0) and real / b or 1
-  end
-  return base * Geo.xpScale
+  local here = K.XP_TABLE[UnitLevel("player")]
+  local real = UnitXPMax and UnitXPMax("player")
+  return base * ((here and real and real > 0) and real / here or 1)
 end
 
 -- Monster XP (Classic formula: level difference, gray monsters, elites x2).
@@ -358,11 +355,10 @@ function Geo.SpotFactor(spot, kills)
 end
 
 -- Best spot for an objective: travel from "from" + hunting time based on density.
-function Geo.BestSpot(r, from)
+function Geo.BestSpot(r, from, speed)
   local spots = Geo.Spots(r.tg)
   if not spots then return nil end
   local kills = (r.tg.kind == "item") and r.count * Geo.KillsPerItem(r.tg) or r.count
-  local speed = Geo.planSpeed or 7
   local best, bc
   for _, sp in ipairs(spots) do
     local travel = Geo.WalkTime(from, sp.p, speed) or K.CROSS_CONTINENT
@@ -379,6 +375,7 @@ end
 K.ESCORT_SPEED = 2.5   -- walking speed of an escorted NPC (yd/s)
 K.ESCORT_MARGIN = 90   -- ambushes, waiting for the NPC to start
 local function MakeStops(task, pos, plevel)
+  local speed = TravelSpeed()
   local t = task.targets
   local stops, from, mob = {}, pos, 0
   if task.kind == "take" then
@@ -414,7 +411,7 @@ local function MakeStops(task, pos, plevel)
       for _, r in ipairs(todo) do if r.tg.sourceItem then sourceLeft = true end end
       for i, r in ipairs(todo) do
         if not (onlyExplore and r.tg.kind ~= "explore") and not (sourceLeft and r.tg.needsSource) then
-          local spot = Geo.BestSpot(r, from)
+          local spot = Geo.BestSpot(r, from, speed)
           local p, d
           if spot then p, d = spot.p, Dist(from, spot.p) else p, d = Nearest(r.tg.points, from) end
           if p and (not bi or (d or math.huge) < bd) then bi, bp, bd, bspot = i, p, d or math.huge, spot end
@@ -427,7 +424,7 @@ local function MakeStops(task, pos, plevel)
       local work = r.count * UnitTime(r.tg)
       local nSpots
       if bspot then
-        local _, ns, kills = Geo.BestSpot(r, from)
+        local _, ns, kills = Geo.BestSpot(r, from, speed)
         nSpots = ns
         work = work * Geo.SpotFactor(bspot, kills)
       end
@@ -440,7 +437,7 @@ local function MakeStops(task, pos, plevel)
         -- Escort: the NPC walks (slower than you) and ambushes happen on the way.
         local d = Dist(from, bp) or 0
         st.escort = true
-        st.work = math.max(0, d / K.ESCORT_SPEED - d / TravelSpeed()) + K.ESCORT_MARGIN
+        st.work = math.max(0, d / K.ESCORT_SPEED - d / speed) + K.ESCORT_MARGIN
         -- Right after the pick-up: nothing may come between them (glued to the previous stop).
         if task.kind == "take" and #stops == 1 and takes == 1 then st.glue = true end
       end
@@ -465,7 +462,7 @@ local function MakeStops(task, pos, plevel)
   if task.kind == "take" and #stops == 1 and takes == 1 and Geo.IsEscort(task.id) then
     local d = Dist(from, f) or 0
     turnin.escort, turnin.glue = true, true
-    turnin.work = turnin.work + math.max(0, d / K.ESCORT_SPEED - d / TravelSpeed()) + K.ESCORT_MARGIN
+    turnin.work = turnin.work + math.max(0, d / K.ESCORT_SPEED - d / speed) + K.ESCORT_MARGIN
   end
   stops[#stops + 1] = turnin
   task.mobXP = mob
@@ -474,7 +471,7 @@ local function MakeStops(task, pos, plevel)
 end
 
 -- Quest to pick up (available, or a follow-up unlocked by the plan) -> plannable task.
-function Geo.TakeTask(en, plevel, pos)
+function Geo.TakeTask(en, plevel, pos, later)
   local t = QuestTargets(en.id)
   if #t.finish == 0 then return nil end
   if (t.missing or 0) > 0 then return nil end -- an objective without a position: cannot be planned
@@ -494,7 +491,7 @@ function Geo.TakeTask(en, plevel, pos)
   if not task.stops then return nil end
   Geo.CheckLater(task, plevel)
   if task.later then
-    Geo.RecordLater(task)
+    Geo.RecordLater(later, task)
     return nil
   end
   return task
@@ -544,7 +541,7 @@ function Geo.Followers(task, ctx, plevel)
       if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
         and (Geo.UnlockLevel(en) or math.huge) <= Geo.PlanCeiling(plevel) then
-        local f = Geo.TakeTask(en, plevel, from)
+        local f = Geo.TakeTask(en, plevel, from, ctx.later)
         if f then
           f.dep, f.depth, f.done = task, (task.depth or 0) + 1, done
           task.followers[#task.followers + 1] = f
@@ -784,10 +781,9 @@ function Geo.LaterReason(id, plevel)
 end
 
 -- Quest set aside for max level (shown separately in the Roadbook).
-function Geo.RecordLater(task)
-  Geo.laterList = Geo.laterList or {}
-  for _, e in ipairs(Geo.laterList) do if e.id == task.id then return end end
-  Geo.laterList[#Geo.laterList + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
+function Geo.RecordLater(list, task)
+  for _, e in ipairs(list) do if e.id == task.id then return end end
+  list[#list + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
 end
 
 -- Dungeon / raid quest kept out of the Roadbook: anything but talking or delivering, even when its
@@ -864,10 +860,9 @@ function Geo.CheckLater(task, plevel)
   if plevel < Geo.MaxLevel() then task.later = Geo.LaterReason(task.id, plevel) end
 end
 
-local function BuildTasks(pos, plevel)
+local function BuildTasks(pos, plevel, later)
   local tasks, skipped = {}, 0
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  for _, q in ipairs(e and e.quests or {}) do
+  for _, q in ipairs(LogQuests()) do
     local xp = q.xp or DBXP(q.id, plevel) or 0
     local group = q.suggestedGroup and q.suggestedGroup > 1
     local atMax = plevel >= Geo.MaxLevel()
@@ -895,7 +890,7 @@ local function BuildTasks(pos, plevel)
           task.quick = true
         end
         if task.later then
-          Geo.RecordLater(task)
+          Geo.RecordLater(later, task)
         else
           tasks[#tasks + 1] = task
         end
@@ -923,7 +918,7 @@ local function BuildTasks(pos, plevel)
   local taken = 0
   for i, n in ipairs(near) do
     if taken >= K.MAX_TAKE_CANDIDATES then break end
-    local task = Geo.TakeTask(n.en, plevel, pos)
+    local task = Geo.TakeTask(n.en, plevel, pos, later)
     if task then
       tasks[#tasks + 1] = task
       taken = taken + 1

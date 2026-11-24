@@ -5,6 +5,7 @@
 
 local ADDON_NAME, ns = ...
 local Geo, L = ns.Geo, ns.L
+local State = ns.State
 
 local buttons = {} -- host frame -> button
 local hooked = {}  -- what is already hooked
@@ -94,7 +95,7 @@ function Geo.QuestLogButtonSync()
     local id = host:IsShown() and b.getQuest()
     if id then
       b:SetText(Geo.InCustom(id) and L["- Roadbook"] or L["+ Roadbook"])
-      b:SetEnabled(not Geo.computing) -- the list is locked while the Roadbook is computed
+      b:SetEnabled(not State.computing) -- the list is locked while the Roadbook is computed
       b:Show()
     else
       b:Hide()

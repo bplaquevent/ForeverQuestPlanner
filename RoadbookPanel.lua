@@ -12,6 +12,7 @@ local ADDON_NAME, ns = ...
 local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K, L = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K, ns.L
 local IsInLog, OM, OpenQuestDetails, Plural, RouteText, Settings = ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Plural, ns.RouteText, ns.Settings
 local UpdateScrollBar = ns.UpdateScrollBar
+local State = ns.State
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line
@@ -144,7 +145,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   local sep = Color("777777", " - ")
   local value = function(t) return Color("dddddd", t) end
   local lines = {}
-  if Geo.computing then lines[1] = Color("ffd100", L["Recomputing…"]) end
+  if State.computing then lines[1] = Color("ffd100", L["Recomputing… the Roadbook cannot be changed"]) end
   -- Size and progress.
   local total = #route - 1
   local finished = total > 0 and doneCount >= total
@@ -261,12 +262,16 @@ local function RowClick(self, button)
     GameTooltip:Hide()
     MenuUtil.CreateContextMenu(self, function(_, root)
       root:CreateTitle(st.task and st.task.title or L["Roadbook step"])
+      local locked = State.computing -- every action of a step changes the Roadbook
+      if locked then root:CreateTitle(Color("ffd100", L["Recomputing…"])) end
       for _, a in ipairs(acts) do
         local d = root:CreateButton(a[1], a[2])
+        if locked then d:SetEnabled(false) end
         if d and d.SetTooltip then
           d:SetTooltip(function(tip)
             tip:AddLine(a[1], 1, 1, 1)
             tip:AddLine(a[3], 0.85, 0.85, 0.85, true)
+            if locked then tip:AddLine(K.LOCKED_TIP, 1, 0.82, 0, true) end
           end)
         end
       end
@@ -624,9 +629,9 @@ function Geo.MapPanelSync()
   UpdateScrollBar(panel.scroll)
   panel.track:SetChecked(following)
   panel.auto:SetChecked(Settings().autoAdd and true or false)
-  panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
-  panel.emptyB:SetEnabled(not Geo.computing)
-  panel.recalc:SetEnabled(not Geo.computing and true or false)
+  panel.track:SetEnabled(not State.computing and (following or not Geo.IsFinished()))
+  panel.emptyB:SetEnabled(not State.computing)
+  panel.recalc:SetEnabled(not State.computing and true or false)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then
