@@ -633,7 +633,7 @@ end
 -- with them first (Geo.ApplyNearFirst). Only steps already in the Roadbook; nothing is added.
 K.NEARBY_RADIUS = 150 -- yards: about one minute of detour at most
 K.NEARBY_KINDS = { take = 1, skill = 2, obj = 2, turnin = 3, dungeon = 2 } -- quest steps, in order of a quest
-K.CITY_MAPS = { [1453] = true, [1454] = true, [1455] = true, [1456] = true, [1457] = true, [1458] = true } -- uiMapID of the capitals
+K.CITY_MAPS = ns.CITY_MAPS -- (Data/Supplements.lua)
 CP.nearSeen = {} -- StepKey of the steps already brought first (forgotten once they are no longer on the spot)
 
 -- The step can be done at the player's level: pick-up with the level required, objective or dungeon with

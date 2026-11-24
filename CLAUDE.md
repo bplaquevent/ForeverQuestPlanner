@@ -12,6 +12,7 @@ Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cas
 |---|---|
 | `Locales/Locales.lua`, `Locales/frFR.lua` | `ns.L` table; French translations |
 | `Data/Passes.lua` | walking passes between zones known before any is learned: Warcraft Wiki rows `ns.PASSES`, QuestieDB patrol NPCs `ns.PASS_PATROLS` (listed by `tools/patrol_npcs.py`) |
+| `Data/Supplements.lua` | what the data we read lacks or gets wrong, completed: faction of the transport lines OpenMap does not give one (`ns.TRANSPORT_SUPPLEMENT`, `ns.TRANSPORT_KIND_FACTION`, read through `Geo.Transports`), QuestieDB's quest categories (`ns.SORT_*`), profession headers, capitals (`ns.CITY_MAPS`), class teleport spells (`ns.RECALL_SPELLS`) |
 | `Solver.lua` | Roadbook solver in pure Lua (no game API, also run by `tools/bench.lua`): XP formulas (`MobXP`, `QuestXP`), world model from a captured problem (walks, passes, danger, network `S.Network` / `S.Route`), route evaluation `S.Evaluate`, goal value `S.Objective`, teleports `S.AddRecalls` / `S.Simulate`, objective order ranks `S.Ranks`, hunting spot variants `S.Variants`, optimizer `S.Optimize` (candidate quests: construction, local search, destroy and rebuild; the list: `S.ValidCustom`, `S.BuildCustom`; list with a duration or level: kept and completed or trimmed, `S.MixPrepare`, units `S.InsertUnit` / `S.WithoutUnit`; tuning `S.OPT`) |
 | `Core.lua` | utilities (`Print`, `Settings` = saved data of the character, `Color`…), constants table `K`, `State`, QuestieDB access (`QDB`, `QGet`, `QuestMeta`, `ChainInfo`), quest log capture (`Snapshot`), reward analysis, `Analyze()` |
 | `Available.lua` | available quests: `CheckAvailable`, frame-sliced scan `StartScan` / `scan` |
@@ -47,6 +48,11 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
   functions are fields of `Geo` / `CP` instead of locals: add new functions there.
 
 ## Conventions
+
+- Correct or complete the input data, never special-case it in the game code: no `if` on one line, zone, NPC or quest
+  in `Geo.lua`, `Route.lua`… One function per kind of data (example: `Geo.Transports`) reads the source's own value
+  first, then the supplement of `Data/Supplements.lua` (with a comment citing its source), then a default.
+  When the source gives the value itself, the supplement row is deleted and no code changes.
 
 - Code, comments and `L["…"]` keys in English. Every new user-visible string goes through `L["English text"]`
   and gets its French translation in `Locales/frFR.lua` (keys roughly alphabetical).

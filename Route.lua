@@ -124,22 +124,8 @@ K.HEARTH_MIN_GAIN = 120 -- minimum gain (s) to suggest hearthing
 K.BIND_WORK = 20        -- talking to the innkeeper
 K.INN_DETOUR = 500      -- maximum detour (m, as the crow flies) to go and bind
 K.RECALL_TOLERANCE = 60 -- a cooldown that moved by more than this (s) changes the plan
-K.TELEPORT_RUNE = 17031 -- Rune of Teleportation (mage teleports)
 K.TELEPORT_MAX_GAP = 1500 -- a place farther than this (m) from the default arrival is not the arrival
--- Class spells: bind = back to the hearthstone's bind point; otherwise a fixed arrival (AreaID +
--- 0-100 coordinates, approximate: replaced by the place really reached after the first cast).
--- cast = cast + loading (s); cd = cooldown used to space two uses (the real remaining time is read).
--- The mage portals are left out: alone, they lead to the same places as the teleports.
-K.RECALL_SPELLS = {
-  { spell = 556, bind = true, cast = 30, cd = 900 },                                  -- Astral Recall (shaman)
-  { spell = 3561, area = 1519, x = 38.0, y = 79.0, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Stormwind
-  { spell = 3562, area = 1537, x = 25.5, y = 7.0, cast = 30, reagent = K.TELEPORT_RUNE },  -- Teleport: Ironforge
-  { spell = 3565, area = 1657, x = 40.0, y = 82.0, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Darnassus
-  { spell = 3567, area = 1637, x = 38.5, y = 85.5, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Orgrimmar
-  { spell = 3563, area = 1497, x = 84.5, y = 17.0, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Undercity
-  { spell = 3566, area = 1638, x = 22.5, y = 16.5, cast = 30, reagent = K.TELEPORT_RUNE }, -- Teleport: Thunder Bluff
-  { spell = 18960, area = 493, x = 44.0, y = 45.0, cast = 30 },                       -- Teleport: Moonglade (druid)
-}
+K.RECALL_SPELLS = ns.RECALL_SPELLS -- (Data/Supplements.lua)
 K.RECALL_BY_SPELL = {}
 for _, e in ipairs(K.RECALL_SPELLS) do K.RECALL_BY_SPELL[e.spell] = e end
 

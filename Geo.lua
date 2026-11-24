@@ -329,12 +329,6 @@ K.DANGER_FACTOR = 1.5   -- extra cost of walking in a dangerous zone (detours, f
 K.K_HUBS = 3            -- number of transport points considered at departure and arrival
 K.DOCK_MERGE = 60       -- yards: transport ends this close are one dock
 K.NODE_MATCH = 150      -- yards: a flight master this close to a flight node is that node
--- Boat and zeppelin lines OpenMap gives no faction to: the same rule as its Map/Routes.lua
--- (zeppelins are the Horde's, these two goblin lines everyone's, every other boat the Alliance's).
-K.TRANSPORT_NEUTRAL = { ["Booty Bay - Ratchet"] = true, ["Steamwheedle Port - Powderfuse Port"] = true }
--- Zephras Isle's airships: neutral island, but each line is one faction's (Warcraft Wiki, Zephras Isle,
--- "Getting there"); OpenMap gives them no faction.
-K.TRANSPORT_FACTION = { ["Alterac Mountains - Zephras Isle"] = "Alliance", ["Mulgore - Zephras Isle"] = "Horde" }
 K.TRANSPORT_MODE = { boat = "bateau", zeppelin = "zeppelin", airship = "airship" }
 
 local function PlayerFactionBit()
@@ -460,13 +454,22 @@ function Geo.FlightDists(from, learned)
   return dist
 end
 
--- Faction allowed on a boat/zeppelin/airship line (nil: everyone).
-function Geo.TransportFaction(t)
-  if t.faction then return t.faction end
-  if K.TRANSPORT_FACTION[t[2]] then return K.TRANSPORT_FACTION[t[2]] end
-  if t[1] == "zeppelin" then return "Horde" end
-  if t[1] == "airship" or K.TRANSPORT_NEUTRAL[t[2]] then return nil end
-  return "Alliance"
+-- Boat, zeppelin and airship lines of OpenMap, each with its faction filled in: OpenMap's own `faction`
+-- field when it has one, else the supplement of Data/Supplements.lua (a line OpenMap gives none),
+-- else the convention of its kind. Rows keep OpenMap's layout (t[1] kind ... t[8]) plus `faction`
+-- ("Alliance", "Horde" or "Neutral": everyone). Built once.
+function Geo.Transports()
+  if Geo.transports then return Geo.transports end
+  local out = {}
+  for _, t in ipairs(OM.places.transports) do
+    local row = {}
+    for k, v in pairs(t) do row[k] = v end
+    local sup = ns.TRANSPORT_SUPPLEMENT[t[2]]
+    row.faction = t.faction or (sup and sup.faction) or ns.TRANSPORT_KIND_FACTION[t[1]] or "Neutral"
+    out[#out + 1] = row
+  end
+  Geo.transports = out
+  return out
 end
 
 function Geo.IsShip(mode)
@@ -506,10 +509,9 @@ function Geo.Docks()
     docks[#docks + 1] = { name = Geo.DockName(c, x, y, route), p = { c = c, x = x, y = y } }
     return #docks
   end
-  for _, t in ipairs(OM.places.transports) do
-    local f = Geo.TransportFaction(t)
+  for _, t in ipairs(Geo.Transports()) do
     local mode = K.TRANSPORT_MODE[t[1]]
-    if mode and (not f or f == faction) then
+    if mode and (t.faction == "Neutral" or t.faction == faction) then
       local a = dockAt(t[3], t[4], t[5], mode, t[2])
       local b = dockAt(t[6], t[7], t[8], mode, t[2])
       links[#links + 1] = { a, b, mode }
