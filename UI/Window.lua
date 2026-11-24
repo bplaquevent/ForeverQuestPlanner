@@ -2,18 +2,13 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local Analyze, AreaName, CP, CharKey, Color, CreateScrollPanel = ns.Analyze, ns.AreaName, ns.CP, ns.CharKey, ns.Color, ns.CreateScrollPanel
-local CreateSearchBox, Geo, GeoReady, ICON = ns.CreateSearchBox, ns.Geo, ns.GeoReady, ns.ICON
-local GiverText, IsClassMeta, IsProfMeta, QuestMeta = ns.GiverText, ns.IsClassMeta, ns.IsProfMeta, ns.QuestMeta
-local IsCompleted, K, L, MatchWords, Normalize = ns.IsCompleted, ns.K, ns.L, ns.MatchWords, ns.Normalize
-local PinIcon, Plural, Print, QDB, QGet = ns.PinIcon, ns.Plural, ns.Print, ns.QDB, ns.QGet
-local Refresh, RemainingObjectives = ns.Refresh, ns.RemainingObjectives
-local RenderAvailable, RenderExport, RenderList, RenderNear, RenderTodo = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear, ns.RenderTodo
-local Settings, ShowMessage, State, StateIcons = ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons
+local Analyze, CP, Color, CreateScrollPanel, CreateSearchBox = ns.Analyze, ns.CP, ns.Color, ns.CreateScrollPanel, ns.CreateSearchBox
+local Geo, GeoReady, ICON, K, L, MatchWords, Normalize = ns.Geo, ns.GeoReady, ns.ICON, ns.K, ns.L, ns.MatchWords, ns.Normalize
+local PinIcon, Plural, Print, RemainingObjectives = ns.PinIcon, ns.Plural, ns.Print, ns.RemainingObjectives
+local RenderAvailable, RenderExport, RenderList, RenderNear = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear
+local RenderTodo, Settings, ShowMessage, State, StateIcons = ns.RenderTodo, ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons
 local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
-local LogById = ns.LogById
-local LogQuests = ns.LogQuests
-local QuestCategory = ns.QuestCategory
+local Refresh -- the window's refresh, defined below (Available.lua forwards to it)
 
 -- Roadbook being computed: the list is emptied and the waiting animation is shown instead.
 function Geo.RenderBusy(panel)

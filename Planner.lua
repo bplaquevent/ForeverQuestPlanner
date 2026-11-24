@@ -2,23 +2,14 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AllInstance, AreaName, ChainInfo, CharKey, CheckAvailable, DBXP = ns.AllInstance, ns.AreaName, ns.ChainInfo, ns.CharKey, ns.CheckAvailable, ns.DBXP
-local Dist, EntityPoints, Geo, GetItemInfoCompat, HasBit = ns.Dist, ns.EntityPoints, ns.Geo, ns.GetItemInfoCompat, ns.HasBit
-local IsClassMeta, IsCompleted, K, L, Nearest, NextQuests = ns.IsClassMeta, ns.IsCompleted, ns.K, ns.L, ns.Nearest, ns.NextQuests
-local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta, ns.QuestTargets
-local AllPrereqs = ns.AllPrereqs
-local Refresh, RemainingTargets, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Settings, ns.StartPoints
-local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
-local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
-local LogQuests = ns.LogQuests
-local AllIds = ns.AllIds
-local NpcFriendly = ns.NpcFriendly
-local PlayerFaction = ns.PlayerFaction
-local WornItemLevel = ns.WornItemLevel
-local SkillName = ns.SkillName
-local LogEntry = ns.LogEntry
-local Normalize = ns.Normalize
-local GeoReady = ns.GeoReady
+local AllInstance, AreaName, CheckAvailable, DBXP, Dist = ns.AllInstance, ns.AreaName, ns.CheckAvailable, ns.DBXP, ns.Dist
+local EntityPoints, Geo, GetItemInfoCompat, HasBit, IsCompleted = ns.EntityPoints, ns.Geo, ns.GetItemInfoCompat, ns.HasBit, ns.IsCompleted
+local K, L, Nearest, NextQuests, PlayerPos, PlayerSkills, QDB = ns.K, ns.L, ns.Nearest, ns.NextQuests, ns.PlayerPos, ns.PlayerSkills, ns.QDB
+local QGet, QuestMeta, QuestTargets, AllPrereqs, Refresh = ns.QGet, ns.QuestMeta, ns.QuestTargets, ns.AllPrereqs, ns.Refresh
+local RemainingTargets, Settings, StartPoints, State, TravelSpeed = ns.RemainingTargets, ns.Settings, ns.StartPoints, ns.State, ns.TravelSpeed
+local TurnInText, UnitTime, OM, WorldPos, scan, LogQuests = ns.TurnInText, ns.UnitTime, ns.OM, ns.WorldPos, ns.scan, ns.LogQuests
+local AllIds, NpcFriendly, PlayerFaction, WornItemLevel = ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.WornItemLevel
+local SkillName, LogEntry, Normalize, GeoReady = ns.SkillName, ns.LogEntry, ns.Normalize, ns.GeoReady
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -161,7 +152,7 @@ end
 local function NearItems(radius)
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
-  local inside, zone = {}, {}
+  local inside = {}
   local here = CurrentMapSet()
   local function add(it)
     if radius == "zone" then
@@ -204,8 +195,7 @@ local function NearItems(radius)
     end
   end
   table.sort(inside, function(a, b) return a.d < b.d end)
-  table.sort(zone, function(a, b) return a.d < b.d end)
-  return inside, zone
+  return inside
 end
 
 ---------------------------------------------------------------------------

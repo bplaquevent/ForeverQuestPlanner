@@ -2,16 +2,12 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local ActivePin, AllInstance, CharKey, ClearPin, Color = ns.ActivePin, ns.AllInstance, ns.CharKey, ns.ClearPin, ns.Color
-local DBXP, Dist, FormatTime, Geo, GeoReady, GetObjectives = ns.DBXP, ns.Dist, ns.FormatTime, ns.Geo, ns.GeoReady, ns.GetObjectives
-local ICON, IsCompleted, IsInLog, K, L, Nearest = ns.ICON, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
-local PinPoint, PlayerPos, PointText, Print, QDB, QGet = ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet
-local QuestTargets, Refresh, Settings, Snapshot, StartScan = ns.QuestTargets, ns.Refresh, ns.Settings, ns.Snapshot, ns.StartScan
-local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.KnownFlights, ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
-local IsWatched, SetWatched = ns.IsWatched, ns.SetWatched
-local OpenQuestDetails, scan = ns.OpenQuestDetails, ns.scan
-local LogEntry = ns.LogEntry
-local IsQuestComplete = ns.IsQuestComplete
+local ActivePin, CharKey, ClearPin, Color, Dist, FormatTime = ns.ActivePin, ns.CharKey, ns.ClearPin, ns.Color, ns.Dist, ns.FormatTime
+local Geo, GeoReady, GetObjectives, ICON, IsCompleted, IsInLog = ns.Geo, ns.GeoReady, ns.GetObjectives, ns.ICON, ns.IsCompleted, ns.IsInLog
+local K, L, Nearest, PinPoint, PlayerPos, PointText, Print = ns.K, ns.L, ns.Nearest, ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print
+local QDB, QGet, Refresh, Settings, Snapshot, KnownFlights = ns.QDB, ns.QGet, ns.Refresh, ns.Settings, ns.Snapshot, ns.KnownFlights
+local State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
+local IsWatched, SetWatched, scan, LogEntry, IsQuestComplete = ns.IsWatched, ns.SetWatched, ns.scan, ns.LogEntry, ns.IsQuestComplete
 local WaitScan = ns.WaitScan
 
 ---------------------------------------------------------------------------
@@ -274,6 +270,11 @@ function Geo.KeepOnlyDone()
   info.dungeons, info.discovered, info.skipped, info.unplanned = nil, nil, nil, nil
   Geo.Freeze(route, info)
   return true
+end
+
+-- The Roadbook is tracked (a step is focused); not tracked otherwise.
+function Geo.Tracking()
+  return ns.CP.CurrentFocus() ~= nil
 end
 
 -- Every step of the Roadbook is done: it can only be extended (custom: quests added), generated again or emptied.
@@ -1377,6 +1378,18 @@ function CP.OnGameEvent(event, a1, a2)
       end
     end
   end
+end
+
+-- Teleport step (kind "hearth"): icon and what to do (parts of the description).
+function Geo.RecallText(s)
+  local spell = s.task and s.task.spell
+  local saves = L["saves ~"] .. FormatTime(s.gain or 0)
+  if not spell then
+    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", { L["Use the hearthstone"], saves }
+  end
+  local tex = Geo.SpellIcon(spell) or "Interface\\Icons\\Spell_Arcane_TeleportStormWind"
+  local name = Geo.SpellName(spell) or ("#" .. spell)
+  return "|T" .. tex .. ":14:14|t", { L["Cast "] .. name, saves }
 end
 
 -- Summary of a step: its title, then the parts of its description (each display joins them its way).

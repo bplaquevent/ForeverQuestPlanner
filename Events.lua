@@ -2,10 +2,10 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local CP, CharKey, CreateMinimapButton, ExportAndSave, Geo, InitDeps = ns.CP, ns.CharKey, ns.CreateMinimapButton, ns.ExportAndSave, ns.Geo, ns.InitDeps
-local K, L, OnWaypointChanged, PlayerPos, Print = ns.K, ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print
-local Color, Refresh, ScheduleSnapshot, Settings, Snapshot, State, ToggleMainFrame = ns.Color, ns.Refresh, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.ToggleMainFrame
-local scan = ns.scan
+local CP, CharKey, CreateMinimapButton, ExportAndSave, Geo = ns.CP, ns.CharKey, ns.CreateMinimapButton, ns.ExportAndSave, ns.Geo
+local InitDeps, K, L, OnWaypointChanged, PlayerPos, Print = ns.InitDeps, ns.K, ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print
+local Color, Refresh, ScheduleSnapshot, Settings, Snapshot = ns.Color, ns.Refresh, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot
+local State, ToggleMainFrame, scan = ns.State, ns.ToggleMainFrame, ns.scan
 
 ---------------------------------------------------------------------------
 -- Events

@@ -2,14 +2,12 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local Color, CurrentMapSet, EntryHaystack, Geo, GeoReady, GetItemInfoCompat = ns.Color, ns.CurrentMapSet, ns.EntryHaystack, ns.Geo, ns.GeoReady, ns.GetItemInfoCompat
-local IsWatched, K, L, MatchWords, MoneyText = ns.IsWatched, ns.K, ns.L, ns.MatchWords, ns.MoneyText
-local NearItems, Normalize, PassStates, PlayerPos = ns.NearItems, ns.Normalize, ns.PassStates, ns.PlayerPos
-local Plural, PointText, QDB, QGet, QuestHaystack, Refresh = ns.Plural, ns.PointText, ns.QDB, ns.QGet, ns.QuestHaystack, ns.Refresh
-local RemainingObjectives, RenderList, Settings = ns.RemainingObjectives, ns.RenderList, ns.Settings
-local ShowMessage, StartPoints, StartScan, State, StateIcons = ns.ShowMessage, ns.StartPoints, ns.StartScan, ns.State, ns.StateIcons
-local journalStates, nearStates, panels, scan = ns.journalStates, ns.nearStates, ns.panels, ns.scan
-local PointInMaps = ns.PointInMaps
+local Color, CurrentMapSet, EntryHaystack, Geo, GeoReady = ns.Color, ns.CurrentMapSet, ns.EntryHaystack, ns.Geo, ns.GeoReady
+local IsWatched, K, L, MatchWords, MoneyText, NearItems = ns.IsWatched, ns.K, ns.L, ns.MatchWords, ns.MoneyText, ns.NearItems
+local Normalize, PassStates, PlayerPos, Plural, PointText = ns.Normalize, ns.PassStates, ns.PlayerPos, ns.Plural, ns.PointText
+local QuestHaystack, RemainingObjectives, RenderList, Settings = ns.QuestHaystack, ns.RemainingObjectives, ns.RenderList, ns.Settings
+local ShowMessage, StartScan, State, StateIcons, journalStates = ns.ShowMessage, ns.StartScan, ns.State, ns.StateIcons, ns.journalStates
+local nearStates, panels, scan = ns.nearStates, ns.panels, ns.scan
 
 ---------------------------------------------------------------------------
 -- Quest log tab (to do / to abandon)
@@ -218,9 +216,9 @@ local function RenderNear()
   end
   if (scan.dirty or not scan.entries) and not scan.running then StartScan() end
 
-  local found, zoneFound = NearItems(State.nearRadius)
+  local found, err = NearItems(State.nearRadius)
   if not found then
-    ShowMessage(panel, "near", Color("ff6060", zoneFound))
+    ShowMessage(panel, "near", Color("ff6060", err))
     return
   end
   local where

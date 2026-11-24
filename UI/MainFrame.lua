@@ -2,13 +2,14 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AddFilterRow, FilterBox = ns.AddFilterRow, ns.FilterBox
-local AddStateFilters, CONTENT_WIDTH, CP, CreateFilterPanel, CreateScrollPanel, Geo = ns.AddStateFilters, ns.CONTENT_WIDTH, ns.CP, ns.CreateFilterPanel, ns.CreateScrollPanel, ns.Geo
-local K, L, LOW_LEVEL_TOGGLE, ParseQuery, Print, QDB, Refresh = ns.K, ns.L, ns.LOW_LEVEL_TOGGLE, ns.ParseQuery, ns.Print, ns.QDB, ns.Refresh
+local AddFilterRow, FilterBox, AddStateFilters, CONTENT_WIDTH, CP = ns.AddFilterRow, ns.FilterBox, ns.AddStateFilters, ns.CONTENT_WIDTH, ns.CP
+local CreateFilterPanel, CreateScrollPanel, Geo, K, L = ns.CreateFilterPanel, ns.CreateScrollPanel, ns.Geo, ns.K, ns.L
+local LOW_LEVEL_TOGGLE, ParseQuery, Print, Refresh, SelectTab = ns.LOW_LEVEL_TOGGLE, ns.ParseQuery, ns.Print, ns.Refresh, ns.SelectTab
+local Settings, Snapshot, State, StopNearTicker = ns.Settings, ns.Snapshot, ns.State, ns.StopNearTicker
+local expandedCategories, journalStates, nearStates, panels = ns.expandedCategories, ns.journalStates, ns.nearStates, ns.panels
+local tabButtons = ns.tabButtons
 
 K.GOAL_LEVEL_SPAN = 10 -- "Reach level" goal: at most this many levels above the current one
-local SelectTab, Settings, Snapshot, State, StopNearTicker, expandedCategories = ns.SelectTab, ns.Settings, ns.Snapshot, ns.State, ns.StopNearTicker, ns.expandedCategories
-local journalStates, nearStates, panels, tabButtons = ns.journalStates, ns.nearStates, ns.panels, ns.tabButtons
 
 -- Roadbook tab, options at the top:
 --   [                       search                       ]

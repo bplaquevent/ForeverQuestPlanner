@@ -2,22 +2,12 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, BuildScanContext, CharKey, DBXP = ns.AreaName, ns.BuildScanContext, ns.CharKey, ns.DBXP
-local Geo, GiverText, HasBit, IsCompleted, IsInLog, K = ns.Geo, ns.GiverText, ns.HasBit, ns.IsCompleted, ns.IsInLog, ns.K
-local L, MakeStops, PlayerPos, Print, QDB = ns.L, ns.MakeStops, ns.PlayerPos, ns.Print, ns.QDB
-local QGet, QuestTargets, RemainingTargets, Settings, TravelSpeed = ns.QGet, ns.QuestTargets, ns.RemainingTargets, ns.Settings, ns.TravelSpeed
-local QuestPrereqs = ns.QuestPrereqs
-local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDoubts
-local State = ns.State
-local PlayerBits = ns.PlayerBits
-local QuestAllowed = ns.QuestAllowed
-local Analyze = ns.Analyze
-local IsClassMeta = ns.IsClassMeta
-local IsProfMeta = ns.IsProfMeta
-local LogById = ns.LogById
-local LogQuests = ns.LogQuests
-local QuestCategory = ns.QuestCategory
-local QuestMeta = ns.QuestMeta
+local AreaName, CharKey, DBXP, Geo, GiverText, IsCompleted = ns.AreaName, ns.CharKey, ns.DBXP, ns.Geo, ns.GiverText, ns.IsCompleted
+local IsInLog, K, L, MakeStops, PlayerPos, Print, QDB, QGet = ns.IsInLog, ns.K, ns.L, ns.MakeStops, ns.PlayerPos, ns.Print, ns.QDB, ns.QGet
+local QuestTargets, RemainingTargets, Settings, QuestPrereqs = ns.QuestTargets, ns.RemainingTargets, ns.Settings, ns.QuestPrereqs
+local Color, PlayerFaction, QuestDoubts, State, PlayerBits = ns.Color, ns.PlayerFaction, ns.QuestDoubts, ns.State, ns.PlayerBits
+local QuestAllowed, Analyze, IsClassMeta, IsProfMeta, LogById = ns.QuestAllowed, ns.Analyze, ns.IsClassMeta, ns.IsProfMeta, ns.LogById
+local LogQuests, QuestCategory, QuestMeta = ns.LogQuests, ns.QuestCategory, ns.QuestMeta
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.DUNGEON_WAVE_DEPTH = 20 -- safety: dungeon visits following one another
@@ -57,11 +47,6 @@ function Geo.ServiceStep()
   for _, def in ipairs(K.SERVICES) do if def.key == sv.kind then title = def.title end end
   return { kind = "service", p = Geo.CopyPoint(sv.p), work = K.SERVICE_TIME,
     task = { title = title .. (sv.name or "?"), npc = sv.name, npcId = sv.id, service = sv.kind, xp = 0 } }
-end
-
--- The Roadbook is tracked (a step is focused); not tracked otherwise.
-function Geo.Tracking()
-  return ns.CP.CurrentFocus() ~= nil
 end
 
 -- Versions with two Roadbooks (automatic and custom, each saved apart): the one that was active

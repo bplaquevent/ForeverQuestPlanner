@@ -2,16 +2,11 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, DBXP, EVENT_SORTS, GiverText, HasBit, IsClassMeta = ns.AreaName, ns.DBXP, ns.EVENT_SORTS, ns.GiverText, ns.HasBit, ns.IsClassMeta
-local IsCompleted, IsInLog, IsProfMeta, K, L, NextQuests = ns.IsCompleted, ns.IsInLog, ns.IsProfMeta, ns.K, ns.L, ns.NextQuests
-local PlayerBits, PlayerSkills, QDB, QGet, QuestMeta = ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta
-local QuestPrereqs = ns.QuestPrereqs
-local State, TrivialRange = ns.State, ns.TrivialRange
-local AllIds = ns.AllIds
-local PlayerFaction = ns.PlayerFaction
-local QuestAllowed = ns.QuestAllowed
-local Print = ns.Print
-local SkillName = ns.SkillName
+local AreaName, DBXP, EVENT_SORTS, GiverText, HasBit = ns.AreaName, ns.DBXP, ns.EVENT_SORTS, ns.GiverText, ns.HasBit
+local IsClassMeta, IsCompleted, IsInLog, IsProfMeta, K, L = ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMeta, ns.K, ns.L
+local NextQuests, PlayerBits, PlayerSkills, QDB, QGet = ns.NextQuests, ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet
+local QuestMeta, QuestPrereqs, State, TrivialRange, AllIds = ns.QuestMeta, ns.QuestPrereqs, ns.State, ns.TrivialRange, ns.AllIds
+local PlayerFaction, QuestAllowed, Print, SkillName = ns.PlayerFaction, ns.QuestAllowed, ns.Print, ns.SkillName
 
 ---------------------------------------------------------------------------
 -- Available quests (QuestieDB), scan spread over several frames
@@ -387,10 +382,8 @@ function StartScan()
         end
         if not inChain then results[#results + 1] = en end
       end
-      kept = results
-      results = kept
       scan.entries = results
-      if Refresh then Refresh() end
+      Refresh()
     end
   end
   step()

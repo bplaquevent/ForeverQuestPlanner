@@ -2,10 +2,8 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, CharKey, Color, HasBit, K, L = ns.AreaName, ns.CharKey, ns.Color, ns.HasBit, ns.K, ns.L
-local OM, QDB, QGet, Settings, SharedData = ns.OM, ns.QDB, ns.QGet, ns.Settings, ns.SharedData
-local PlayerFaction = ns.PlayerFaction
-local NpcFriendly = ns.NpcFriendly
+local AreaName, Color, HasBit, K, L, OM, QDB, QGet = ns.AreaName, ns.Color, ns.HasBit, ns.K, ns.L, ns.OM, ns.QDB, ns.QGet
+local Settings, SharedData, PlayerFaction, NpcFriendly = ns.Settings, ns.SharedData, ns.PlayerFaction, ns.NpcFriendly
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)

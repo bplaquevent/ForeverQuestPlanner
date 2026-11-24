@@ -3,16 +3,10 @@
 
 local ADDON_NAME, ns = ...
 local ChainInfo, ChainText, CharKey, Color, FormatNumber, Geo = ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color, ns.FormatNumber, ns.Geo
-local GeoReady, IsClassMeta, IsCompleted, IsInLog, K, L, Nearest = ns.GeoReady, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
-local PlayerPos, PointText, Print, QDB, QGet, QuestMeta = ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta
-local AllPrereqs = ns.AllPrereqs
-local QuestTargets, Refresh, RemainingTargets, Settings, Snapshot, State = ns.QuestTargets, ns.Refresh, ns.RemainingTargets, ns.Settings, ns.Snapshot, ns.State
-local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.TurnInText, ns.StartPoints, ns.EntityPoints
-local LogRecord = ns.LogRecord
-local LogQuests = ns.LogQuests
-local LogEntry = ns.LogEntry
-local IsQuestComplete = ns.IsQuestComplete
-local Normalize = ns.Normalize
+local GeoReady, IsClassMeta, IsCompleted, IsInLog, K, L = ns.GeoReady, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L
+local PointText, Print, QDB, QGet, QuestMeta, Refresh = ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.Refresh
+local Settings, Snapshot, State, TrivialRange, TurnInText = ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange, ns.TurnInText
+local LogRecord, LogQuests, IsQuestComplete, Normalize = ns.LogRecord, ns.LogQuests, ns.IsQuestComplete, ns.Normalize
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -1181,5 +1175,5 @@ ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSear
 ns.ICON, ns.MatchWords, ns.OnWaypointChanged = ICON, MatchWords, OnWaypointChanged
 ns.ParseQuery, ns.PassStates, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinIcon, PinPoint, Plural
 ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetWatched = QuestHaystack, RenderExport, RenderList, SetWatched
-ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.IsWatched, ns.SetWatched, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, IsWatched, SetWatched, expandedCategories, journalStates
+ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.IsWatched, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, IsWatched, expandedCategories, journalStates
 ns.nearStates, ns.OpenQuestDetails, ns.panels, ns.tabButtons = nearStates, OpenQuestDetails, panels, tabButtons

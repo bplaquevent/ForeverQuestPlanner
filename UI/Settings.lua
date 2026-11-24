@@ -2,9 +2,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local CP, Color, Geo, K, L, Plural = ns.CP, ns.Color, ns.Geo, ns.K, ns.L, ns.Plural
-local Print, Refresh, Settings, scan = ns.Print, ns.Refresh, ns.Settings, ns.scan
-local State = ns.State
+local CP, Color, Geo, K, L, Refresh, Settings, scan, State = ns.CP, ns.Color, ns.Geo, ns.K, ns.L, ns.Refresh, ns.Settings, ns.scan, ns.State
 
 ---------------------------------------------------------------------------
 -- Settings: Roadbook difficulty and estimate parameters
