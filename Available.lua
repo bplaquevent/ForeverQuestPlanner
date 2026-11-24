@@ -397,7 +397,7 @@ function StartScan()
 end
 
 -- /fqp quest <id or part of a name>: what QuestieDB says about the quests that match, and why each is
--- listed or not as available (debugging aid).
+-- listed or not as available (debugging aid: in English on purpose, as /fqp npc, to be reported as it is).
 local function QuestDiag(text)
   local _, race, raceID = UnitRace("player")
   local _, rbit = PlayerBits()

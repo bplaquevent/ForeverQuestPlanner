@@ -7,9 +7,8 @@
 --    (flight network, boats and zeppelins, zone and dungeon levels): both are read directly.
 
 local ADDON_NAME, ns = ...
-ns = ns or {}
--- Localization: English by default, other languages in Locales/*.lua.
-local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
+-- Localization (Locales/*.lua): English by default.
+local L = ns.L
 local PREFIX = "|cff33ccffForeverQuestPlanner|r: "
 
 local function Print(msg)
@@ -67,6 +66,22 @@ local function MigrateSettings(root, key)
   return st
 end
 
+-- A zone pass as saved: its place and its two zones (a damaged entry would break every walk).
+local function ValidPass(ps)
+  return type(ps) == "table" and type(ps.a) == "number" and type(ps.b) == "number" and type(ps.c) == "number"
+    and type(ps.x) == "number" and type(ps.y) == "number"
+end
+
+local function KeepValidPasses(list)
+  local out = {}
+  for _, ps in ipairs(type(list) == "table" and list or {}) do
+    if ValidPass(ps) then out[#out + 1] = ps end
+  end
+  return out
+end
+
+local checkedShared -- the shared data checked this session
+
 -- Learned about the world, shared by every character: zone passes walked ({ c, x, y, a, b, n }) and
 -- the places really reached by the teleport spells (spell -> point). Created once from what was saved
 -- before (account-wide, then per character in 2.56.16): the same pass seen twice is kept once.
@@ -76,11 +91,18 @@ local function SharedData()
     root = {}
     ForeverQuestPlannerSettings = root
   end
-  if root.shared then return root.shared end
+  if root.shared then
+    if checkedShared ~= root.shared then
+      root.shared.passes = KeepValidPasses(root.shared.passes)
+      root.shared.teleportArrivals = type(root.shared.teleportArrivals) == "table" and root.shared.teleportArrivals or {}
+      checkedShared = root.shared
+    end
+    return root.shared
+  end
   local shared = { passes = {}, teleportArrivals = {} }
   local function take(t)
     if type(t) ~= "table" then return end
-    for _, ps in ipairs(type(t.passes) == "table" and t.passes or {}) do
+    for _, ps in ipairs(KeepValidPasses(t.passes)) do
       local same
       for _, q in ipairs(shared.passes) do
         if q.a == ps.a and q.b == ps.b and q.c == ps.c and math.abs(q.x - ps.x) < 150 and math.abs(q.y - ps.y) < 150 then
@@ -97,7 +119,7 @@ local function SharedData()
   end
   take(root)
   for _, st in pairs(root.chars or {}) do take(st) end
-  root.shared = shared
+  root.shared, checkedShared = shared, shared
   return shared
 end
 
@@ -525,7 +547,7 @@ end
 -- Forever uses C_SkillInfo (like Questie); the other APIs are fallbacks.
 local skillCache, skillCacheTime = nil, 0
 local function PlayerSkills(fresh) -- fresh: read again (a skill changed)
-  local now = GetTime and GetTime() or 0
+  local now = GetTime()
   if not fresh and skillCache and now - skillCacheTime < 5 then return skillCache[1], skillCache[2], skillCache[3] end
   local skills, names, known = {}, {}, false
   if C_SkillInfo and C_SkillInfo.GetNumSkillLines and C_SkillInfo.GetSkillLineInfo then

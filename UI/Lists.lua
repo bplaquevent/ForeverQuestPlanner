@@ -994,7 +994,7 @@ end
 -- Follows a QuestieDB point: OpenMap's waypoint (the game's pin and arrow, TomTom's too).
 local function PinPoint(p, title, label, questId)
   if not p then
-    Print(L["Unknown position for \""] .. (title or "?") .. L["\"."])
+    Print(string.format(L["Unknown position for \"%s\"."], title or "?"))
     return
   end
   local ui = Geo.PointUi(p)
@@ -1012,7 +1012,7 @@ local function PinPoint(p, title, label, questId)
     if Refresh then C_Timer.After(0.1, Refresh) end
   else
     PinStore()[CharKey()] = nil
-    Print(L["This client cannot place a pin here ("] .. PointText(p) .. ").")
+    Print(string.format(L["This client cannot place a pin here (%s)."], PointText(p)))
   end
 end
 
@@ -1087,7 +1087,7 @@ function Geo.ShowOnMap(getPoint, title, questId)
     PinPoint(p, title, label or L["objective"], questId)
     Geo.OpenWorldMap(Geo.PointUi(p))
   else
-    Print(L["Unknown position for \""] .. (title or "?") .. L["\"."])
+    Print(string.format(L["Unknown position for \"%s\"."], title or "?"))
     Geo.OpenWorldMap(questId and Geo.QuestZoneUi(questId))
   end
 end
@@ -1098,11 +1098,11 @@ function Geo.MapButton(getPoint, title, questId)
 end
 
 -- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.
-K.CUSTOM_TIP = "Roadbook list: the quests the Roadbook does, along the fastest route."
+K.CUSTOM_TIP = L["Roadbook list: the quests the Roadbook does, along the fastest route."]
 
 -- Tooltip (title, text) of an add / remove button of the quest id.
 function Geo.CustomTip(id)
-  return id and Geo.InCustom(id) and L["Remove from the Roadbook list"] or L["Add to the Roadbook list"], L[K.CUSTOM_TIP]
+  return id and Geo.InCustom(id) and L["Remove from the Roadbook list"] or L["Add to the Roadbook list"], K.CUSTOM_TIP
 end
 
 -- Adds the quest to the list or removes it; a quest with follow-ups asks whether its whole chain goes with it.
@@ -1193,9 +1193,9 @@ end
 function Geo.CustomBulkButtons(list)
   local locked = State.computing and true or nil
   return { text = L["Add all"], disabled = locked, fn = function() if not Geo.ListLocked() then Geo.CustomAddList(list) end end,
-      tip = { L["Add every quest of this category to the Roadbook list"], L[K.CUSTOM_TIP] } },
+      tip = { L["Add every quest of this category to the Roadbook list"], K.CUSTOM_TIP } },
     { text = L["Remove all"], disabled = locked, fn = function() if not Geo.ListLocked() then Geo.CustomRemoveList(list) end end,
-      tip = { L["Remove every quest of this category from the Roadbook list"], L[K.CUSTOM_TIP] } }
+      tip = { L["Remove every quest of this category from the Roadbook list"], K.CUSTOM_TIP } }
 end
 
 ---------------------------------------------------------------------------

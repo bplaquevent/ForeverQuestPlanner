@@ -892,7 +892,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
     if CP.RefuseWhileComputing() then return end -- one computation at a time: a request meanwhile is refused, not queued
     CP.computeToken = (CP.computeToken or 0) + 1
     token = CP.computeToken
-    State.computing, State.computeStart = true, GetTime and GetTime() or 0
+    State.computing, State.computeStart = true, GetTime()
     Geo.SyncQuestLogButton() -- the list is locked
     if not keep then Geo.ClearFrozen() end
     if Refresh then Refresh() end
@@ -1698,7 +1698,7 @@ function CP.CreateCheckpointButton()
   end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
-    self.dragEnd = GetTime and GetTime() or 0 -- the release of a Shift-drag must not count as a click
+    self.dragEnd = GetTime() -- the release of a Shift-drag must not count as a click
     local point, _, _, x, y = self:GetPoint()
     Settings().checkpointPos = { point, x, y }
   end)

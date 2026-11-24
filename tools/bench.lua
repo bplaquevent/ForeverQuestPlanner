@@ -141,6 +141,8 @@ end
 ---------------------------------------------------------------------------
 local P = LoadProblem(file)
 if opts.save then
+  -- A name only: it goes into a file path and a shell command.
+  if not opts.save:match("^[%w_-]+$") then fail("--save: letters, digits, - and _ only") end
   os.execute("mkdir -p '" .. root .. "/tools/cases'")
   local path = root .. "/tools/cases/" .. opts.save .. ".lua"
   local out = { "-- Roadbook problem captured by /fqp dump (" .. tostring(P.char) .. ", " .. tostring(P.date) .. ").\nreturn " }

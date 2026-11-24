@@ -371,7 +371,7 @@ local function RenderNear()
     local _, zoneName = CurrentMapSet()
     where = L["In the whole current zone"] .. (zoneName and (" (" .. zoneName .. ")") or "")
   else
-    where = L["Within "] .. State.nearRadius .. L[" m"]
+    where = string.format(L["Within %d m"], State.nearRadius)
   end
   local info = where .. L[" - updated automatically every 3 s."]
   if scan.running then info = info .. "\n" .. Color("ff8040", L["Scanning available quests: \"Available quests\" will fill in."]) end
@@ -387,7 +387,7 @@ local function RenderNear()
   local function row(it)
     local D = K.DESC
     local take = it.kind == "take"
-    local figures = Geo.DescLine(take and Geo.XPText(it.xp, true) or nil, Color(D.meta, string.format("%.0f m", it.d)),
+    local figures = Geo.DescLine(take and Geo.XPText(it.xp, true) or nil, Color(D.meta, string.format(L["%.0f m"], it.d)),
       (take and it.lowLevel) and Color(D.meta, L["low level"]) or nil)
     local who = (take and L["Given by: "] or L["Turn in to: "]) .. (it.giver or "?")
     local text = "  " .. StateIcons(it.id) ..
@@ -406,7 +406,7 @@ local function RenderNear()
     local text = "  " .. StateIcons(g.id) .. Geo.QuestTitle(g.label, g.id and { id = g.id, level = g.level } or nil)
     for _, it in ipairs(g.steps) do
       text = text .. Geo.DescLine(Color(D.action, L["Objective: "] .. (it.extra or "?") .. K.DESC_SEP .. PointText(it.p)),
-        Color(D.meta, string.format("%.0f m", it.d)))
+        Color(D.meta, string.format(L["%.0f m"], it.d)))
     end
     text = text .. Geo.ChainTextLine(g.id)
     local first = g.steps[1]

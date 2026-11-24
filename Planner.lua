@@ -53,8 +53,8 @@ function Geo.SkillNeed(id, q)
   if type(req) == "table" and req[1] and (req[2] or 0) > 0 then skill, need = req[1], req[2] end
   local parts = {}
   local Q = QDB.Quest
-  local okR, raw = false, nil
-  if Q and Q.GetRaw then okR, raw = pcall(Q.GetRaw, id, "objectivesText") end
+  local okR, raw
+  okR, raw = pcall(Q.GetRaw, id, "objectivesText")
   for _, list in ipairs({ okR and raw or QGet(Q, id, "objectivesText"), q and q.objectivesText }) do
     if type(list) == "table" then
       for _, t in ipairs(list) do parts[#parts + 1] = tostring(t) end
@@ -1091,7 +1091,7 @@ function Geo.NearestService(kind, pos)
   pos = pos or PlayerPos()
   if not pos then return nil end
   local cache = Geo.svcNear and Geo.svcNear[kind]
-  local now = GetTime and GetTime() or 0
+  local now = GetTime()
   if cache and now - cache.at < K.SERVICE_CACHE and cache.pos and (Dist(pos, cache.pos) or math.huge) < 100 then
     return cache.best
   end

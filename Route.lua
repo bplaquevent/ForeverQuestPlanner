@@ -416,7 +416,7 @@ function Geo.PreloadRewardItems()
   end
   for _, q in ipairs(LogQuests()) do want(q.id) end
   for _, en in ipairs(scan.entries or {}) do want(en.id) end
-  local start = GetTime and GetTime() or 0
+  local start = GetTime()
   while #missing > 0 and State.co and coroutine.running() == State.co and (GetTime() - start) < K.ITEM_WAIT do
     coroutine.yield() -- next frame
     local still = {}

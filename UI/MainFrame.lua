@@ -103,7 +103,7 @@ local function CreateRoadbookPanel(f)
   busySub:SetPoint("TOP", busyText, "BOTTOM", 0, -40)
   local tick = 0
   busy:SetScript("OnUpdate", function(_, elapsed)
-    local t = GetTime and GetTime() or 0
+    local t = GetTime()
     for i, d in ipairs(dots) do
       local wave = math.max(0, math.sin(t * 5 - i * 0.7)) -- 0..1, moving from left to right
       d:SetAlpha(0.25 + 0.75 * wave)
