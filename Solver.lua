@@ -865,6 +865,47 @@ local function QuickTravel(P, a, b)
   return S.Travel(P.W, P.net0, P.player.level, a, b)
 end
 
+-- A random factor between 1 and 1 + noise on v (rebuilds explore other choices); v as it is without noise.
+local function Noisy(v, rand, noise)
+  if not noise then return v end
+  return v * (1 + noise * (rand(1000) - 1) / 1000)
+end
+
+-- Cheapest place to insert step s in route r, after one of r[lo..hi]; glued(b): nothing may come between
+-- b and the step before it. Returns the index and the travel added (QuickTravel), nil if no place fits.
+local function CheapestSlot(P, r, s, lo, hi, glued, rand, noise)
+  local bestI, bestD
+  for i = lo, hi do
+    local a, b = r[i], r[i + 1]
+    if not (b and glued(b)) then
+      local d = QuickTravel(P, a.p, s.p)
+      if b then d = d + QuickTravel(P, s.p, b.p) - QuickTravel(P, a.p, b.p) end
+      d = Noisy(d, rand, noise)
+      if not bestD or d < bestD then bestI, bestD = i, d end
+    end
+  end
+  return bestI, bestD
+end
+
+-- Places allowed to a step of the list in a route whose steps are at pos[ci]: after the steps it needs
+-- (pred, unless free of the order rules), right after the step it is glued to. nil: not yet.
+local function ListRange(pred, s, pos, n, free)
+  local lo, hi = 1, n
+  if not free then
+    for _, pc in ipairs(pred[s.ci] or {}) do
+      local j = pos[pc]
+      if not j then return nil end
+      if j > lo then lo = j end
+    end
+  end
+  if s.glueTo then
+    local j = pos[s.glueTo]
+    if not j then return nil end
+    lo, hi = j, j
+  end
+  return lo, hi
+end
+
 -- Inserts a task's steps where they cost the least (quick estimate), in their order, after the turn-in
 -- of the quest they follow (a candidate quest or a quest of the list: depCi). Returns the new core and
 -- the extra time, or nil.
@@ -891,15 +932,7 @@ function S.InsertTask(P, core, t)
   for k, s in ipairs(t.stops) do
     local hi = #r
     if s.glue and k > 1 then hi = lo end
-    local bestI, bestD
-    for i = lo, hi do
-      local a, b = r[i], r[i + 1]
-      if not (b and b.glue) then
-        local d = QuickTravel(P, a.p, s.p)
-        if b then d = d + QuickTravel(P, s.p, b.p) - QuickTravel(P, a.p, b.p) end
-        if not bestD or d < bestD then bestI, bestD = i, d end
-      end
-    end
+    local bestI, bestD = CheapestSlot(P, r, s, lo, hi, function(b) return b.glue end)
     if not bestI then return nil end
     table.insert(r, bestI + 1, s)
     delta = delta + bestD + (s.work or 0)
@@ -1087,28 +1120,10 @@ function S.BuildCustom(P, core, rand, noise)
     for i, st in ipairs(r) do if st.ci then pos[st.ci] = i end end
     local best
     for ri, s in ipairs(remaining) do
-      local ok, lo, hi = true, 1, #r
-      if not (relax or s.relaxed) then
-        for _, pc in ipairs(P.custom.pred[s.ci] or {}) do
-          local j = pos[pc]
-          if not j then ok = false break end
-          if j > lo then lo = j end
-        end
-      end
-      if ok and s.glueTo then
-        local j = pos[s.glueTo]
-        if j then lo, hi = j, j else ok = false end
-      end
-      if ok then
-        for j = lo, hi do
-          local a, b = r[j], r[j + 1]
-          if not (b and b.glueTo) then
-            local d = QuickTravel(P, a.p, s.p)
-            if b then d = d + QuickTravel(P, s.p, b.p) - QuickTravel(P, a.p, b.p) end
-            if noise then d = d * (1 + noise * (rand(1000) - 1) / 1000) end
-            if not best or d < best.d then best = { ri = ri, j = j, d = d } end
-          end
-        end
+      local lo, hi = ListRange(P.custom.pred, s, pos, #r, relax or s.relaxed)
+      if lo then
+        local j, d = CheapestSlot(P, r, s, lo, hi, function(b) return b.glueTo end, rand, noise)
+        if j and (not best or d < best.d) then best = { ri = ri, j = j, d = d } end
       end
       S.yield()
     end
@@ -1203,28 +1218,10 @@ function S.InsertUnit(P, core, u, rand, noise)
     for i, st in ipairs(r) do if st.ci then pos[st.ci] = i end end
     local best
     for ri, s in ipairs(remaining) do
-      local ok, lo, hi = true, 1, #r
-      if not s.relaxed then
-        for _, pc in ipairs(C.pred[s.ci] or {}) do
-          local j = pos[pc]
-          if not j then ok = false break end
-          if j > lo then lo = j end
-        end
-      end
-      if ok and s.glueTo then
-        local j = pos[s.glueTo]
-        if j then lo, hi = j, j else ok = false end
-      end
-      if ok then
-        for j = lo, hi do
-          local a, b = r[j], r[j + 1]
-          if not (b and (b.glueTo or b.glue)) then
-            local d = QuickTravel(P, a.p, s.p)
-            if b then d = d + QuickTravel(P, s.p, b.p) - QuickTravel(P, a.p, b.p) end
-            if noise then d = d * (1 + noise * (rand(1000) - 1) / 1000) end
-            if not best or d < best.d then best = { ri = ri, j = j, d = d } end
-          end
-        end
+      local lo, hi = ListRange(C.pred, s, pos, #r, s.relaxed)
+      if lo then
+        local j, d = CheapestSlot(P, r, s, lo, hi, function(b) return b.glueTo or b.glue end, rand, noise)
+        if j and (not best or d < best.d) then best = { ri = ri, j = j, d = d } end
       end
     end
     if not best then return nil end
@@ -1315,27 +1312,21 @@ function S.Optimize(P, goal, opts)
   -- Construction: adds the quest (or chain) bringing the most XP per second added, until the goal
   -- (custom Roadbook: every step of the list, by cheapest insertion).
   -- noise: each rate is multiplied by a random factor up to 1 + noise (rebuilds explore other choices).
-  -- Units of the list added by the most XP per second (a unit adding a rule broken counts less).
-  local function constructUnits(c, noise, share)
+  -- Greedy construction: from c, adds the best candidate each time. each(c, consider) calls
+  -- consider(candidate) for every one; penalize: a candidate adding a rule broken counts less.
+  local function greedy(c, noise, share, penalize, each)
     local cur = sim(c)
     while not reached(cur) and not out(share) do
-      local inCore, best = S.UnitsIn(P, c), nil
-      for _, u in ipairs(P.custom.unitList) do
-        if not inCore[u] then
-          local cand = S.InsertUnit(P, c, u, rand, noise)
-          if cand and valid(P, cand) then
-            local res = sim(cand)
-            local ok = S.HardViolations(res) == 0
-            if ok and goal.kind == "time" and res.time > goal.value * O.OVERSHOOT then ok = false end
-            if ok then
-              local rate = (res.xp - cur.xp) / math.max(res.time - cur.time, 30)
-              if #res.violations > #cur.violations then rate = rate / 10 end
-              if noise then rate = rate * (1 + noise * (rand(1000) - 1) / 1000) end
-              if rate > 0 and (not best or rate > best.rate) then best = { core = cand, res = res, rate = rate } end
-            end
-          end
-        end
-      end
+      local best
+      each(c, function(cand)
+        if not (cand and valid(P, cand)) then return end
+        local res = sim(cand)
+        if S.HardViolations(res) ~= 0 or (goal.kind == "time" and res.time > goal.value * O.OVERSHOOT) then return end
+        local rate = (res.xp - cur.xp) / math.max(res.time - cur.time, 30)
+        if penalize and #res.violations > #cur.violations then rate = rate / 10 end
+        rate = Noisy(rate, rand, noise)
+        if rate > 0 and (not best or rate > best.rate) then best = { core = cand, res = res, rate = rate } end
+      end)
       if not best then break end
       c, cur = best.core, best.res
     end
@@ -1343,28 +1334,18 @@ function S.Optimize(P, goal, opts)
   end
   local function construct(c, noise, share)
     if custom then return S.BuildCustom(P, c, rand, noise) end
-    if mode == "pick" then return constructUnits(c, noise, share) end
-    local cur = sim(c)
-    while not reached(cur) and not out(share) do
-      local best
-      local adds = S.Additions(P, c)
-      for j = 1, math.min(O.TOP_K, #adds) do
-        local cand = adds[j].core
-        if valid(P, cand) then
-          local res = sim(cand)
-          local ok = S.HardViolations(res) == 0
-          if ok and goal.kind == "time" and res.time > goal.value * O.OVERSHOOT then ok = false end
-          if ok then
-            local rate = (res.xp - cur.xp) / math.max(res.time - cur.time, 30)
-            if noise then rate = rate * (1 + noise * (rand(1000) - 1) / 1000) end
-            if rate > 0 and (not best or rate > best.rate) then best = { core = cand, res = res, rate = rate } end
-          end
+    if mode == "pick" then -- units of the list
+      return greedy(c, noise, share, true, function(core, consider)
+        local inCore = S.UnitsIn(P, core)
+        for _, u in ipairs(P.custom.unitList) do
+          if not inCore[u] then consider(S.InsertUnit(P, core, u, rand, noise)) end
         end
-      end
-      if not best then break end
-      c, cur = best.core, best.res
+      end)
     end
-    return c
+    return greedy(c, noise, share, false, function(core, consider)
+      local adds = S.Additions(P, core)
+      for j = 1, math.min(O.TOP_K, #adds) do consider(adds[j].core) end
+    end)
   end
   local start = { { kind = "start", p = P.player.pos, work = 0 } }
   if mixed then
