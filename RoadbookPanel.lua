@@ -12,6 +12,7 @@ local ADDON_NAME, ns = ...
 local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K, L = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K, ns.L
 local IsInLog, OM, OpenQuestDetails, Plural, RouteText, Settings = ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Plural, ns.RouteText, ns.Settings
 local UpdateScrollBar = ns.UpdateScrollBar
+local State = ns.State
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line
@@ -144,7 +145,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   local sep = Color("777777", " - ")
   local value = function(t) return Color("dddddd", t) end
   local lines = {}
-  if Geo.computing then lines[1] = Color("ffd100", L["Recomputing…"]) end
+  if State.computing then lines[1] = Color("ffd100", L["Recomputing…"]) end
   -- Size and progress.
   local total = #route - 1
   local finished = total > 0 and doneCount >= total
@@ -624,9 +625,9 @@ function Geo.MapPanelSync()
   UpdateScrollBar(panel.scroll)
   panel.track:SetChecked(following)
   panel.auto:SetChecked(Settings().autoAdd and true or false)
-  panel.track:SetEnabled(not Geo.computing and (following or not Geo.IsFinished()))
-  panel.emptyB:SetEnabled(not Geo.computing)
-  panel.recalc:SetEnabled(not Geo.computing and true or false)
+  panel.track:SetEnabled(not State.computing and (following or not Geo.IsFinished()))
+  panel.emptyB:SetEnabled(not State.computing)
+  panel.recalc:SetEnabled(not State.computing and true or false)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
   local key = tostring(target)
   if target and panel.scrollKey ~= key then

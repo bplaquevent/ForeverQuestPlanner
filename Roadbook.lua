@@ -10,6 +10,7 @@ local QuestTargets, Refresh, Settings, Snapshot, StartScan = ns.QuestTargets, ns
 local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.KnownFlights, ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
 local IsWatched, SetWatched = ns.IsWatched, ns.SetWatched
 local OpenQuestDetails, scan = ns.OpenQuestDetails, ns.scan
+local LogEntry = ns.LogEntry
 
 ---------------------------------------------------------------------------
 -- Roadbook checkpoints: focus on the next step from a floating button
@@ -109,7 +110,7 @@ function CP.FocusStep(s)
   if qid and IsInLog(qid) then WatchOnly(qid) end
   local fz = moved and s.kind == "turnin" and Geo.Frozen()
   if fz and not CP.StepReady(s, fz.route) then
-    local need = s.task.id and Geo.SkillNeed(s.task.id, CP.LogEntry(s.task.id))
+    local need = s.task.id and Geo.SkillNeed(s.task.id, LogEntry(s.task.id))
     Print(Color(K.DESC.warn, need and (Geo.SkillNeedText(need) .. L[": "]) or L["Objectives not completed yet: "])
       .. (s.task.title or "?"))
   end
@@ -130,12 +131,6 @@ end
 -- Saved Roadbook: once computed, the plan no longer changes until its end, or until a
 -- recompute request (duration change, Recalculate button).
 ---------------------------------------------------------------------------
-function Geo.CopyPoint(p)
-  if not p then return nil end
-  return { c = p.c, x = p.x, y = p.y, area = p.area, ui = p.ui, mx = p.mx, my = p.my, zoneName = p.zoneName,
-    teleport = p.teleport, cast = p.cast, instance = p.instance, lmin = p.lmin, lmax = p.lmax }
-end
-
 -- Quest steps done inside a dungeon (dungeon step of the custom Roadbook).
 function Geo.SerializeMembers(members)
   if not members then return nil end
@@ -159,21 +154,32 @@ function Geo.DeserializeMembers(list)
   return out
 end
 
+-- Fields of a step and of its task saved as they are; the others are written out below.
+local STEP_FIELDS = { "kind", "at", "xp", "work", "gain", "spots", "escort", "glue", "via", "bindDest", "search",
+  "done", "afterSource", "skill", "npc", "nopin" }
+local TASK_FIELDS = { "id", "title", "level", "xp", "starter", "reqLevel", "tags", "npc", "mode", "from", "dest",
+  "kind", "quick", "dungeon", "warn", "levelWarn", "orderWarn", "spell", "service", "npcId" }
+
+local function CopyFields(from, fields, into)
+  for _, k in ipairs(fields) do into[k] = from[k] end
+  return into
+end
+
 function Geo.SerializeStep(st)
   local t = st.task or {}
-  return { kind = st.kind, at = st.at, xp = st.xp, work = st.work, gain = st.gain, spots = st.spots,
-    escort = st.escort, glue = st.glue, via = st.via, bindDest = st.bindDest, search = st.search,
-    fmHub = st.fmHub and { id = st.fmHub.id, node = st.fmHub.node, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil,
-    members = Geo.SerializeMembers(t.members),
-    spotN = st.spot and st.spot.n, done = st.done, p = Geo.CopyPoint(st.p),
-    objName = st.r and st.r.tg and st.r.tg.name, objKind = st.r and st.r.tg and st.r.tg.kind, count = st.r and st.r.count,
-    objSource = st.r and st.r.tg and st.r.tg.sourceItem, afterSource = st.afterSource,
-    skill = st.skill, npc = st.npc, nopin = st.nopin,
-    first = t.stops and t.stops[1] == st or nil,
-    task = { id = t.id, title = t.title, level = t.level, xp = t.xp, starter = t.starter, reqLevel = t.reqLevel,
-      depTitle = t.dep and t.dep.title, tags = t.tags, npc = t.npc, mode = t.mode, from = t.from, dest = t.dest,
-      destP = Geo.CopyPoint(t.destP), kind = t.kind, quick = t.quick, dungeon = t.dungeon, warn = t.warn,
-      levelWarn = t.levelWarn, orderWarn = t.orderWarn, spell = t.spell, service = t.service, npcId = t.npcId } }
+  local rec = CopyFields(st, STEP_FIELDS, {})
+  rec.fmHub = st.fmHub and { id = st.fmHub.id, node = st.fmHub.node, name = st.fmHub.name, p = Geo.CopyPoint(st.fmHub.p) } or nil
+  rec.members = Geo.SerializeMembers(t.members)
+  rec.spotN = st.spot and st.spot.n
+  rec.p = Geo.CopyPoint(st.p)
+  local tg = st.r and st.r.tg
+  rec.objName, rec.objKind, rec.objSource = tg and tg.name, tg and tg.kind, tg and tg.sourceItem
+  rec.count = st.r and st.r.count
+  rec.first = t.stops and t.stops[1] == st or nil
+  rec.task = CopyFields(t, TASK_FIELDS, {})
+  rec.task.depTitle = t.dep and t.dep.title
+  rec.task.destP = Geo.CopyPoint(t.destP)
+  return rec
 end
 
 function Geo.DeserializeStep(rec, tasks)
@@ -181,18 +187,16 @@ function Geo.DeserializeStep(rec, tasks)
   local key = tostring(tr.id) .. "|" .. tostring(tr.title) .. "|" .. tostring((rec.kind == "travel" or rec.kind == "dungeon") and rec.at or "")
   local task = tasks[key]
   if not task then
-    task = { id = tr.id, title = tr.title, level = tr.level, xp = tr.xp, starter = tr.starter, reqLevel = tr.reqLevel,
-      dep = tr.depTitle and { title = tr.depTitle } or nil, tags = tr.tags, npc = tr.npc, mode = tr.mode,
-      from = tr.from, dest = tr.dest, destP = tr.destP, kind = tr.kind, quick = tr.quick, stops = {},
-      dungeon = tr.dungeon, warn = tr.warn, levelWarn = tr.levelWarn, orderWarn = tr.orderWarn, spell = tr.spell, service = tr.service, npcId = tr.npcId,
-      members = Geo.DeserializeMembers(rec.members) }
+    task = CopyFields(tr, TASK_FIELDS, { stops = {} })
+    task.dep = tr.depTitle and { title = tr.depTitle } or nil
+    task.destP = tr.destP
+    task.members = Geo.DeserializeMembers(rec.members)
     tasks[key] = task
   end
-  local st = { kind = rec.kind, at = rec.at, xp = rec.xp, work = rec.work or 0, gain = rec.gain, spots = rec.spots,
-    escort = rec.escort, glue = rec.glue, fmHub = rec.fmHub, via = rec.via, bindDest = rec.bindDest, search = rec.search,
-    spot = rec.spotN and { n = rec.spotN } or nil, done = rec.done, p = rec.p or {}, task = task, afterSource = rec.afterSource,
-    skill = rec.skill, npc = rec.npc, nopin = rec.nopin,
-    r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind, sourceItem = rec.objSource }, count = rec.count } or nil }
+  local st = CopyFields(rec, STEP_FIELDS, { task = task })
+  st.work, st.p, st.fmHub = rec.work or 0, rec.p or {}, rec.fmHub
+  st.spot = rec.spotN and { n = rec.spotN } or nil
+  st.r = rec.objName and { tg = { name = rec.objName, kind = rec.objKind, sourceItem = rec.objSource }, count = rec.count } or nil
   if rec.first then task.stops[1] = st end
   return st
 end
@@ -217,10 +221,21 @@ function Geo.IsCustom()
   return (rec and rec.info and rec.info.custom) and true or false
 end
 
--- Saves the plan.
-function Geo.Freeze(route, info)
+local function SerializeRoute(route)
   local steps = {}
   for i = 2, #route do steps[#steps + 1] = Geo.SerializeStep(route[i]) end
+  return steps
+end
+
+-- Saves the steps of the loaded plan again, after they changed (marked, removed, added).
+function Geo.SaveRoute()
+  local fz, rec = Geo.frozen, Geo.FrozenRec()
+  if fz and rec then rec.steps = SerializeRoute(fz.route) end
+end
+
+-- A new or adapted plan: saved, and redrawn on the map if it is there.
+function Geo.Freeze(route, info)
+  local steps = SerializeRoute(route)
   local slim = { count = info.count, xp = info.xp, total = info.total, mobXP = info.mobXP, levels = info.levels,
     speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.taxi,
     custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered }
@@ -230,7 +245,7 @@ function Geo.Freeze(route, info)
   Geo.Trace("freeze", string.format("plan saved: %d step(s), %d done%s", #steps,
     (function() local n = 0 for _, s in ipairs(steps) do if s.done then n = n + 1 end end return n end)(),
     info.custom and ", custom list" or ""))
-  Geo.MapSync() -- a new or adapted plan: redrawn on the map if it is there
+  Geo.MapSync()
 end
 
 -- Saved plan (reloaded after a /reload), or nil.
@@ -254,7 +269,7 @@ function Geo.ClearFrozen()
   if Geo.frozen or Geo.FrozenRec() then Geo.Trace("clear", "plan emptied") end
   Geo.frozen = nil
   Geo.FrozenStore()[CharKey()] = nil
-  Geo.lastPlanError = nil
+  State.lastPlanError = nil
 end
 
 -- Steps to come removed, the steps done kept (history): the custom Roadbook whose list was emptied.
@@ -265,7 +280,7 @@ function Geo.KeepOnlyDone()
   local start = { { kind = "start", p = fz.route[1].p, work = 0 } }
   local info = {}
   for k, v in pairs(fz.info) do info[k] = v end
-  local route = Geo.KeepDone(fz, CP.StepDone, start, { total = 0, levels = {} }, info)
+  local route = Geo.KeepDone(fz, CP.StepDone, start, { total = 0, levels = { UnitLevel("player") } }, info)
   if #route < 2 then return false end
   info.dungeons, info.discovered, info.skipped, info.unplanned = nil, nil, nil, nil
   Geo.Freeze(route, info)
@@ -284,7 +299,7 @@ end
 
 -- The Roadbook exists (saved, or being computed).
 function Geo.HasRoadbook()
-  if Geo.computing then return true end
+  if State.computing then return true end
   local rec = Geo.FrozenRec()
   return (rec and rec.steps and #rec.steps > 0) or false
 end
@@ -294,12 +309,7 @@ function Geo.MarkDone(st, value)
   if value == nil then value = true end
   Geo.Trace("mark", (value and "done: " or "not done: ") .. Geo.StepTrace(st))
   st.done = value or nil
-  local fz, rec = Geo.frozen, Geo.FrozenRec()
-  if fz and rec and rec.steps then
-    for i = 2, #fz.route do
-      if fz.route[i] == st and rec.steps[i - 1] then rec.steps[i - 1].done = value or nil end
-    end
-  end
+  Geo.SaveRoute()
 end
 
 -- Step already done: marked, or observed in the game (quest picked up, objective done, quest turned in…).
@@ -329,22 +339,13 @@ function CP.StepDone(st)
     return o and o.finished and true or false
   end
   if st.kind == "skill" then
-    return not (id and Geo.SkillNeed(id, CP.LogEntry(id)))
+    return not (id and Geo.SkillNeed(id, LogEntry(id)))
   end
   if st.kind == "fm" then
     local node = (st.fmHub and st.fmHub.node) or Geo.NodeAt(st.p)
     if node and Geo.KnownNodes()[node] then return true end
   end
   return false
-end
-
--- Quest log entry of a quest (last capture), or nil.
-function CP.LogEntry(id)
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  for _, q in ipairs(e and e.quests or {}) do
-    if q.id == id then return q end
-  end
-  return nil
 end
 
 -- Step that can be done now (order of its quest): a turn-in once the other steps of its quest in
@@ -364,7 +365,7 @@ function CP.StepReady(st, route)
   end
   local id = st.task and st.task.id
   if not id or (st.kind ~= "turnin" and st.kind ~= "obj") then return true end
-  if st.kind == "turnin" and Geo.SkillNeed(id, CP.LogEntry(id)) then return false end -- profession level
+  if st.kind == "turnin" and Geo.SkillNeed(id, LogEntry(id)) then return false end -- profession level
   if st.kind == "turnin" and IsInLog(id) and C_QuestLog.IsComplete and C_QuestLog.IsComplete(id) then return true end
   for i = 2, #route do
     local o = route[i]
@@ -393,8 +394,8 @@ function Geo.Recompute(goal, cb, keepDone, re)
   if not keepDone then Geo.ClearFrozen() end
   Snapshot()
   Geo.RequestPlan(goal, function(route, err, info)
-    if not Geo.computing then return end -- deleted meanwhile
-    Geo.computing = nil
+    if not State.computing then return end -- deleted meanwhile
+    State.computing = nil
     pcall(CP.RefreshButton) -- the Objective button can be clicked again
     if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end -- the list can change again
     if route and #route >= 2 and goal ~= "custom" then
@@ -485,7 +486,7 @@ end
 -- Turns the tracking on ("Tracking" box of the steps panel, Objective button): the Objective button
 -- follows the Roadbook, which is computed again from here.
 function CP.TrackOn()
-  if Geo.computing then
+  if State.computing then
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
     return
   end
@@ -511,7 +512,7 @@ function CP.DoTrackOn()
   else
     CP.focusAfter = true
     ok, res = pcall(CP.Recompute, "custom", true)
-    res = ok and Geo.computing and true or false
+    res = ok and State.computing and true or false
   end
   CP.turningOn = nil
   if not ok then Print(L["Roadbook update error: "] .. tostring(res)) end
@@ -534,7 +535,7 @@ end
 -- Returns true if an update was started.
 function CP.RecallCheck()
   local fz, rec = Geo.Frozen(), Geo.FrozenRec()
-  if not (fz and rec) or Geo.computing then return false end
+  if not (fz and rec) or State.computing then return false end
   local now = Geo.RecallState()
   if not rec.recall then -- Roadbook from a former version: its state starts now
     rec.recall = now
@@ -557,7 +558,7 @@ function CP.Replan(msg, opts, manual)
   -- Never computed again by itself while not tracked (manual: the Recompute icon).
   if not (manual or Geo.Tracking() or CP.turningOn) then return false end
   if not GeoReady() then return false end
-  if Geo.computing then
+  if State.computing then
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
     return false
   end
@@ -582,7 +583,7 @@ function CP.ScheduleRecallCheck(delay)
     if token ~= CP.recallToken then return end
     CP.recallAt = nil
     if not Geo.Frozen() or not Geo.Tracking() then return end
-    if CP.flying or Geo.computing or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
+    if CP.flying or State.computing or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
       or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) or not PlayerPos() then
       CP.ScheduleRecallCheck(10)
       return
@@ -608,7 +609,7 @@ function CP.AheadKey(st)
 end
 function CP.AheadCheck()
   local fz = Geo.Frozen()
-  if not fz or Geo.computing or CP.autoPending then return false end
+  if not fz or State.computing or CP.autoPending then return false end
   local route, first, ahead = fz.route, nil, {}
   for i = 2, #route do
     local st = route[i]
@@ -652,7 +653,7 @@ end
 
 function CP.NearbyCheck()
   local fz = Geo.Frozen()
-  if not fz or not Geo.Tracking() or Geo.computing or CP.autoPending or Geo.ServicePending() then return end
+  if not fz or not Geo.Tracking() or State.computing or CP.autoPending or Geo.ServicePending() then return end
   if CP.flying or (UnitOnTaxi and UnitOnTaxi("player")) or (InCombatLockdown and InCombatLockdown())
     or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) then return end
   local pos = PlayerPos()
@@ -797,8 +798,8 @@ function CP.Empty()
 end
 
 function CP.DoEmpty()
-  if Geo.computing then -- computation in progress: cancelled
-    Geo.co, Geo.planCbs, Geo.computing = nil, nil, nil
+  if State.computing then -- computation in progress: cancelled
+    State.co, State.planCbs, State.computing = nil, nil, nil
     CP.computeToken = (CP.computeToken or 0) + 1
   end
   CP.TrackOff(true)
@@ -806,8 +807,8 @@ function CP.DoEmpty()
   Geo.ClearFrozen()
   Geo.ServiceClear()
   Geo.CustomSetList({}, true)
-  Geo.customUnplanned = nil
-  Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute
+  State.customUnplanned = nil
+  State.customToken = (State.customToken or 0) + 1 -- no pending recompute
   Print(L["Roadbook emptied."])
   if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
   CP.RefreshButton()
@@ -885,13 +886,13 @@ function CP.Recompute(goal, keep, attempt, token, re)
       if not keep then Print(L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."]) end
       return
     end
-    if Geo.computing then -- one computation at a time: a request meanwhile is refused, not queued
+    if State.computing then -- one computation at a time: a request meanwhile is refused, not queued
       Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
       return
     end
     CP.computeToken = (CP.computeToken or 0) + 1
     token = CP.computeToken
-    Geo.computing, Geo.computingGoal, Geo.computeStart = true, goal, GetTime and GetTime() or 0
+    State.computing, State.computeStart = true, GetTime and GetTime() or 0
     if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end -- the list is locked
     if not keep then Geo.ClearFrozen() end
     if Refresh then Refresh() end
@@ -903,7 +904,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
     if not scan.running then StartScan() end
     attempt = (attempt or 0) + 1
     if attempt > 40 then
-      Geo.computing = nil
+      State.computing = nil
       pcall(CP.RefreshButton)
       if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
       Print(L["Quest scan is taking too long: try again in a moment."])
@@ -951,7 +952,7 @@ end
 -- panel shown, the map left closed). Right click: the steps panel shown or hidden.
 function CP.ObjectiveClickUnsafe(button)
   -- Roadbook being computed: nothing, unless it is adapted while followed (its step stays shown).
-  if Geo.computing and not (Geo.Tracking() and CP.CurrentFocus()) then return end
+  if State.computing and not (Geo.Tracking() and CP.CurrentFocus()) then return end
   if not Geo.Frozen() then
     CP.ShowActive()
     return
@@ -1193,11 +1194,7 @@ function CP.Reroute(st, pos, msg)
     legs = Geo.LegSteps(Geo.World(), pos, target.p, Geo.Net(TravelSpeed()), UnitLevel("player"), st.at)
   end
   for k, leg in ipairs(legs) do table.insert(route, fi + k - 1, leg) end
-  local rec = Geo.FrozenRec()
-  if rec then
-    rec.steps = {}
-    for i = 2, #route do rec.steps[#rec.steps + 1] = Geo.SerializeStep(route[i]) end
-  end
+  Geo.SaveRoute()
   local first = legs[1]
   msg = msg or L["Wrong destination: new route. "]
   if first then
@@ -1221,7 +1218,7 @@ function CP.GiverFound(a1, a2)
   local handled = false
   local fz = Geo.Frozen()
   if fz then
-    local route, rec = fz.route, Geo.FrozenRec()
+    local route = fz.route
     local list = {}
     for i = 2, #route do
       local st = route[i]
@@ -1240,9 +1237,9 @@ function CP.GiverFound(a1, a2)
         local i = list[k]
         if i ~= best then
           table.remove(route, i)
-          if rec and rec.steps then table.remove(rec.steps, i - 1) end
         end
       end
+      Geo.SaveRoute()
       handled = true
       local msg = L["Quest giver found: "] .. (title or "?") .. ". "
       scan.dirty = true -- the quest left the available ones: scanned again before the computation
@@ -1303,7 +1300,7 @@ end
 
 -- Added as soon as no computation is running.
 function CP.AutoAddSoon(id, title, tries)
-  if Geo.computing then
+  if State.computing then
     if (tries or 0) < 30 then C_Timer.After(2, function() CP.AutoAddSoon(id, title, (tries or 0) + 1) end) end
     return
   end
@@ -1482,7 +1479,7 @@ function CP.RefreshButton()
   local b = CP.checkpointButton
   if not (b and b.title) then return end
   local s = CP.CurrentFocus()
-  if Geo.computing and not s then
+  if State.computing and not s then
     -- Roadbook being computed with no step followed (being computed, start…): the click does nothing.
     b.title:SetText(L["Objective"])
     b.sub:SetText(L["Recomputing…"])
@@ -1506,7 +1503,7 @@ function CP.RefreshButton()
     local sub = CP.PackInfos(b.sub, d, maxW)
     if types ~= "" then sub = types .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
     -- Roadbook adapted while followed: the step stays shown meanwhile, replaced at the end if needed.
-    if Geo.computing then sub = Color("ffd100", L["Recomputing…"]) .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
+    if State.computing then sub = Color("ffd100", L["Recomputing…"]) .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
     b.sub:SetText(sub)
     b.current = s
   else
@@ -1744,7 +1741,7 @@ K.SERVICE_ICON_SIZE = 26
 -- planned again (transport steps to reach it, then the rest). A second click on the pending
 -- service cancels it.
 function CP.ServiceClick(kind)
-  if Geo.computing then
+  if State.computing then
     Print(string.format(L["Computing the Roadbook (up to %d s), please wait…"], K.PLAN_TIME))
     return
   end
