@@ -9,8 +9,8 @@
 -- (the player's pins shown or hidden as they were, and the waypoint followed before tracking).
 
 local ADDON_NAME, ns = ...
-local CP, CharKey, ClearPin, Geo, K, L, OM = ns.CP, ns.CharKey, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM
-local IsInLog, OpenQuestDetails, Print, Settings = ns.IsInLog, ns.OpenQuestDetails, ns.Print, ns.Settings
+local CP, CharKey, ClearPin, Geo, K, L, OM, IsInLog = ns.CP, ns.CharKey, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM, ns.IsInLog
+local OpenQuestDetails, Print, Settings = ns.OpenQuestDetails, ns.Print, ns.Settings
 
 K.MAP_SET = "fqp_roadbook"             -- OpenMap pin set of the steps
 K.MAP_ROUTE_SET = "fqp_roadbook_route" -- and of the route (under the pins)

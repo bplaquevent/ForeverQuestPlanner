@@ -6,12 +6,9 @@
 -- plain tables only, with the map of the zones around the points (the bench has no map API).
 
 local ADDON_NAME, ns = ...
-local BuildScanContext, BuildTasks, CharKey, Geo, K, L = ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.Geo, ns.K, ns.L
-local OM, PlayerPos, Print, QDB, QGet, Settings = ns.OM, ns.PlayerPos, ns.Print, ns.QDB, ns.QGet, ns.Settings
-local AllPrereqs = ns.AllPrereqs
-local StartScan, State, TravelSpeed, UnitTime, scan = ns.StartScan, ns.State, ns.TravelSpeed, ns.UnitTime, ns.scan
-local LogById = ns.LogById
-local WaitScan = ns.WaitScan
+local BuildScanContext, BuildTasks, CharKey, Geo, K, L, OM = ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.Geo, ns.K, ns.L, ns.OM
+local PlayerPos, Print, QDB, QGet, Settings, AllPrereqs, State = ns.PlayerPos, ns.Print, ns.QDB, ns.QGet, ns.Settings, ns.AllPrereqs, ns.State
+local TravelSpeed, UnitTime, LogById, WaitScan = ns.TravelSpeed, ns.UnitTime, ns.LogById, ns.WaitScan
 
 local Pb = {}
 K.BENCH_VERSION = 2

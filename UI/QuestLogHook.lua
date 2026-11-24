@@ -4,8 +4,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local Geo, L = ns.Geo, ns.L
-local State = ns.State
+local Geo, L, State = ns.Geo, ns.L, ns.State
 
 local buttons = {} -- host frame -> button
 local hooked = {}  -- what is already hooked

@@ -2,20 +2,14 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AllInstance, AreaName, ChainInfo, CharKey, CheckAvailable, DBXP = ns.AllInstance, ns.AreaName, ns.ChainInfo, ns.CharKey, ns.CheckAvailable, ns.DBXP
-local Dist, EntityPoints, Geo, GetItemInfoCompat, HasBit = ns.Dist, ns.EntityPoints, ns.Geo, ns.GetItemInfoCompat, ns.HasBit
-local IsClassMeta, IsCompleted, K, L, Nearest, NextQuests = ns.IsClassMeta, ns.IsCompleted, ns.K, ns.L, ns.Nearest, ns.NextQuests
-local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta, ns.QuestTargets
-local AllPrereqs = ns.AllPrereqs
-local Refresh, RemainingTargets, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Settings, ns.StartPoints
-local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
-local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
-local LogQuests = ns.LogQuests
-local AllIds = ns.AllIds
-local NpcFriendly = ns.NpcFriendly
-local PlayerFaction = ns.PlayerFaction
-local WornItemLevel = ns.WornItemLevel
-local SkillName = ns.SkillName
+local AllInstance, AreaName, CheckAvailable, DBXP, Dist = ns.AllInstance, ns.AreaName, ns.CheckAvailable, ns.DBXP, ns.Dist
+local EntityPoints, Geo, GetItemInfoCompat, HasBit, IsCompleted = ns.EntityPoints, ns.Geo, ns.GetItemInfoCompat, ns.HasBit, ns.IsCompleted
+local K, L, Nearest, NextQuests, PlayerPos, PlayerSkills, QDB = ns.K, ns.L, ns.Nearest, ns.NextQuests, ns.PlayerPos, ns.PlayerSkills, ns.QDB
+local QGet, QuestMeta, QuestTargets, AllPrereqs, Refresh = ns.QGet, ns.QuestMeta, ns.QuestTargets, ns.AllPrereqs, ns.Refresh
+local RemainingTargets, Settings, StartPoints, State, TravelSpeed = ns.RemainingTargets, ns.Settings, ns.StartPoints, ns.State, ns.TravelSpeed
+local TurnInText, UnitTime, OM, WorldPos, scan, LogQuests = ns.TurnInText, ns.UnitTime, ns.OM, ns.WorldPos, ns.scan, ns.LogQuests
+local AllIds, NpcFriendly, PlayerFaction, WornItemLevel = ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.WornItemLevel
+local SkillName, LogEntry, Normalize, GeoReady = ns.SkillName, ns.LogEntry, ns.Normalize, ns.GeoReady
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -158,7 +152,7 @@ end
 local function NearItems(radius)
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
-  local inside, zone = {}, {}
+  local inside = {}
   local here = CurrentMapSet()
   local function add(it)
     if radius == "zone" then
@@ -201,8 +195,7 @@ local function NearItems(radius)
     end
   end
   table.sort(inside, function(a, b) return a.d < b.d end)
-  table.sort(zone, function(a, b) return a.d < b.d end)
-  return inside, zone
+  return inside
 end
 
 ---------------------------------------------------------------------------
@@ -616,6 +609,58 @@ function Geo.BuildRewardIndexAsync()
   step()
 end
 
+-- Reward item: name from QuestieDB; the game's link (quality color) when already in its cache.
+-- No request to the server: the tooltip loads the item on hover.
+Geo.itemCache = {}
+function Geo.ItemInGameCache(id)
+  if C_Item and C_Item.IsItemDataCachedByID then
+    local ok, v = pcall(C_Item.IsItemDataCachedByID, id)
+    return ok and v and true or false
+  end
+  return false
+end
+
+function Geo.RewardItem(itemId)
+  local it = Geo.itemCache[itemId]
+  if not it then
+    it = { id = itemId, name = QGet(QDB.Item, itemId, "name") or ("#" .. itemId) }
+    Geo.itemCache[itemId] = it
+  end
+  if not it.link and Geo.ItemInGameCache(itemId) then -- e.g. loaded by a tooltip since
+    local name, link = GetItemInfoCompat(itemId)
+    if name then it.name, it.link = name, link end
+  end
+  return it
+end
+
+-- Rewards of a quest: item ids and reputations.
+Geo.rewardCache = {}
+function Geo.QuestRewards(id)
+  local r = Geo.rewardCache[id]
+  if r then return r end
+  r = { items = Geo.RewardIndex()[id] or {}, rep = {} }
+  local rep = QGet(QDB.Quest, id, "reputationReward")
+  if type(rep) == "table" then
+    for _, p in ipairs(rep) do
+      if type(p) == "table" and p[1] and (p[2] or 0) > 0 then r.rep[#r.rep + 1] = { faction = p[1], value = p[2] } end
+    end
+  end
+  Geo.rewardCache[id] = r
+  return r
+end
+
+function Geo.FactionName(fid)
+  if GetFactionInfoByID then
+    local ok, name = pcall(GetFactionInfoByID, fid)
+    if ok and name then return name end
+  end
+  if C_Reputation and C_Reputation.GetFactionDataByID then -- newer API (Forever factions)
+    local ok, data = pcall(C_Reputation.GetFactionDataByID, fid)
+    if ok and type(data) == "table" and data.name and data.name ~= "" then return data.name end
+  end
+  return L["Faction "] .. fid
+end
+
 -- QuestieDB "teachesSpell" field: a spell ID, or the default 0 (truthy in Lua!) when the item teaches nothing.
 function Geo.ItemTeachesSpell(itemId)
   local v = QGet(QDB.Item, itemId, "teachesSpell")
@@ -737,6 +782,103 @@ end
 function Geo.RecordLater(list, task)
   for _, e in ipairs(list) do if e.id == task.id then return end end
   list[#list + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
+end
+
+---------------------------------------------------------------------------
+-- What a quest is: its types, whether it follows another, its tag, whether to abandon it
+---------------------------------------------------------------------------
+-- Quest types, deduced from the QuestieDB objectives (several per quest, in this order).
+K.QUEST_TYPES = { "escort", "assassination", "slaying", "collect", "gathering", "interaction", "exploration",
+  "talk", "reputation", "delivery" }
+-- Words of the objective text, for quests whose objectives QuestieDB does not know.
+K.QUEST_TYPE_WORDS = {
+  slaying = { "%f[%a]kill", "%f[%a]slay", "%f[%a]destroy", "%f[%a]defeat", "%f[%a]exterminate", "%f[%a]eliminate" },
+  collect = { "%f[%a]collect%f[%A]", "%f[%a]gather%f[%A]", "%f[%a]obtain%f[%A]", "%f[%a]recover%f[%A]",
+    "%f[%a]retrieve%f[%A]", "bring %d", "bring me %d" },
+  exploration = { "%f[%a]explore%f[%A]", "%f[%a]scout%f[%A]", "%f[%a]investigate%f[%A]", "%f[%a]locate%f[%A]" },
+  interaction = { "%f[%a]use%f[%A]", "%f[%a]place%f[%A]", "%f[%a]plant%f[%A]", "%f[%a]activate%f[%A]" },
+}
+
+-- Unique NPC (to assassinate): rare, rare elite or boss, or a single known spawn point.
+function Geo.UniqueNpc(id)
+  local rank = QGet(QDB.Npc, id, "rank")
+  if K.UNIQUE_RANKS[rank] then return true end
+  local spawns, n = QGet(QDB.Npc, id, "spawns"), 0
+  if type(spawns) == "table" then
+    for _, pts in pairs(spawns) do n = n + (type(pts) == "table" and #pts or 0) end
+  end
+  return n == 1
+end
+
+Geo.qtypes = {}
+function Geo.QuestTypes(id)
+  if not id then return {} end
+  local cached = Geo.qtypes[id]
+  if cached then return cached end
+  local has = {}
+  if Geo.IsEscort(id) then has.escort = true end
+  local obj = QGet(QDB.Quest, id, "objectives")
+  if type(obj) == "table" then
+    for _, o in ipairs(obj[1] or {}) do
+      local icon = o[3]
+      if K.TALK_ICONS[icon] then has.talk = true
+      elseif Geo.UniqueNpc(o[1]) then has.assassination = true
+      else has.slaying = true end
+    end
+    if #(obj[2] or {}) > 0 then has.interaction = true end
+    for _, o in ipairs(obj[3] or {}) do
+      local npcs, objs = QGet(QDB.Item, o[1], "npcDrops"), QGet(QDB.Item, o[1], "objectDrops")
+      if type(npcs) == "table" and #npcs > 0 then has.collect = true
+      elseif type(objs) == "table" and #objs > 0 then has.gathering = true
+      else has.collect = true end -- bought, crafted…
+    end
+    if #(obj[4] or {}) > 0 then has.reputation = true end
+    local givesItem = (tonumber(QGet(QDB.Quest, id, "sourceItemId")) or 0) > 0 -- 0 = no item
+    for _, o in ipairs(obj[5] or {}) do
+      if givesItem then has.interaction = true -- credit for using the item given by the quest on them
+      elseif type(o) == "table" and o[2] and Geo.UniqueNpc(o[2]) then has.assassination = true
+      else has.slaying = true end
+    end
+    if #(obj[6] or {}) > 0 then has.interaction = true end
+  end
+  if not has.escort and type(QGet(QDB.Quest, id, "triggerEnd")) == "table" then has.exploration = true end
+  if not next(has) then
+    -- No objective known by QuestieDB (frequent for Forever quests): words of the English text.
+    local text = ""
+    local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
+    if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
+    for kind, words in pairs(K.QUEST_TYPE_WORDS) do
+      for _, w in ipairs(words) do
+        if text:find(w) then has[kind] = true break end
+      end
+    end
+    if not next(has) then has.delivery = true end -- bring something / someone, or talk to an NPC
+  end
+  local list = {}
+  for _, k in ipairs(K.QUEST_TYPES) do if has[k] then list[#list + 1] = k end end
+  Geo.qtypes[id] = list
+  return list
+end
+
+-- A quest that follows another one (a quest prerequisite in QuestieDB).
+function Geo.IsFollowUp(id)
+  return id ~= nil and #AllPrereqs(id) > 0
+end
+
+-- Game tag of a quest of the log ("Elite", "Dungeon"…), "" if none, nil if not in the log.
+function Geo.LogTag(id)
+  local q = LogEntry(id)
+  return q and (q.tag or "") or nil
+end
+
+-- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
+-- a quest event (Events.lua clears State.abandonIds).
+function Geo.ToAbandon(questId)
+  if not State.abandonIds then
+    pcall(ns.Analyze)
+    State.abandonIds = State.abandonIds or {} -- no new try on each line after an error
+  end
+  return State.abandonIds[questId] or false
 end
 
 -- Dungeon / raid quest kept out of the Roadbook: anything but talking or delivering, even when its
@@ -1172,6 +1314,94 @@ end
 function Geo.Innkeepers()
   Geo.ScanServices()
   return Geo.inn or {}
+end
+
+local function CurrentZoneNames()
+  local names = {}
+  local function add(n) if n and n ~= "" then names[n] = true end end
+  add(GetRealZoneText())
+  add(GetZoneText())
+  if C_Map and C_Map.GetBestMapForUnit then
+    local mapID = C_Map.GetBestMapForUnit("player")
+    local info = mapID and C_Map.GetMapInfo(mapID)
+    if info then
+      add(info.name)
+      local parent = info.parentMapID and C_Map.GetMapInfo(info.parentMapID)
+      if parent and Enum and Enum.UIMapType and parent.mapType == Enum.UIMapType.Zone then add(parent.name) end
+    end
+  end
+  return names
+end
+
+-- The available quests (scan.entries) a filter of the "Available" tab shows, grouped, the groups in
+-- their order. filter: "all", "zone", "dungeon", "pvp", "class", "custom" (the Roadbook list);
+-- matches(entry): the search, optional; showLow: low-level quests too. Returns the groups
+-- ({ name, kind ("zone", "dungeon", "class", "pvp"), list = entries }) and the number of quests.
+function Geo.AvailableGroups(filter, matches, showLow)
+  local zoneNames = filter == "zone" and CurrentZoneNames() or nil
+  local hereMaps = filter == "zone" and CurrentMapSet() or {}
+  local function StartsHere(e)
+    if not GeoReady() then return false end
+    for _, pt in ipairs(StartPoints(e.id)) do
+      if PointInMaps(pt, hereMaps) then return true end
+    end
+    return false
+  end
+  local groups, byKey, total = {}, {}, 0
+  -- The groups apart from the places: id (never a place's name) -> title and place in the list.
+  local special = { ["#class"] = { name = L["Class"], rank = 1 }, ["#prof"] = { name = L["Professions"], rank = 2 } }
+  local function Place(e) return e.dungeon or e.area or e.starterZone or L["Other"] end
+  local function ClassOrPlace(e)
+    return (e.isClass and "#class") or (e.isProf and "#prof") or Place(e)
+  end
+  -- Whether the filter keeps the entry, and the key of its group.
+  local function Select(e)
+    if filter == "custom" then return Geo.InCustom(e.id), ClassOrPlace(e) end
+    -- low-level quest hidden ("Low-level quests" option), or not at the required level yet
+    if (e.lowLevel and not showLow) or e.future then return false end
+    if filter == "zone" then
+      return StartsHere(e) or (e.area and zoneNames[e.area]) or (e.starterZone and zoneNames[e.starterZone])
+        or (e.dungeon and zoneNames[e.dungeon]), Place(e)
+    elseif filter == "dungeon" then
+      return e.dungeon ~= nil and not e.pvp, e.dungeon -- battlegrounds have their own filter
+    elseif filter == "pvp" then
+      return e.pvp, Place(e)
+    elseif filter == "class" then
+      return e.isClass or e.isProf, e.isClass and "#class" or "#prof"
+    end
+    -- "All": class and profession quests in their own groups (some are not tied to a place,
+    -- e.g. the Forever "Crafting" writs), the others by zone.
+    return true, ClassOrPlace(e)
+  end
+  for _, e in ipairs(scan.entries) do
+    local keep, key = Select(e)
+    if keep and (not matches or matches(e)) then
+      local g = byKey[key]
+      if not g then
+        local s = special[key]
+        local kind = e.dungeon and key == e.dungeon and "dungeon" or (s and "class") or "zone"
+        g = { name = s and s.name or key, rank = s and s.rank, kind = kind, list = {} }
+        byKey[key] = g
+        groups[#groups + 1] = g
+      end
+      g.list[#g.list + 1] = e
+      total = total + 1
+      if e.pvp then g.pvp, g.kind = true, "pvp" end
+    end
+  end
+  -- Order of the groups: class, professions, dungeons, standard zones, PvP; then alphabetical.
+  local function Rank(g)
+    if g.rank then return g.rank end -- class, professions
+    if g.pvp then return 5 end
+    if g.kind == "dungeon" then return 3 end
+    return 4
+  end
+  table.sort(groups, function(a, b)
+    local ra, rb = Rank(a), Rank(b)
+    if ra ~= rb then return ra < rb end
+    return Normalize(a.name) < Normalize(b.name)
+  end)
+  return groups, total
 end
 
 -- Shared with the next files.

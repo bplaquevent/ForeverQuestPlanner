@@ -3,15 +3,10 @@
 
 local ADDON_NAME, ns = ...
 local ChainInfo, ChainText, CharKey, Color, FormatNumber, Geo = ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color, ns.FormatNumber, ns.Geo
-local GeoReady, IsClassMeta, IsCompleted, IsInLog, K, L, Nearest = ns.GeoReady, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
-local PlayerPos, PointText, Print, QDB, QGet, QuestMeta = ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta
-local AllPrereqs = ns.AllPrereqs
-local QuestTargets, Refresh, RemainingTargets, Settings, Snapshot, State = ns.QuestTargets, ns.Refresh, ns.RemainingTargets, ns.Settings, ns.Snapshot, ns.State
-local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.TurnInText, ns.StartPoints, ns.EntityPoints
-local LogRecord = ns.LogRecord
-local LogQuests = ns.LogQuests
-local LogEntry = ns.LogEntry
-local IsQuestComplete = ns.IsQuestComplete
+local GeoReady, IsClassMeta, IsCompleted, IsInLog, K, L = ns.GeoReady, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L
+local PointText, Print, QDB, QGet, QuestMeta, Refresh = ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.Refresh
+local Settings, Snapshot, State, TrivialRange, TurnInText = ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange, ns.TurnInText
+local LogRecord, LogQuests, IsQuestComplete, Normalize = ns.LogRecord, ns.LogQuests, ns.IsQuestComplete, ns.Normalize
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -630,6 +625,7 @@ OpenQuestDetails = function(questID)
   if C_QuestLog.SetSelectedQuest then pcall(C_QuestLog.SetSelectedQuest, questID) end
   local logFrame = rawget(_G, "QuestLogFrame")
   if logFrame then
+    if InCombatLockdown() then return end -- opening a game panel from an addon is refused in combat
     if not logFrame:IsShown() then
       if ShowUIPanel then pcall(ShowUIPanel, logFrame) else logFrame:Show() end
     end
@@ -649,23 +645,6 @@ local function WatchOnly(questID)
   end
   if not IsWatched(questID) then SetWatched(questID, true) end
 end
-
--- Most useful point of a quest: nearest remaining objective, otherwise the turn-in NPC.
-local function ObjectivePoint(q)
-  local pos = PlayerPos()
-  local t = QuestTargets(q.id)
-  if not q.complete then
-    local best, bd, label
-    for _, r in ipairs(RemainingTargets(q, t)) do
-      local p, d = Nearest(r.tg.points, pos)
-      if p and (not best or (d and (not bd or d < bd))) then best, bd, label = p, d, r.tg.name end
-    end
-    if best then return best, label end
-  end
-  local f = Nearest(t.finish, pos)
-  return f, L["turn in the quest"]
-end
-Geo.ObjectivePoint = ObjectivePoint
 
 -- Pin placed by the addon (OpenMap's waypoint), remembered per character.
 local function PinStore()
@@ -738,103 +717,14 @@ local ICON = {
   done = "|TInterface\\RaidFrame\\ReadyCheck-Ready:16:16|t",            -- green check: turned in (as the steps done)
 }
 
--- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
--- a quest event (Events.lua clears State.abandonIds).
-function Geo.ToAbandon(questId)
-  if not State.abandonIds then
-    pcall(ns.Analyze)
-    State.abandonIds = State.abandonIds or {} -- no new try on each line after an error
-  end
-  return State.abandonIds[questId] or false
-end
-
 ---------------------------------------------------------------------------
 -- Quest line shown the same way in every tab: title, level, elite, types
 ---------------------------------------------------------------------------
--- Quest types, deduced from the QuestieDB objectives (several per quest, in this order).
-K.QUEST_TYPES = { "escort", "assassination", "slaying", "collect", "gathering", "interaction", "exploration",
-  "talk", "reputation", "delivery" }
 K.QUEST_TYPE_LABEL = {
   escort = L["Escort"], assassination = L["Assassination"], slaying = L["Slaying"], collect = L["Collect"],
   gathering = L["Gathering"], interaction = L["Interaction"], exploration = L["Exploration"], talk = L["Talk"],
   reputation = L["Reputation"], delivery = L["Delivery"],
 }
-
--- Words of the objective text, for quests whose objectives QuestieDB does not know.
-K.QUEST_TYPE_WORDS = {
-  slaying = { "%f[%a]kill", "%f[%a]slay", "%f[%a]destroy", "%f[%a]defeat", "%f[%a]exterminate", "%f[%a]eliminate" },
-  collect = { "%f[%a]collect%f[%A]", "%f[%a]gather%f[%A]", "%f[%a]obtain%f[%A]", "%f[%a]recover%f[%A]",
-    "%f[%a]retrieve%f[%A]", "bring %d", "bring me %d" },
-  exploration = { "%f[%a]explore%f[%A]", "%f[%a]scout%f[%A]", "%f[%a]investigate%f[%A]", "%f[%a]locate%f[%A]" },
-  interaction = { "%f[%a]use%f[%A]", "%f[%a]place%f[%A]", "%f[%a]plant%f[%A]", "%f[%a]activate%f[%A]" },
-}
-
--- Unique NPC (to assassinate): rare, rare elite or boss, or a single known spawn point.
-function Geo.UniqueNpc(id)
-  local rank = QGet(QDB.Npc, id, "rank")
-  if K.UNIQUE_RANKS[rank] then return true end
-  local spawns, n = QGet(QDB.Npc, id, "spawns"), 0
-  if type(spawns) == "table" then
-    for _, pts in pairs(spawns) do n = n + (type(pts) == "table" and #pts or 0) end
-  end
-  return n == 1
-end
-
-Geo.qtypes = {}
-function Geo.QuestTypes(id)
-  if not id then return {} end
-  local cached = Geo.qtypes[id]
-  if cached then return cached end
-  local has = {}
-  if Geo.IsEscort(id) then has.escort = true end
-  local obj = QGet(QDB.Quest, id, "objectives")
-  if type(obj) == "table" then
-    for _, o in ipairs(obj[1] or {}) do
-      local icon = o[3]
-      if K.TALK_ICONS[icon] then has.talk = true
-      elseif Geo.UniqueNpc(o[1]) then has.assassination = true
-      else has.slaying = true end
-    end
-    if #(obj[2] or {}) > 0 then has.interaction = true end
-    for _, o in ipairs(obj[3] or {}) do
-      local npcs, objs = QGet(QDB.Item, o[1], "npcDrops"), QGet(QDB.Item, o[1], "objectDrops")
-      if type(npcs) == "table" and #npcs > 0 then has.collect = true
-      elseif type(objs) == "table" and #objs > 0 then has.gathering = true
-      else has.collect = true end -- bought, crafted…
-    end
-    if #(obj[4] or {}) > 0 then has.reputation = true end
-    local givesItem = (tonumber(QGet(QDB.Quest, id, "sourceItemId")) or 0) > 0 -- 0 = no item
-    for _, o in ipairs(obj[5] or {}) do
-      if givesItem then has.interaction = true -- credit for using the item given by the quest on them
-      elseif type(o) == "table" and o[2] and Geo.UniqueNpc(o[2]) then has.assassination = true
-      else has.slaying = true end
-    end
-    if #(obj[6] or {}) > 0 then has.interaction = true end
-  end
-  if not has.escort and type(QGet(QDB.Quest, id, "triggerEnd")) == "table" then has.exploration = true end
-  if not next(has) then
-    -- No objective known by QuestieDB (frequent for Forever quests): words of the English text.
-    local text = ""
-    local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
-    if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
-    for kind, words in pairs(K.QUEST_TYPE_WORDS) do
-      for _, w in ipairs(words) do
-        if text:find(w) then has[kind] = true break end
-      end
-    end
-    if not next(has) then has.delivery = true end -- bring something / someone, or talk to an NPC
-  end
-  local list = {}
-  for _, k in ipairs(K.QUEST_TYPES) do if has[k] then list[#list + 1] = k end end
-  Geo.qtypes[id] = list
-  return list
-end
-
--- Game tag of a quest of the log ("Elite", "Dungeon"…), "" if none, nil if not in the log.
-function Geo.LogTag(id)
-  local q = LogEntry(id)
-  return q and (q.tag or "") or nil
-end
 
 -- Quest level, colored like in the game's quest log (gray, green, yellow, orange, red).
 function Geo.LevelBadge(level)
@@ -862,11 +752,6 @@ end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
 -- isClass, isProf, dungeon, noTypes (types left out, shown apart with Geo.QuestTypesText) }.
--- A quest that follows another one (a quest prerequisite in QuestieDB).
-function Geo.IsFollowUp(id)
-  return id ~= nil and #AllPrereqs(id) > 0
-end
-
 function Geo.QuestBadges(o)
   local id = o.id
   local tag = o.tag
@@ -932,14 +817,6 @@ end
 function Geo.XPText(xp, approx, suffix)
   if not (xp and xp > 0) then return nil end
   return Color(K.DESC.xp, (approx and "~" or "+") .. FormatNumber(xp) .. " XP" .. (suffix or ""))
-end
-
--- Kind of step, the same labels and colors in the Roadbook and the Nearby tab.
-function Geo.KindTag(kind)
-  if kind == "take" then return Color("80c0ff", L["[Pick up]"]) end
-  if kind == "obj" then return Color("ffd100", L["[Objective]"]) end
-  if kind == "turnin" then return Color("40ff40", L["[Turn in]"]) end
-  return ""
 end
 
 local function IconLegend(withAvailable)
@@ -1031,34 +908,6 @@ function Geo.QuestZoneUi(id)
   local sort = QGet(QDB.Quest, id, "zoneOrSort") or 0
   if not (type(sort) == "number" and sort > 0 and GeoReady()) then return nil end
   return Geo.PointUi({ area = sort })
-end
-
--- Where to pick up a quest: its giver, otherwise the monsters / objects dropping the item that
--- starts it, otherwise its first located objective, otherwise its turn-in NPC.
-function Geo.GiverPoint(id, pos)
-  local p = Nearest(StartPoints(id), pos)
-  if p then return p, L["pick up the quest"] end
-  local by = QGet(QDB.Quest, id, "startedBy")
-  local items = type(by) == "table" and by[3]
-  for _, itemId in ipairs(type(items) == "table" and items or {}) do
-    local pts = {}
-    for _, n in ipairs(QGet(QDB.Item, itemId, "npcDrops") or {}) do
-      for _, w in ipairs(EntityPoints("npc", n)) do pts[#pts + 1] = w end
-    end
-    for _, o in ipairs(QGet(QDB.Item, itemId, "objectDrops") or {}) do
-      for _, w in ipairs(EntityPoints("object", o)) do pts[#pts + 1] = w end
-    end
-    local q = Nearest(pts, pos)
-    if q then return q, L["item that starts the quest"] end
-  end
-  local t = QuestTargets(id)
-  for _, tg in ipairs(t) do
-    local q = Nearest(tg.points, pos)
-    if q then return q, tg.name or L["objective"] end
-  end
-  local f = Nearest(t.finish, pos)
-  if f then return f, L["turn in the quest"] end
-  return nil
 end
 
 -- Opens the world map on a map (the addon window is closed so that it does not hide it).
@@ -1198,25 +1047,6 @@ function Geo.CustomBulkButtons(list)
       tip = { L["Remove every quest of this category from the Roadbook list"], K.CUSTOM_TIP } }
 end
 
----------------------------------------------------------------------------
--- Search (accent and case insensitive, every word must be present)
----------------------------------------------------------------------------
-local ACCENTS = {
-  ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["á"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a",
-  ["ç"] = "c", ["Ç"] = "c",
-  ["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e", ["É"] = "e", ["È"] = "e", ["Ê"] = "e", ["Ë"] = "e",
-  ["î"] = "i", ["ï"] = "i", ["í"] = "i", ["Î"] = "i", ["Ï"] = "i",
-  ["ô"] = "o", ["ö"] = "o", ["ó"] = "o", ["Ô"] = "o", ["Ö"] = "o",
-  ["ù"] = "u", ["û"] = "u", ["ü"] = "u", ["ú"] = "u", ["Ù"] = "u", ["Û"] = "u", ["Ü"] = "u",
-  ["œ"] = "oe", ["Œ"] = "oe", ["’"] = "'",
-}
-
-local function Normalize(s)
-  s = tostring(s or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-  s = s:gsub("[\1-\127\194-\244][\128-\191]*", function(c) return ACCENTS[c] or c end)
-  return s:lower()
-end
-
 local function ParseQuery(text)
   local words = {}
   for w in Normalize(text):gmatch("%S+") do words[#words + 1] = w end
@@ -1342,8 +1172,8 @@ end
 
 -- Shared with the next files.
 ns.ActivePin, ns.CONTENT_WIDTH, ns.ClearPin, ns.CreateScrollPanel, ns.CreateSearchBox, ns.EntryHaystack = ActivePin, CONTENT_WIDTH, ClearPin, CreateScrollPanel, CreateSearchBox, EntryHaystack
-ns.ICON, ns.IsPinned, ns.IsWatched, ns.MatchWords, ns.Normalize, ns.OnWaypointChanged = ICON, IsPinned, IsWatched, MatchWords, Normalize, OnWaypointChanged
+ns.ICON, ns.MatchWords, ns.OnWaypointChanged = ICON, MatchWords, OnWaypointChanged
 ns.ParseQuery, ns.PassStates, ns.PinIcon, ns.PinPoint, ns.Plural = ParseQuery, PassStates, PinIcon, PinPoint, Plural
 ns.QuestHaystack, ns.RenderExport, ns.RenderList, ns.SetWatched = QuestHaystack, RenderExport, RenderList, SetWatched
-ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.IsWatched, ns.SetWatched, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, IsWatched, SetWatched, expandedCategories, journalStates
+ns.ShowMessage, ns.StateIcons, ns.UpdateScrollBar, ns.WatchOnly, ns.IsWatched, ns.expandedCategories, ns.journalStates = ShowMessage, StateIcons, UpdateScrollBar, WatchOnly, IsWatched, expandedCategories, journalStates
 ns.nearStates, ns.OpenQuestDetails, ns.panels, ns.tabButtons = nearStates, OpenQuestDetails, panels, tabButtons

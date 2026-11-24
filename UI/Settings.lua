@@ -2,8 +2,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local CP, Color, Geo, K, L, Plural = ns.CP, ns.Color, ns.Geo, ns.K, ns.L, ns.Plural
-local Print, Refresh, Settings, scan = ns.Print, ns.Refresh, ns.Settings, ns.scan
+local CP, Color, Geo, K, L, Refresh, Settings, scan, State = ns.CP, ns.Color, ns.Geo, ns.K, ns.L, ns.Refresh, ns.Settings, ns.scan, ns.State
 
 ---------------------------------------------------------------------------
 -- Settings: Roadbook difficulty and estimate parameters
@@ -45,11 +44,9 @@ function Geo.SetParam(d, v)
   st.params = st.params or {}
   st.params[d.key] = (math.abs(v - d.default) < 1e-6) and nil or v
   Geo.ApplyParams()
-  if d.rescan then scan.dirty = true end
 end
 
 function Geo.ParamText(d, v)
-  if d.pct then return string.format("%d %%", math.floor(v * 100 + 0.5)) end
   if d.signed then return string.format("%+d", v) .. (d.unit or "") end
   return tostring(v) .. (d.unit or "")
 end
@@ -121,6 +118,8 @@ function Geo.SettingsSlider(box, d, x, y, panel)
   end)
   sl:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.sliders[#panel.sliders + 1] = sl
+  panel.slidersByKey = panel.slidersByKey or {}
+  panel.slidersByKey[d.key] = sl
 end
 
 -- Settings window: general options, then a Roadbook panel with its option groups.
@@ -136,8 +135,7 @@ function Geo.CreateSettingsPanel(f)
     function() return not Settings().hideMinimap end,
     function(v)
       Settings().hideMinimap = not v or nil
-      local mb = _G["ForeverQuestPlannerMinimapButton"]
-      if mb then mb:SetShown(v) end
+      if State.minimapButton then State.minimapButton:SetShown(v) end
     end, panel)
 
   -- Roadbook: hearthstone, class teleports, flight masters, objective button, then difficulty and time estimates.
@@ -190,7 +188,7 @@ function Geo.CreateSettingsPanel(f)
   end
   -- Elite quests on/off, on the free row of the "Difficulty" box; off: their slider is greyed.
   local function UpdateEliteSlider()
-    local sl = _G["ForeverQuestPlannerParamMAX_ELITE_GAP"]
+    local sl = panel.slidersByKey.MAX_ELITE_GAP
     if sl and sl.Enable then
       if Settings().noElite then sl:Disable() else sl:Enable() end
       sl:SetAlpha(Settings().noElite and 0.4 or 1)

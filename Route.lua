@@ -2,12 +2,9 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, CharKey, Dist, Geo, GetItemInfoCompat = ns.AreaName, ns.CharKey, ns.Dist, ns.Geo, ns.GetItemInfoCompat
-local K, L, PlayerPos, Print, Settings = ns.K, ns.L, ns.PlayerPos, ns.Print, ns.Settings
-local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData, ns.Solver, ns.TaxiCount, ns.TravelSpeed, ns.WorldPos, ns.scan
-local LogQuests = ns.LogQuests
-local State = ns.State
-local FormatTime = ns.FormatTime
+local AreaName, CharKey, Dist, Geo, GetItemInfoCompat, K, L = ns.AreaName, ns.CharKey, ns.Dist, ns.Geo, ns.GetItemInfoCompat, ns.K, ns.L
+local Print, Settings, SharedData, Solver, TaxiCount, WorldPos = ns.Print, ns.Settings, ns.SharedData, ns.Solver, ns.TaxiCount, ns.WorldPos
+local scan, LogQuests, State = ns.scan, ns.LogQuests, ns.State
 
 ---------------------------------------------------------------------------
 -- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
@@ -564,18 +561,6 @@ function Geo.RequestPlan(goal, cb, opts)
     Print(L["|cffff6060Roadbook computation error|r: "] .. tostring(message))
     finish(nil, L["Computation error: "] .. tostring(message))
   end)
-end
-
--- Teleport step (kind "hearth"): icon and what to do (parts of the description).
-function Geo.RecallText(s)
-  local spell = s.task and s.task.spell
-  local saves = L["saves ~"] .. FormatTime(s.gain or 0)
-  if not spell then
-    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", { L["Use the hearthstone"], saves }
-  end
-  local tex = Geo.SpellIcon(spell) or "Interface\\Icons\\Spell_Arcane_TeleportStormWind"
-  local name = Geo.SpellName(spell) or ("#" .. spell)
-  return "|T" .. tex .. ":14:14|t", { L["Cast "] .. name, saves }
 end
 
 -- Shared with the next files.

@@ -9,10 +9,9 @@
 -- edge, shown or hidden by the Objective button and the Steps button.
 
 local ADDON_NAME, ns = ...
-local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K, L = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K, ns.L
-local IsInLog, OM, OpenQuestDetails, Plural, RouteText, Settings = ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Plural, ns.RouteText, ns.Settings
-local UpdateScrollBar = ns.UpdateScrollBar
-local State = ns.State
+local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K
+local L, IsInLog, OM, OpenQuestDetails, Plural, RouteText = ns.L, ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Plural, ns.RouteText
+local Settings, UpdateScrollBar, State = ns.Settings, ns.UpdateScrollBar, ns.State
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line

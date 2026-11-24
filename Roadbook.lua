@@ -2,16 +2,12 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local ActivePin, AllInstance, CharKey, ClearPin, Color = ns.ActivePin, ns.AllInstance, ns.CharKey, ns.ClearPin, ns.Color
-local DBXP, Dist, FormatTime, Geo, GeoReady, GetObjectives = ns.DBXP, ns.Dist, ns.FormatTime, ns.Geo, ns.GeoReady, ns.GetObjectives
-local ICON, IsCompleted, IsInLog, K, L, Nearest = ns.ICON, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.Nearest
-local PinPoint, PlayerPos, PointText, Print, QDB, QGet = ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print, ns.QDB, ns.QGet
-local QuestTargets, Refresh, Settings, Snapshot, StartScan = ns.QuestTargets, ns.Refresh, ns.Settings, ns.Snapshot, ns.StartScan
-local KnownFlights, State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.KnownFlights, ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
-local IsWatched, SetWatched = ns.IsWatched, ns.SetWatched
-local OpenQuestDetails, scan = ns.OpenQuestDetails, ns.scan
-local LogEntry = ns.LogEntry
-local IsQuestComplete = ns.IsQuestComplete
+local ActivePin, CharKey, ClearPin, Color, Dist, FormatTime = ns.ActivePin, ns.CharKey, ns.ClearPin, ns.Color, ns.Dist, ns.FormatTime
+local Geo, GeoReady, GetObjectives, ICON, IsCompleted, IsInLog = ns.Geo, ns.GeoReady, ns.GetObjectives, ns.ICON, ns.IsCompleted, ns.IsInLog
+local K, L, Nearest, PinPoint, PlayerPos, PointText, Print = ns.K, ns.L, ns.Nearest, ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print
+local QDB, QGet, Refresh, Settings, Snapshot, KnownFlights = ns.QDB, ns.QGet, ns.Refresh, ns.Settings, ns.Snapshot, ns.KnownFlights
+local State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
+local IsWatched, SetWatched, scan, LogEntry, IsQuestComplete = ns.IsWatched, ns.SetWatched, ns.scan, ns.LogEntry, ns.IsQuestComplete
 local WaitScan = ns.WaitScan
 
 ---------------------------------------------------------------------------
@@ -122,13 +118,6 @@ function CP.FocusStep(s)
   CP.WatchTransport(s)
 end
 
-function CP.FocusedStepIndex(plan)
-  for i, st in ipairs(plan or {}) do
-    if CP.IsStepFocused(st) then return i end
-  end
-  return nil
-end
-
 ---------------------------------------------------------------------------
 -- Saved Roadbook: once computed, the plan no longer changes until its end, or until a
 -- recompute request (duration change, Recalculate button).
@@ -217,12 +206,6 @@ function Geo.FrozenRec()
   return Geo.FrozenStore()[CharKey()]
 end
 
--- The saved Roadbook was computed for the custom quest list.
-function Geo.IsCustom()
-  local rec = Geo.FrozenRec()
-  return (rec and rec.info and rec.info.custom) and true or false
-end
-
 local function SerializeRoute(route)
   local steps = {}
   for i = 2, #route do steps[#steps + 1] = Geo.SerializeStep(route[i]) end
@@ -287,6 +270,11 @@ function Geo.KeepOnlyDone()
   info.dungeons, info.discovered, info.skipped, info.unplanned = nil, nil, nil, nil
   Geo.Freeze(route, info)
   return true
+end
+
+-- The Roadbook is tracked (a step is focused); not tracked otherwise.
+function Geo.Tracking()
+  return ns.CP.CurrentFocus() ~= nil
 end
 
 -- Every step of the Roadbook is done: it can only be extended (custom: quests added), generated again or emptied.
@@ -587,7 +575,7 @@ function CP.ScheduleRecallCheck(delay)
     if not okA then Print(L["Roadbook update error: "] .. tostring(started)) end
     if okA and started then return end
     if not Geo.Tracking() then return end
-    local ok, err = pcall(CP.RecallCheck, false)
+    local ok, err = pcall(CP.RecallCheck)
     if not ok then Print(L["Roadbook update error: "] .. tostring(err)) end
   end)
 end
@@ -756,11 +744,6 @@ function CP.QuestRemoved(id)
   StaticPopup_Show("FQP_QUEST_ABANDONED", text, nil, { id = id, title = title })
 end
 
--- Roadbook adapted (refused with a message while a computation is running).
-function CP.ReplanSoon(msg)
-  CP.Replan(msg)
-end
-
 StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
   text = "%s",
   button1 = L["Remove from the list"],
@@ -769,7 +752,7 @@ StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
     if data then CP.SkipQuest({ task = { id = data.id, title = data.title } }) end
   end,
   OnCancel = function(_, data) -- also Escape: the quest stays planned
-    if data then CP.ReplanSoon(L["Quest abandoned, to pick up again: "] .. data.title .. ". ") end
+    if data then CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ") end
   end,
   timeout = 0,
   whileDead = true,
@@ -1395,6 +1378,18 @@ function CP.OnGameEvent(event, a1, a2)
       end
     end
   end
+end
+
+-- Teleport step (kind "hearth"): icon and what to do (parts of the description).
+function Geo.RecallText(s)
+  local spell = s.task and s.task.spell
+  local saves = L["saves ~"] .. FormatTime(s.gain or 0)
+  if not spell then
+    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", { L["Use the hearthstone"], saves }
+  end
+  local tex = Geo.SpellIcon(spell) or "Interface\\Icons\\Spell_Arcane_TeleportStormWind"
+  local name = Geo.SpellName(spell) or ("#" .. spell)
+  return "|T" .. tex .. ":14:14|t", { L["Cast "] .. name, saves }
 end
 
 -- Summary of a step: its title, then the parts of its description (each display joins them its way).
