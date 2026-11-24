@@ -13,6 +13,7 @@ local Settings, ShowMessage, State, StateIcons = ns.Settings, ns.ShowMessage, ns
 local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
 local LogById = ns.LogById
 local LogQuests = ns.LogQuests
+local QuestCategory = ns.QuestCategory
 
 -- Roadbook being computed: the list is emptied and the waiting animation is shown instead.
 function Geo.RenderBusy(panel)
@@ -36,11 +37,9 @@ function Geo.ListCategory(it, byLog, plevel)
   local dg = sort > 0 and QDB.dungeonOf[sort]
   if dg then return "dungeon", AreaName(dg) or L["Dungeon"] end
   local m = QuestMeta(it.id)
-  local isProf = m and IsProfMeta(m)
   local level = it.level or Geo.QuestLevelOf(it.id) or 0
-  if level > plevel + 3 and not isProf then return "later" end
-  if isProf then return "zone", L["Professions"] end
-  if m and IsClassMeta(m) then return "zone", L["Class"] end
+  local kind, name = QuestCategory(nil, level, plevel, m and IsProfMeta(m), m and IsClassMeta(m))
+  if kind == "later" or name then return kind, name end
   local zone = sort > 0 and AreaName(sort) or nil
   if not zone then
     local _, starterZone = GiverText(QGet(QDB.Quest, it.id, "startedBy"))

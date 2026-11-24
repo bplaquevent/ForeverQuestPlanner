@@ -3,17 +3,18 @@
 
 local ADDON_NAME, ns = ...
 local AllInstance, AreaName, ChainInfo, CharKey, CheckAvailable, DBXP = ns.AllInstance, ns.AreaName, ns.ChainInfo, ns.CharKey, ns.CheckAvailable, ns.DBXP
-local Dist, EntityPoints, EquippedItemLevel, Geo, GetItemInfoCompat, HasBit = ns.Dist, ns.EntityPoints, ns.EquippedItemLevel, ns.Geo, ns.GetItemInfoCompat, ns.HasBit
+local Dist, EntityPoints, Geo, GetItemInfoCompat, HasBit = ns.Dist, ns.EntityPoints, ns.Geo, ns.GetItemInfoCompat, ns.HasBit
 local IsClassMeta, IsCompleted, K, L, Nearest, NextQuests = ns.IsClassMeta, ns.IsCompleted, ns.K, ns.L, ns.Nearest, ns.NextQuests
 local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta, ns.QuestTargets
 local AllPrereqs = ns.AllPrereqs
-local Refresh, RemainingTargets, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.SLOTS, ns.Settings, ns.StartPoints
+local Refresh, RemainingTargets, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Settings, ns.StartPoints
 local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
 local LogQuests = ns.LogQuests
 local AllIds = ns.AllIds
 local NpcFriendly = ns.NpcFriendly
 local PlayerFaction = ns.PlayerFaction
+local WornItemLevel = ns.WornItemLevel
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -662,8 +663,8 @@ function Geo.ItemInterest(itemId, plevel)
     return 1, name .. L[" (teaches a skill)"]
   end
   if equipLoc == "INVTYPE_BAG" then return 1, name .. L[" (bag)"] end
-  local slots = SLOTS[equipLoc]
-  if not slots then return 0 end
+  local worst = WornItemLevel(equipLoc)
+  if not worst then return 0 end
   local _, cls = UnitClass("player")
   if classID == 4 and subclassID and subclassID > 0 then
     local ok = K.ARMOR[cls] and K.ARMOR[cls][subclassID]
@@ -683,14 +684,11 @@ function Geo.ItemInterest(itemId, plevel)
       end
     end
   end
-  local worst = math.huge
-  for _, sl in ipairs(slots) do worst = math.min(worst, EquippedItemLevel(sl)) end
   local upgrade = (ilvl or 0) > worst
   if (quality or 0) >= 3 then
     if specOK then return 1, name .. L[" (blue)"] end
     return 1, name .. L[" (blue, off-spec)"]
   end
-  if upgrade and specOK then return 1, name .. L[" (upgrade)"] end
   if upgrade then return 1, name .. L[" (upgrade)"] end
   return 0
 end

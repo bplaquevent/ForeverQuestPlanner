@@ -796,16 +796,23 @@ local function EquippedItemLevel(slot)
   return ilvl or 0
 end
 
+-- Lowest item level you wear where an item of this equip location goes, or nil if it cannot be worn.
+local function WornItemLevel(equipLoc)
+  local slots = SLOTS[equipLoc]
+  if not slots then return nil end
+  local worst = math.huge
+  for _, s in ipairs(slots) do worst = math.min(worst, EquippedItemLevel(s)) end
+  return worst
+end
+
 -- Returns true + reason if the item is interesting, false otherwise, nil if unknown (not cached).
 local function EvaluateItem(link, isUsable)
   if not link then return nil end
   local name, _, _, ilvl, _, _, _, _, equipLoc = GetItemInfoCompat(link)
   if not name then return nil end
   if equipLoc == "INVTYPE_BAG" then return true, name .. L[" (bag)"] end
-  local slots = SLOTS[equipLoc]
-  if not slots or isUsable == false then return false end
-  local worst = math.huge
-  for _, s in ipairs(slots) do worst = math.min(worst, EquippedItemLevel(s)) end
+  local worst = WornItemLevel(equipLoc)
+  if not worst or isUsable == false then return false end
   if (ilvl or 0) > worst then return true, name .. L[" (upgrade)"] end
   return false
 end
@@ -864,6 +871,19 @@ local function DungeonOf(q)
   return nil
 end
 
+local function FormatTime(sec)
+  sec = math.floor(sec + 0.5)
+  if sec < 60 then return sec .. L[" s"] end
+  if sec < 3600 then return math.floor(sec / 60 + 0.5) .. L[" min"] end
+  return string.format("%d h %02d", math.floor(sec / 3600), math.floor((sec % 3600) / 60))
+end
+
+local function FormatNumber(n)
+  local s = tostring(math.floor(n + 0.5))
+  local out = s:reverse():gsub("(%d%d%d)", "%1 "):reverse()
+  return (out:gsub("^ ", ""))
+end
+
 -- Money: interest threshold (level² × 2 copper) and display in g/s/c.
 local function MoneyThreshold(plevel)
   return (plevel or 1) * (plevel or 1) * 2
@@ -881,6 +901,18 @@ local function MoneyText(copper)
   if sv > 0 then parts[#parts + 1] = sv .. L["s"] end
   if c > 0 then parts[#parts + 1] = c .. L["c"] end
   return table.concat(parts, " ")
+end
+
+K.LATER_GAP = 3 -- a quest more than this many levels above yours is for later (professions apart)
+
+-- Category of a quest, the first that applies: "dungeon" (name), "later", "zone" Professions or
+-- Class; else "zone" with no name (the caller's zone of the quest). dungeon: its name, or nil.
+local function QuestCategory(dungeon, level, plevel, isProf, isClass)
+  if dungeon then return "dungeon", dungeon end
+  if level > plevel + K.LATER_GAP and not isProf then return "later" end
+  if isProf then return "zone", L["Professions"] end
+  if isClass then return "zone", L["Class"] end
+  return "zone", nil
 end
 
 local function Analyze()
@@ -938,32 +970,22 @@ local function Analyze()
         result.abandon[#result.abandon + 1] = { quest = q, reason = q._abandon }
         State.abandonIds[q.id] = true
       end
-      local dungeon = DungeonOf(q)
-      if dungeon then
-        q._tooHigh = level > plevel + 3
-        local g = byDungeon[dungeon]
+      local kind, name = QuestCategory(DungeonOf(q), level, plevel, isProf, isClass)
+      if kind == "dungeon" then
+        local g = byDungeon[name]
         if not g then
-          g = { name = dungeon, instance = true, quests = {} }
-          byDungeon[dungeon] = g
+          g = { name = name, instance = true, quests = {} }
+          byDungeon[name] = g
           result.dungeons[#result.dungeons + 1] = g
         end
         g.quests[#g.quests + 1] = q
-      elseif level > plevel + 3 and not isProf then
+      elseif kind == "later" then
         result.later[#result.later + 1] = q
       else
-        local key
-        if isProf and not q.isInstance then
-          key = L["Professions"]
-        elseif isClass and not q.isInstance then
-          key = L["Class"]
-        elseif q.isInstance then
-          key = q.instanceName or q.zone or L["Dungeon"]
-        else
-          key = q.mapZone or q.zone or L["No zone"]
-        end
+        local key = name or q.mapZone or q.zone or L["No zone"]
         local g = byZone[key]
         if not g then
-          g = { name = key, instance = q.isInstance, quests = {} }
+          g = { name = key, quests = {} }
           byZone[key] = g
           result.groups[#result.groups + 1] = g
         end
@@ -988,12 +1010,15 @@ end
 
 -- Shared with the next files.
 ns.Analyze, ns.AreaName, ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color = Analyze, AreaName, ChainInfo, ChainText, CharKey, Color
-ns.DBXP, ns.EVENT_SORTS, ns.EquippedItemLevel, ns.GetItemInfoCompat, ns.GetObjectives, ns.GiverText = DBXP, EVENT_SORTS, EquippedItemLevel, GetItemInfoCompat, GetObjectives, GiverText
+ns.DBXP, ns.EVENT_SORTS, ns.GetItemInfoCompat, ns.GetObjectives, ns.GiverText = DBXP, EVENT_SORTS, GetItemInfoCompat, GetObjectives, GiverText
 ns.HasBit, ns.InitDeps, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMeta = HasBit, InitDeps, IsClassMeta, IsCompleted, IsInLog, IsProfMeta
 ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PROFESSION_SKILLS, ns.PlayerBits = K, L, MoneyText, NextQuests, PROFESSION_SKILLS, PlayerBits
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
-ns.SLOTS, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = SLOTS, ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
+ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
 ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
 ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
 ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQuests, LogRecord
 ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.QuestAllowed = AllIds, NpcFriendly, PlayerFaction, QuestAllowed
+ns.WornItemLevel = WornItemLevel
+ns.QuestCategory = QuestCategory
+ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime

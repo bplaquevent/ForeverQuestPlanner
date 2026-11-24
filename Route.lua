@@ -7,6 +7,7 @@ local K, L, PlayerPos, Print, Settings = ns.K, ns.L, ns.PlayerPos, ns.Print, ns.
 local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData, ns.Solver, ns.TaxiCount, ns.TravelSpeed, ns.WorldPos, ns.scan
 local LogQuests = ns.LogQuests
 local State = ns.State
+local FormatTime = ns.FormatTime
 
 ---------------------------------------------------------------------------
 -- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
@@ -591,19 +592,6 @@ function Geo.RequestPlan(goal, cb, opts)
   step()
 end
 
-local function FormatTime(sec)
-  sec = math.floor(sec + 0.5)
-  if sec < 60 then return sec .. L[" s"] end
-  if sec < 3600 then return math.floor(sec / 60 + 0.5) .. L[" min"] end
-  return string.format("%d h %02d", math.floor(sec / 3600), math.floor((sec % 3600) / 60))
-end
-
-local function FormatNumber(n)
-  local s = tostring(math.floor(n + 0.5))
-  local out = s:reverse():gsub("(%d%d%d)", "%1 "):reverse()
-  return (out:gsub("^ ", ""))
-end
-
 -- Teleport step (kind "hearth"): icon, tag and what to do, for the lists and the Objective button.
 function Geo.RecallText(s)
   local spell = s.task and s.task.spell
@@ -617,4 +605,3 @@ function Geo.RecallText(s)
 end
 
 -- Shared with the next files.
-ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime
