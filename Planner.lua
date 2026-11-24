@@ -7,10 +7,9 @@ local Dist, EntityPoints, EquippedItemLevel, Geo, GetItemInfoCompat, HasBit = ns
 local IsClassMeta, IsCompleted, K, L, Nearest, NextQuests = ns.IsClassMeta, ns.IsCompleted, ns.K, ns.L, ns.Nearest, ns.NextQuests
 local PlayerPos, PlayerSkills, QDB, QGet, QuestMeta, QuestTargets = ns.PlayerPos, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta, ns.QuestTargets
 local AllPrereqs = ns.AllPrereqs
-local Refresh, RemainingTargets, Route, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.Route, ns.SLOTS, ns.Settings, ns.StartPoints
+local Refresh, RemainingTargets, SLOTS, Settings, StartPoints = ns.Refresh, ns.RemainingTargets, ns.SLOTS, ns.Settings, ns.StartPoints
 local State, TravelSpeed, TrivialRange, TurnInText, UnitTime = ns.State, ns.TravelSpeed, ns.TrivialRange, ns.TurnInText, ns.UnitTime
 local OM, WorldPos, scan = ns.OM, ns.WorldPos, ns.scan
-local BuildNetwork = ns.BuildNetwork
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -231,7 +230,6 @@ State.xpGoal = { kind = "time", value = 7200 }
 K.MAX_TAKE_CANDIDATES = 1500      -- safety: quests to pick up considered by the Roadbook, at most
 K.MAX_FOLLOW_DEPTH = 12  -- safety: maximum length of an evaluated quest chain
 K.SLICE_MS = 15          -- maximum computation time per frame (the computation is spread over several frames)
-K.REPLAN_DISTANCE = 150  -- beyond this distance (m), the Roadbook is recomputed from the new position
 K.XP_TABLE = { 400, 900, 1400, 2100, 2800, 3600, 4500, 5400, 6500, 7600, 8800, 10100, 11400, 12900, 14400,
   16000, 17700, 19400, 21300, 23200, 25200, 27300, 29400, 31700, 34000, 36400, 38900, 41400, 44300, 47400,
   50800, 54500, 58600, 62800, 67100, 71600, 76100, 80800, 85700, 90700, 95800, 101000, 106300, 111800, 117500,
@@ -268,31 +266,6 @@ function Geo.ObjectiveXP(r, plevel)
   elseif tg.kind == "item" then kills = r.count * Geo.KillsPerItem(tg)
   else return 0 end
   return math.floor(kills * Geo.MobXP(plevel, tg.mobLevel, tg.elite))
-end
-
--- Expected level after each route step (lv[1] = now), rested XP included.
-function Geo.Levels(route)
-  local level = UnitLevel("player")
-  local xp = UnitXP and UnitXP("player") or 0
-  local need = (UnitXPMax and UnitXPMax("player")) or Geo.XPNeeded(level) or math.huge
-  local rested = GetXPExhaustion and GetXPExhaustion() or 0
-  local maxLevel = GetMaxPlayerLevel and GetMaxPlayerLevel() or 60
-  local lv = { level }
-  for i = 2, #route do
-    local s = route[i]
-    local gain = s.xp or 0
-    if s.kind == "obj" and gain > 0 and rested > 0 then
-      local b = math.min(rested, gain)
-      rested, gain = rested - b, gain + b
-    end
-    xp = xp + gain
-    while level < maxLevel and xp >= need do
-      xp, level = xp - need, level + 1
-      need = Geo.XPNeeded(level) or math.huge
-    end
-    lv[i] = level
-  end
-  return lv
 end
 
 ---------------------------------------------------------------------------
@@ -960,26 +933,6 @@ local function BuildTasks(pos, plevel)
   return tasks, skipped
 end
 
--- Cached travel time between two points (points are shared objects).
-local function MakeTravel(net, plevel)
-  local cache = {}
-  return function(a, b)
-    if a == b then return 0 end
-    if b.teleport then return b.cast or K.HEARTH_TIME end -- hearthstone, teleport spell: usable from anywhere
-    local row = cache[a]
-    if not row then
-      row = {}
-      cache[a] = row
-    end
-    local v = row[b]
-    if v == nil then
-      v = Route(a, b, net, plevel)
-      row[b] = v
-    end
-    return v
-  end
-end
-
 K.FM_KNOWN_RADIUS = 150 -- yards: the QuestieDB flight master NPC standing at a flight node
 
 -- Service NPCs of the player's faction (QuestieDB), read once per session:
@@ -1247,10 +1200,10 @@ function Geo.NearestService(kind, pos)
     end
   end
   local plevel = UnitLevel("player")
-  local travel = MakeTravel(BuildNetwork(TravelSpeed()), plevel)
+  local W, net = Geo.World(), Geo.Net(TravelSpeed())
   local best
   for _, e in ipairs(cands) do
-    local t = travel(pos, e.p)
+    local t = ns.Solver.Travel(W, net, plevel, pos, e.p)
     if t and t < math.huge and (not best or t < best.time) then
       best = { id = e.id, name = e.name, p = e.p, time = t }
     end
@@ -1289,4 +1242,4 @@ function Geo.Innkeepers()
 end
 
 -- Shared with the next files.
-ns.BuildTasks, ns.CurrentMapSet, ns.MakeStops, ns.MakeTravel, ns.NearItems = BuildTasks, CurrentMapSet, MakeStops, MakeTravel, NearItems
+ns.BuildTasks, ns.CurrentMapSet, ns.MakeStops, ns.NearItems = BuildTasks, CurrentMapSet, MakeStops, NearItems

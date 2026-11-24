@@ -190,24 +190,15 @@ function Pb.Custom(P, cp, live)
     for _, s in ipairs(task.stops or {}) do
       if s.kind == "obj" and ci[s] then objs[#objs + 1] = out.steps[ci[s]] end
     end
-    ns.Solver.Ranks(objs)
-    for _, a in ipairs(objs) do
-      for _, b in ipairs(objs) do
-        if b.rank < a.rank then
-          out.pred[a.ci] = out.pred[a.ci] or {}
-          table.insert(out.pred[a.ci], b.ci)
-        end
-      end
-    end
+    ns.Solver.RankPreds(objs, out.pred)
   end
   out.first = cp.service and ci[cp.service] or nil -- service shortcut: always the first step
   P.custom = out
 end
 
--- Flight network, docks, passes, innkeepers, flight masters, ways back, bind location.
+-- What the travel model needs: flight network, docks and their lines, passes, into w.
 -- live: zones read from the map when needed; otherwise the passes are copied (plain tables).
-function Pb.World(P, live)
-  local w = {}
+function Pb.Network(w, live)
   local known = Geo.KnownNodes()
   local usable = {}
   w.nodes = {}
@@ -232,6 +223,23 @@ function Pb.World(P, live)
     w.passes = {}
     for _, ps in ipairs(Geo.Passes()) do w.passes[#w.passes + 1] = { c = ps.c, x = ps.x, y = ps.y, a = ps.a, b = ps.b } end
   end
+  if live then
+    -- Zone of a point (map API, cached by Geo.ZoneIdAt), its name and its levels (OpenMap), read when needed.
+    w.zoneAt = function(p) return (Geo.ZoneIdAt(p)) end
+    w.zones = setmetatable({}, { __index = function(t, id)
+      local lv = OM.levels[id]
+      local info = C_Map.GetMapInfo(id)
+      local z = { min = lv and lv[1], max = lv and lv[2], name = info and info.name }
+      t[id] = z
+      return z
+    end })
+  end
+end
+
+-- The travel model's world (the Network above), innkeepers, flight masters, ways back, bind location.
+function Pb.World(P, live)
+  local w = {}
+  Pb.Network(w, live)
   w.inns = {}
   for _, inn in ipairs(Geo.Innkeepers()) do w.inns[#w.inns + 1] = { id = inn.id, name = inn.name, p = Pb.Point(inn.p) } end
   w.fms = {}
@@ -245,17 +253,24 @@ function Pb.World(P, live)
   end
   local bind, bindName = Geo.CurrentBind()
   w.bind, w.bindName = Pb.Point(bind), bindName
-  if live then
-    -- Zone of a point (map API, cached by Geo.ZoneIdAt) and its levels (OpenMap), read when needed.
-    w.zoneAt = function(p) return (Geo.ZoneIdAt(p)) end
-    w.zones = setmetatable({}, { __index = function(t, id)
-      local lv = OM.levels[id]
-      local z = { min = lv and lv[1], max = lv and lv[2] }
-      t[id] = z
-      return z
-    end })
-  end
   P.world = w
+end
+
+-- The solver's world outside a computation (directions, distances, services, a saved Roadbook's
+-- transports), built again when a pass is learned (Geo.PassesChanged) and once the game gives the
+-- town names of the docks.
+function Geo.World()
+  local W = Geo.liveWorld
+  if W and (Geo.liveNamed or not Geo.taxiNames) then return W end
+  local P = { k = K, world = {} }
+  Pb.Network(P.world, true)
+  Geo.liveWorld, Geo.liveNamed = ns.Solver.World(P), Geo.taxiNames ~= nil
+  return Geo.liveWorld
+end
+
+-- Transport network of that world: with the flight paths known now (or `known`), at `speed`.
+function Geo.Net(speed, known)
+  return ns.Solver.Network(Geo.World(), known or Geo.KnownNodes(), speed)
 end
 
 -- Every point of a capture, by continent.
@@ -351,7 +366,7 @@ function Pb.Constants(P)
   for _, name in ipairs({ "PATH_FACTOR", "PASS_PATH_FACTOR", "PASS_MIN", "DANGER_MARGIN", "DANGER_FACTOR",
     "FLIGHT_SPEED", "FLIGHT_OVERHEAD", "TRANSPORT_TIME", "K_HUBS", "CROSS_CONTINENT", "ZONE_CELL", "HEARTH_TIME",
     "HEARTH_CD", "HEARTH_MIN_GAIN", "BIND_WORK", "INN_DETOUR", "OVERHEAD", "MOB_TIME", "ELITE_MOB_TIME",
-    "KILLS_NO_RATE", "DUNGEON_TIME", "LEVEL_PLAN_MAX_TIME", "LOOKAHEAD_LEVELS" }) do
+    "KILLS_NO_RATE", "DUNGEON_TIME", "LEVEL_PLAN_MAX_TIME", "LOOKAHEAD_LEVELS", "SERVICE_TIME" }) do
     k[name] = K[name]
   end
   P.k = k
@@ -387,7 +402,7 @@ end
 
 function Pb.Run(P)
   local co = coroutine.create(function() Pb.Capture(P) end)
-  Geo.co, Geo.runningKey = co, "bench"
+  Geo.co = co
   local function step()
     if Geo.co ~= co then
       Print(L["Capture interrupted by a Roadbook computation: try again."])
@@ -434,7 +449,7 @@ function Pb.Baselines(P, done)
       end
       P.baseline[b.name] = out
       nextOne(i + 1)
-    end, true)
+    end)
   end
   nextOne(1)
 end

@@ -2,9 +2,9 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, BuildNetwork, BuildScanContext, CharKey, DBXP = ns.AreaName, ns.BuildNetwork, ns.BuildScanContext, ns.CharKey, ns.DBXP
+local AreaName, BuildScanContext, CharKey, DBXP = ns.AreaName, ns.BuildScanContext, ns.CharKey, ns.DBXP
 local Geo, GiverText, HasBit, IsCompleted, IsInLog, K = ns.Geo, ns.GiverText, ns.HasBit, ns.IsCompleted, ns.IsInLog, ns.K
-local L, MakeStops, MakeTravel, PlayerPos, Print, QDB = ns.L, ns.MakeStops, ns.MakeTravel, ns.PlayerPos, ns.Print, ns.QDB
+local L, MakeStops, PlayerPos, Print, QDB = ns.L, ns.MakeStops, ns.PlayerPos, ns.Print, ns.QDB
 local QGet, QuestTargets, RemainingTargets, Settings, TravelSpeed = ns.QGet, ns.QuestTargets, ns.RemainingTargets, ns.Settings, ns.TravelSpeed
 local QuestPrereqs = ns.QuestPrereqs
 local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDoubts
@@ -32,7 +32,6 @@ end
 
 function Geo.ServiceSet(e)
   Settings().service = e and { kind = e.kind, id = e.id, name = e.name, p = Geo.CopyPoint(e.p) } or nil
-  Geo.customCache = nil
 end
 
 function Geo.ServiceClear()
@@ -433,7 +432,6 @@ end
 function Geo.CustomChanged()
   Geo.customToken = (Geo.customToken or 0) + 1
   local token = Geo.customToken
-  Geo.customCache = nil
   if #Geo.CustomList() == 0 then
     Geo.customUnplanned = nil
     Geo.ServiceClear()
@@ -490,39 +488,6 @@ function Geo.CustomTask(e, pos, plevel, logById)
   task.stops = MakeStops(task, pos, plevel)
   if not task.stops then return nil, L["not located"] end
   return task
-end
-
--- Network (and travel times) with the flight masters `hubs` activated, cached by set.
-function Geo.NetEntry(cache, hubs, speed, plevel)
-  local ids = {}
-  for _, h in ipairs(hubs) do ids[#ids + 1] = string.format("%s:%.0f:%.0f", tostring(h.p.c), h.p.x, h.p.y) end
-  table.sort(ids)
-  local key = table.concat(ids, ";")
-  local e = cache[key]
-  if not e then
-    local list = {}
-    for i, h in ipairs(hubs) do list[i] = h end
-    e = { net = BuildNetwork(speed, list) }
-    cache[key] = e
-  end
-  if not e.travel then e.travel = MakeTravel(e.net, plevel) end
-  return e
-end
-
--- Network of each leg (arriving at route[i]): the known flight paths, plus the ones activated
--- by the earlier steps of the route.
-function Geo.RouteNets(route, speed, plevel, cache)
-  local out, hubs = {}, {}
-  local cur = Geo.NetEntry(cache, hubs, speed, plevel)
-  for i = 1, #route do
-    out[i] = cur
-    local h = route[i].fmHub
-    if h and h.p then
-      hubs[#hubs + 1] = h
-      cur = Geo.NetEntry(cache, hubs, speed, plevel)
-    end
-  end
-  return out
 end
 
 function Geo.FlightMasterStep(fm)
@@ -805,7 +770,7 @@ function Geo.AcceptGenerated(route, info, done, prepare)
   local function apply()
     Geo.CustomSetList(list)
     Geo.customToken = (Geo.customToken or 0) + 1 -- no pending recompute of the former list
-    Geo.customCache, Geo.customUnplanned = nil, info.unplanned
+    Geo.customUnplanned = info.unplanned
     Geo.Freeze(prepare and prepare(route) or route, info)
     if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
     done(true)

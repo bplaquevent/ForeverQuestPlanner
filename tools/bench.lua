@@ -185,8 +185,7 @@ local function Report(name, b)
   end
   local route = b.route
   local info = b.info or {}
-  -- Level goal: at least the next level (as the planner does).
-  local target = (type(b.goal) == "table" and b.goal.kind == "level") and math.max(b.goal.value, pl.level + 1) or nil
+  local target = type(b.goal) == "table" and S.Goal(P, b.goal).target or nil
   print(string.format("  %d steps, in game: %s, %d XP", #route - 1, Time(info.total), info.xp or 0))
   local leg = S.Evaluate(P, route, { legacy = true })
   local worst, wi = 0, nil
@@ -221,6 +220,15 @@ for _, name in ipairs({ "auto", "custom" }) do
   if P.baseline and P.baseline[name] then Report(name, P.baseline[name]) end
 end
 
+-- --service: is the service step the first one (a teleport may come before it)?
+local function PrintServiceFirst(route)
+  local k = 2
+  while route[k] and route[k].kind == "hearth" do k = k + 1 end
+  local first = route[k]
+  print("  service first: " .. ((first and first.kind == "service") and "OK"
+    or "WRONG (first step: " .. tostring(first and first.kind) .. ")"))
+end
+
 ---------------------------------------------------------------------------
 -- Optimizer, compared with the automatic Roadbook of the current planner (same goal).
 ---------------------------------------------------------------------------
@@ -242,14 +250,9 @@ local function CustomFrom(n)
         out.steps[ci] = st
         list[k] = st
       end
-      S.Ranks(list)
+      S.RankPreds(list, out.pred)
       for k, st in ipairs(list) do
-        local pred = {}
-        for _, o in ipairs(list) do
-          if o.rank < st.rank then pred[#pred + 1] = o.ci end
-        end
         if st.glue and k > 1 then st.glueTo = list[k - 1].ci end
-        out.pred[st.ci] = pred
       end
       byN[t.n] = list
     end
@@ -258,7 +261,8 @@ local function CustomFrom(n)
     -- Service shortcut (Geo.ServiceStep): at the place of the last step (the player's place when the
     -- list is empty), before every other step.
     local at = ci > 0 and out.steps[ci].p or P.player.pos
-    local svc = { kind = "service", p = at, work = 60, title = "Service", ci = ci + 1 }
+    local svc = { kind = "service", p = at, work = P.k.SERVICE_TIME or 60, -- (not in older captures)
+      title = "Service", ci = ci + 1 }
     out.steps[ci + 1] = svc
     for k = 1, ci do
       out.pred[k] = out.pred[k] or {}
@@ -289,12 +293,7 @@ if not opts.list and (opts.custom or (P.custom and P.custom.steps)) then
         ZoneName(P, st.p)))
     end
   end
-  if opts.service then
-    local k = 2
-    while co.route[k] and co.route[k].kind == "hearth" do k = k + 1 end -- a teleport may come before it
-    local first = co.route[k]
-    print("  service first: " .. ((first and first.kind == "service") and "OK" or "WRONG (first step: " .. tostring(first and first.kind) .. ")"))
-  end
+  if opts.service then PrintServiceFirst(co.route) end
   if opts.custom then os.exit(0) end
 end
 
@@ -309,12 +308,10 @@ local listCase = opts.list and tonumber(opts.list)
 if listCase then
   P.custom = (listCase > 0 or opts.service) and CustomFrom(listCase) or nil
   if P.custom then
-    local total = 0
     S.clock = os.clock
     local whole = S.Optimize(P, "custom", { maxEvals = 3000 })
-    total = whole.res.time
     print("")
-    print(string.format("== List of %d quests: whole list %s, %d XP, level %d -> %d", #P.custom.tasks, Time(total),
+    print(string.format("== List of %d quests: whole list %s, %d XP, level %d -> %d", #P.custom.tasks, Time(whole.res.time),
       whole.res.xp, pl.level, whole.res.level))
   end
 else
@@ -326,15 +323,11 @@ local function GoalText(res)
   if g.kind == "level" then
     return res.reach and ("level " .. g.target .. " in " .. Time(res.reach)) or ("level " .. g.target .. " not reached")
   end
-  local xp = 0
-  for k = 2, #res.at do
-    if res.at[k] <= g.value then xp = xp + res.stepXP[k] end
-  end
+  local xp = S.XPWithin(res, g.value)
   return string.format("%d XP in %s (%.0f XP/h)", xp, Time(g.value), xp / g.value * 3600)
 end
 
 local function Line(name, res)
-  local teleports = 0
   print(string.format("  %-9s %s | total %s, %d XP, %d violations", name, GoalText(res), Time(res.time), res.xp,
     #res.violations))
 end
@@ -343,19 +336,14 @@ print("")
 print(string.format("== Optimizer, goal %s %s", g.kind, g.kind == "time" and Time(g.value) or tostring(g.target)))
 local base = P.baseline and P.baseline.auto
 local baseSame = base and base.route and type(base.goal) == "table" and base.goal.kind == g.kind
-  and (g.kind ~= "time" or base.goal.value == g.value) and (g.kind ~= "level" or math.max(base.goal.value, pl.level + 1) == g.target)
+  and (g.kind ~= "time" or base.goal.value == g.value) and (g.kind ~= "level" or S.Goal(P, base.goal).target == g.target)
 if base and base.route then
   Line(baseSame and "current" or "current*", S.Evaluate(P, base.route, { targetLevel = g.target }))
   if not baseSame then print("  (* computed by the game for another goal)") end
 end
 S.clock = os.clock
 local opt = S.Optimize(P, goal, { maxEvals = opts.evals and tonumber(opts.evals) or nil })
-if opts.service and P.custom and P.custom.first then
-  local k = 2
-  while opt.route[k] and opt.route[k].kind == "hearth" do k = k + 1 end -- a teleport may come before it
-  local first = opt.route[k]
-  print("  service first: " .. ((first and first.kind == "service") and "OK" or "WRONG (first step: " .. tostring(first and first.kind) .. ")"))
-end
+if opts.service and P.custom and P.custom.first then PrintServiceFirst(opt.route) end
 Line("optimized", opt.res)
 local nT, nH = 0, 0
 local listIds = {}

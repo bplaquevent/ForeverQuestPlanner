@@ -2,8 +2,8 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, BuildNetwork, CharKey, Dist, Geo, GetItemInfoCompat = ns.AreaName, ns.BuildNetwork, ns.CharKey, ns.Dist, ns.Geo, ns.GetItemInfoCompat
-local K, L, PlayerPos, Print, Route, Settings = ns.K, ns.L, ns.PlayerPos, ns.Print, ns.Route, ns.Settings
+local AreaName, CharKey, Dist, Geo, GetItemInfoCompat = ns.AreaName, ns.CharKey, ns.Dist, ns.Geo, ns.GetItemInfoCompat
+local K, L, PlayerPos, Print, Settings = ns.K, ns.L, ns.PlayerPos, ns.Print, ns.Settings
 local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData, ns.Solver, ns.TaxiCount, ns.TravelSpeed, ns.WorldPos, ns.scan
 
 ---------------------------------------------------------------------------
@@ -82,34 +82,55 @@ function Geo.Boardings(choice, net)
   return out
 end
 
--- Network of the leg arriving at route[k]: a single network, or a function k -> network
--- (custom Roadbook: flight paths activated on the way become usable after their step).
-function Geo.LegNet(net, k)
-  if type(net) == "function" then return net(k) end
-  return net
+-- "Take the flight / zeppelin / boat" step of a boarding (Geo.Boardings), planned at time `at`.
+function Geo.TravelStep(b, at)
+  local what = (b.mode == "vol" and L["Take the flight"]) or (L["Take the "] .. (K.MODE_NAME[b.mode] or b.mode))
+  return { kind = "travel", p = Geo.MapPoint(b.hub.p), work = 0, at = at,
+    task = { title = what .. L[": "] .. (b.hub.name or "?") .. " -> " .. (b.dest and b.dest.name or "?"),
+      mode = b.mode, from = b.hub.name, dest = b.dest and b.dest.name, destP = b.dest and b.dest.p,
+      xp = 0, travel = true } }
 end
 
--- Adds a step at the boarding point of each transport used by the route.
-function Geo.AddTransportStops(route, nets, plevel)
-  local out = { route[1] }
+-- Boarding steps of the transports taken from a to b on the network `net` of the world W: the way the
+-- travel model costs (Solver.Route).
+function Geo.LegSteps(W, a, b, net, plevel, at)
+  local out = {}
+  local _, choice = Solver.Route(W, a, b, net, plevel)
+  if choice then
+    for _, boarding in ipairs(Geo.Boardings(choice, net)) do out[#out + 1] = Geo.TravelStep(boarding, at) end
+  end
+  return out
+end
+
+-- Adds a step at the boarding point of each transport used by the route: legs[k] = the solver's leg
+-- arriving at route[k] (Solver.Evaluate). Returns the route and the level after each of its steps.
+function Geo.AddTransportStops(W, route, legs, levels)
+  local out, outLevels = { route[1] }, { levels[1] }
   for k = 2, #route do
-    local cur = route[k]
-    local net = Geo.LegNet(nets, k)
-    if cur.kind ~= "hearth" and not cur.glue and #net.hubs > 0 then -- escort: on foot, with the NPC
-      local _, choice = Route(out[#out].p, cur.p, net, plevel)
-      if choice then
-        for _, b in ipairs(Geo.Boardings(choice, net)) do
-          local what = (b.mode == "vol" and L["Take the flight"]) or (L["Take the "] .. (K.MODE_NAME[b.mode] or b.mode))
-          out[#out + 1] = { kind = "travel", p = Geo.MapPoint(b.hub.p), work = 0,
-            task = { title = what .. L[": "] .. (b.hub.name or "?") .. " -> " .. (b.dest and b.dest.name or "?"),
-              mode = b.mode, from = b.hub.name, dest = b.dest and b.dest.name, destP = b.dest and b.dest.p,
-              xp = 0, travel = true } }
-        end
+    local cur, leg = route[k], legs[k]
+    if leg and cur.kind ~= "hearth" and not cur.glue then -- escort: on foot, with the NPC
+      for _, st in ipairs(Geo.LegSteps(W, leg.from, leg.to, leg.net, leg.level)) do
+        out[#out + 1] = st
+        outLevels[#out] = outLevels[#out - 1]
       end
     end
     out[#out + 1] = cur
+    outLevels[#out] = levels[k]
   end
-  return out
+  return out, outLevels
+end
+
+-- Network usable on the leg arriving at route[i]: the known flight paths, plus the ones activated by
+-- the earlier steps of the route.
+function Geo.NetFor(route, i, speed)
+  local known = {}
+  for id in pairs((Geo.KnownNodes())) do known[id] = true end
+  for k = 2, i - 1 do
+    local h = route[k].fmHub
+    local id = h and (h.node or Geo.NodeAt(h.p))
+    if id then known[id] = true end
+  end
+  return Geo.Net(speed, known)
 end
 
 ---------------------------------------------------------------------------
@@ -435,6 +456,7 @@ function Geo.FromSolver(P, sroute, res)
   local srcByKey = {}
   for _, s in ipairs(P.world.recall) do srcByKey[tostring(s.key)] = s end
   local route = { { kind = "start", p = pl.posSrc or pl.pos, work = 0 } }
+  local legs, levels = {}, { res.levels[1] } -- the solver's, at the same places as the game steps
   for i = 2, #sroute do
     local s = sroute[i]
     local st = s.src
@@ -455,27 +477,20 @@ function Geo.FromSolver(P, sroute, res)
     if st then
       st.at = res.at[i]
       route[#route + 1] = st
+      legs[#route], levels[#route] = res.legs[i], res.levels[i]
     end
   end
-  local cache = {}
-  local nets = Geo.RouteNets(route, pl.speed, pl.level, cache)
-  -- Transport skipped by the player (P.ban): left out of the first leg only.
-  local banNet = P.ban and BuildNetwork(pl.speed, nil, P.ban)
-  local okT, withT = pcall(Geo.AddTransportStops, route, function(k)
-    if k == 2 and banNet then return banNet end
-    return nets[k].net
-  end, pl.level)
+  local okT, withT, withLevels = pcall(Geo.AddTransportStops, P.W, route, legs, levels)
   if not okT then Print(L["Transport steps error: "] .. tostring(withT)) end
-  if okT and withT then route = withT end
+  if okT then route, levels = withT, withLevels end
   for i = 2, #route do route[i].at = route[i].at or route[i - 1].at or 0 end -- boardings: on the way
   local ids, count = {}, 0
   for _, st in ipairs(route) do
     local id = st.task and st.task.id
     if id and not ids[id] then ids[id], count = true, count + 1 end
   end
-  local net = BuildNetwork(pl.speed)
-  local info = { total = res.time, xp = res.xp, mobXP = res.mobXP, levels = Geo.Levels(route), speed = pl.speed,
-    plevel = pl.level, net = net, count = count, netCache = cache }
+  local info = { total = res.time, xp = res.xp, mobXP = res.mobXP, levels = levels, speed = pl.speed,
+    plevel = pl.level, taxi = TaxiCount(), count = count }
   return route, info
 end
 
@@ -528,64 +543,29 @@ function Geo.KeepDone(fz, isDone, rest, restInfo, info)
   return route
 end
 
--- Roadbook computation in the background (spread over several frames) with caching.
--- goal: "Adapt" option ({ kind, value }) or "custom" (the list as it is); the list is in the key.
-function Geo.GoalKey(goal)
-  if goal == "custom" then return goal end
-  return goal.kind .. goal.value
-end
-
--- Profession levels (a quest waiting for one can be turned in once it is reached).
-function Geo.SkillsKey()
-  local skills = ns.PlayerSkills()
-  local ids = {}
-  for id, v in pairs(skills) do ids[#ids + 1] = id .. ":" .. v end
-  table.sort(ids)
-  return table.concat(ids, ",")
-end
-
-function Geo.PlanKey(goal)
-  local e = ForeverQuestPlannerDB and ForeverQuestPlannerDB[CharKey()]
-  local b = Geo.BindStore()[CharKey()]
-  local list = {}
-  for _, it in ipairs(Geo.CustomList()) do list[#list + 1] = it.id end
-  return table.concat({ Geo.GoalKey(goal), table.concat(list, ","), tostring(Settings().noHearth),
-    tostring(Settings().noRecallSpells), tostring(Settings().noFMDetour), UnitLevel("player"),
-    UnitXP and UnitXP("player") or 0, e and e.updated or "", tostring(scan.entries), TaxiCount(),
-    tostring(b and b.name), tostring(Settings().service and Settings().service.id), tostring(Settings().mountSpeed), Geo.paramsVersion or 0, Geo.SkillsKey() }, "|")
-end
-
--- Returns true if the cached plan is up to date; otherwise starts (or continues) the computation and
--- calls cb(route, err, info) when done. force = recompute even if the cache is valid.
--- opts: a Roadbook adapted (Geo.PlanCustom), computed apart from the plans of the tabs.
-function Geo.RequestPlan(goal, cb, force, opts)
-  local key = Geo.PlanKey(goal) .. (opts and "|adapt" or "")
-  local pos = PlayerPos()
-  local cacheField = goal == "custom" and "customCache" or "planCache"
-  local c = Geo[cacheField]
-  if not force and c and c.key == key and pos and c.pos and (Dist(pos, c.pos) or math.huge) < K.REPLAN_DISTANCE then
-    return true
-  end
+-- Roadbook computation in the background (spread over several frames).
+-- goal: "Adapt" option ({ kind, value }) or "custom" (the list as it is).
+-- cb(route, err, info) when done; a newer request replaces the running one, and its result goes to
+-- the callbacks of both. opts: a Roadbook adapted (Geo.PlanCustom).
+function Geo.RequestPlan(goal, cb, opts)
   if cb then
     Geo.planCbs = Geo.planCbs or {}
     local dup = false
     for _, f in ipairs(Geo.planCbs) do if f == cb then dup = true break end end
     if not dup then table.insert(Geo.planCbs, cb) end
   end
-  if Geo.co and Geo.runningKey == key then return false end
-  Geo.runningKey = key
   local co = coroutine.create(function()
     if goal == "custom" then return Geo.PlanCustom(opts) end
     return Geo.PlanGenerate(goal, opts)
   end)
   Geo.co = co
-  local function finish(result)
+  local function finish(route, err, info)
     Geo.co = nil
-    Geo[cacheField] = result
+    Geo.lastPlanError = not route and err or nil
     local cbs = Geo.planCbs or {}
     Geo.planCbs = nil
     for _, f in ipairs(cbs) do
-      local ok, e = pcall(f, result.route, result.err, result.info)
+      local ok, e = pcall(f, route, err, info)
       if not ok then Print(L["Error after computing the Roadbook: "] .. tostring(e)) end
     end
   end
@@ -595,15 +575,14 @@ function Geo.RequestPlan(goal, cb, force, opts)
     local ok, route, err, info = coroutine.resume(co)
     if not ok then
       Print(L["|cffff6060Roadbook computation error|r: "] .. tostring(route))
-      finish({ key = key, pos = pos, err = L["Computation error: "] .. tostring(route) })
+      finish(nil, L["Computation error: "] .. tostring(route))
     elseif coroutine.status(co) == "dead" then
-      finish({ key = key, pos = pos, route = route, err = err, info = info })
+      finish(route, err, info)
     else
       C_Timer.After(0, step)
     end
   end
   step()
-  return false
 end
 
 local function FormatTime(sec)

@@ -278,11 +278,8 @@ function Geo.StartPlaces(id, from)
   return list
 end
 
-local function Dist(a, b)
-  if not a or not b or a.c ~= b.c then return nil end
-  local dx, dy = a.x - b.x, a.y - b.y
-  return math.sqrt(dx * dx + dy * dy)
-end
+local Solver = ns.Solver
+local Dist = Solver.Dist
 
 local function Nearest(points, from)
   local best, bd
@@ -314,11 +311,6 @@ local function TravelSpeed()
     if run and run > 7 then s.mountSpeed = run end
   end
   return math.max(7, s.mountSpeed or 7)
-end
-
-local function TravelTime(a, b, speed)
-  if not a or not b then return 0 end
-  return Geo.WalkTime(a, b, speed) or K.CROSS_CONTINENT
 end
 
 local function PointText(p)
@@ -443,37 +435,6 @@ function Geo.NodeAt(p)
   return best
 end
 
--- Flight lengths (yards) from node `from` to every node reachable over `learned` nodes only
--- (the ends included): Dijkstra over OpenMap's flight paths. Nodes the flight map shows as
--- unreachable are exactly those no such path joins.
-function Geo.FlightDists(from, learned)
-  if not Geo.flightEdges then
-    local edges = {}
-    for _, e in ipairs(OM.flights.paths) do
-      edges[e[1]] = edges[e[1]] or {}
-      table.insert(edges[e[1]], { e[2], e[3] })
-    end
-    Geo.flightEdges = edges
-  end
-  local dist, done = { [from] = 0 }, {}
-  while true do
-    local k, kd
-    for id, d in pairs(dist) do
-      if not done[id] and (not kd or d < kd) then k, kd = id, d end
-    end
-    if not k then break end
-    done[k] = true
-    for _, e in ipairs(Geo.flightEdges[k] or {}) do
-      local to = e[1]
-      if learned[to] and not done[to] then
-        local nd = kd + e[2]
-        if not dist[to] or nd < dist[to] then dist[to] = nd end
-      end
-    end
-  end
-  return dist
-end
-
 -- Boat, zeppelin and airship lines of OpenMap, each with its faction filled in: OpenMap's own `faction`
 -- field when it has one, else the supplement of Data/Supplements.lua (a line OpenMap gives none),
 -- else the convention of its kind. Rows keep OpenMap's layout (t[1] kind ... t[8]) plus `faction`
@@ -586,17 +547,6 @@ function Geo.ZoneIdAt(p)
   return z.id, z.name
 end
 
--- Zone (name, minimum level) at a world point. Levels: OpenMap.MapLevels (the client's tables
--- have none); zones it does not list (cities...) have no level.
-local levelZones = {}
-local function ZoneAt(p)
-  local id, name = Geo.ZoneIdAt(p)
-  local lv = id and OM.levels[id]
-  if not (lv and lv[1]) then return nil end
-  levelZones[id] = levelZones[id] or { name = name or AreaName(0), min = lv[1] }
-  return levelZones[id]
-end
-
 -- Passes learned in game: { c, x, y, a, b, n } (world point, the zones' uiMapIDs a < b, times seen).
 function Geo.LearnedPasses()
   return SharedData().passes
@@ -653,86 +603,16 @@ function Geo.Passes()
 end
 
 function Geo.PassesChanged()
-  Geo.passList, Geo.passGraph = nil, nil
+  Geo.passList, Geo.liveWorld = nil, nil
 end
 
--- Shortest ways between the passes of a continent (Floyd-Warshall): two passes are joined when
--- they share a zone (a straight line across it).
-local function PassGraph(c)
-  Geo.passGraph = Geo.passGraph or {}
-  local g = Geo.passGraph[c]
-  if g then return g end
-  local pts, byZone = {}, {}
-  for _, ps in ipairs(Geo.Passes()) do
-    if ps.c == c then
-      pts[#pts + 1] = ps
-      for _, z in ipairs({ ps.a, ps.b }) do
-        byZone[z] = byZone[z] or {}
-        table.insert(byZone[z], #pts)
-      end
-    end
-  end
-  local n, D, nxt = #pts, {}, {}
-  for i = 1, n do
-    D[i], nxt[i] = {}, {}
-    local p = pts[i]
-    for j = 1, n do
-      local q = pts[j]
-      local shared = p.a == q.a or p.a == q.b or p.b == q.a or p.b == q.b
-      D[i][j] = (i == j and 0) or (shared and Dist(p, q)) or math.huge
-      nxt[i][j] = j
-    end
-  end
-  for k = 1, n do
-    local Dk = D[k]
-    for i = 1, n do
-      local dik = D[i][k]
-      if dik < math.huge then
-        local Di, Ni, nik = D[i], nxt[i], nxt[i][k]
-        for j = 1, n do
-          local v = dik + Dk[j]
-          if v < Di[j] then Di[j], Ni[j] = v, nik end
-        end
-      end
-    end
-  end
-  g = { pts = pts, byZone = byZone, D = D, nxt = nxt }
-  Geo.passGraph[c] = g
-  return g
-end
-
--- Walking distance from a to b (nil: other continent) and the passes it goes through, in order
--- (nil: straight line). Same zone, unknown zone, or a zone without any pass: straight line.
+-- Walks of the travel model (Solver.lua) in the live world: distance and passes on the way, time at `speed`.
 function Geo.WalkWay(a, b)
-  local d = Dist(a, b)
-  if not d or d < K.PASS_MIN then return d end
-  local za, zb = Geo.ZoneIdAt(a), Geo.ZoneIdAt(b)
-  if not (za and zb) or za == zb then return d end
-  local g = PassGraph(a.c)
-  local ia, ib = g.byZone[za], g.byZone[zb]
-  if not (ia and ib) then return d end
-  local best, bi, bj = math.huge, nil, nil
-  for _, i in ipairs(ia) do
-    local di = Dist(a, g.pts[i])
-    for _, j in ipairs(ib) do
-      local v = di + g.D[i][j] + Dist(g.pts[j], b)
-      if v < best then best, bi, bj = v, i, j end
-    end
-  end
-  if not bi then return d end
-  local way, i = { g.pts[bi] }, bi
-  while i ~= bj do
-    i = g.nxt[i][bj]
-    way[#way + 1] = g.pts[i]
-  end
-  return best, way
+  return Solver.WalkWay(Geo.World(), a, b)
 end
 
--- Walking time from a to b at `speed` (nil: other continent), and the passes on the way.
 function Geo.WalkTime(a, b, speed)
-  local d, way = Geo.WalkWay(a, b)
-  if not d then return nil end
-  return d * (way and K.PASS_PATH_FACTOR or K.PATH_FACTOR) / speed, way
+  return Solver.WalkTime(Geo.World(), a, b, speed)
 end
 
 -- Learning, every K.PASS_TICK seconds: a walk from a zone to another (not flying, not on a boat:
@@ -810,146 +690,22 @@ function Geo.WithLevel(label, name)
   return lv and (label .. " " .. lv) or label
 end
 
--- Walking time between two points (through the zone passes); also returns the dangerous zone crossed.
-local function WalkCost(a, b, net, plevel)
-  local t, way = Geo.WalkTime(a, b, net.speed)
-  if not t then return math.huge end
-  local worst, p = nil, a
-  for k = 1, (way and #way or 0) + 1 do
-    local q = way and way[k] or b
-    if Dist(p, q) > 300 then
-      for _, f in ipairs({ 0.25, 0.5, 0.75, 1 }) do
-        local z = ZoneAt({ c = p.c, x = p.x + (q.x - p.x) * f, y = p.y + (q.y - p.y) * f })
-        if z and z.min > plevel + K.DANGER_MARGIN and (not worst or z.min > worst.min) then worst = z end
-      end
-    end
-    p = q
-  end
-  if worst then t = t * K.DANGER_FACTOR end
-  return t, worst
-end
-
--- Transport point graph + shortest paths (Floyd-Warshall, about fifty nodes).
--- extra: flight masters not learned yet, used as if their flight path were activated
--- ({ name, p, node }, custom Roadbook: flight paths activated on the way).
--- ban: transport skipped by the player, left out (Solver.Network: same rule).
-local function BuildNetwork(speed, extra, ban)
-  local hubs = {}
-  local learned = {}
-  for id in pairs((Geo.KnownNodes())) do learned[id] = true end
-  for id in pairs(learned) do
-    hubs[#hubs + 1] = { kind = "taxi", name = Geo.NodeName(id), p = Geo.NodePoint(id), node = id }
-  end
-  for _, h in ipairs(extra or {}) do
-    local id = h.node or Geo.NodeAt(h.p)
-    if not (id and learned[id]) then
-      if id then learned[id] = true end
-      hubs[#hubs + 1] = { kind = "taxi", name = h.name, p = { c = h.p.c, x = h.p.x, y = h.p.y }, node = id, guess = true }
-    end
-  end
-  local dk = Geo.Docks()
-  local dockIndex = {}
-  for k, dock in ipairs(dk.docks) do
-    hubs[#hubs + 1] = { kind = "dock", name = dock.name, p = dock.p }
-    dockIndex[k] = #hubs
-  end
-
-  local n = #hubs
-  local D, nxt, via = {}, {}, {}
-  for i = 1, n do
-    D[i], nxt[i], via[i] = {}, {}, {}
-    local a = hubs[i]
-    local banned = ban and ban.mode == "vol" and a.kind == "taxi" and ns.Solver.Near(a.p, ban.from, ns.Solver.BAN_RADIUS)
-    local fd = (a.kind == "taxi" and a.node and not banned) and Geo.FlightDists(a.node, learned) or nil
-    for j = 1, n do
-      nxt[i][j] = j
-      if i == j then
-        D[i][j] = 0
-      else
-        local b = hubs[j]
-        local best, how = math.huge, nil
-        local walk = Geo.WalkTime(a.p, b.p, speed)
-        if walk then best, how = walk, "walk" end
-        local len = fd and b.kind == "taxi" and b.node and fd[b.node]
-        if len then
-          local fl = len / K.FLIGHT_SPEED + K.FLIGHT_OVERHEAD
-          if fl < best then best, how = fl, "flight" end
-        end
-        D[i][j], via[i][j] = best, how
-      end
-    end
-  end
-  for _, l in ipairs(dk.links) do
-    local i, j = dockIndex[l[1]], dockIndex[l[2]]
-    local banned = ban and ban.mode ~= "vol" and i and j and ns.Solver.Near(hubs[i].p, ban.from, ns.Solver.BAN_RADIUS)
-      and ns.Solver.Near(hubs[j].p, ban.to, ns.Solver.BAN_RADIUS)
-    if i and j and not banned and K.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = K.TRANSPORT_TIME, l[3] end
-  end
-  for k = 1, n do
-    local Dk = D[k]
-    for i = 1, n do
-      local dik = D[i][k]
-      if dik < math.huge then
-        local Di, Ni, nik = D[i], nxt[i], nxt[i][k]
-        for j = 1, n do
-          local v = dik + Dk[j]
-          if v < Di[j] then Di[j], Ni[j] = v, nik end
-        end
-      end
-    end
-  end
-  return { hubs = hubs, D = D, nxt = nxt, via = via, speed = speed, near = {}, taxi = TaxiCount() }
-end
-
-local function NearHubs(net, p)
-  local cached = net.near[p]
-  if cached then return cached end
-  local list = {}
-  for i, h in ipairs(net.hubs) do
-    local d = Dist(h.p, p)
-    if d then list[#list + 1] = { i = i, d = d } end
-  end
-  table.sort(list, function(a, b) return a.d < b.d end)
-  local out = {}
-  for k = 1, math.min(K.K_HUBS, #list) do out[k] = list[k].i end
-  net.near[p] = out
-  return out
-end
-
--- Best route from a to b: direct walk, or walk -> network -> walk.
-local function Route(a, b, net, plevel)
-  if not a or not b then return 0, nil end
-  if not net then return TravelTime(a, b, 7), nil end
-  local best = (a.c == b.c) and (WalkCost(a, b, net, plevel)) or math.huge
-  local choice
-  if #net.hubs > 0 then
-    local hb = NearHubs(net, b)
-    for _, i in ipairs(NearHubs(net, a)) do
-      local wa = WalkCost(a, net.hubs[i].p, net, plevel)
-      if wa < best then
-        for _, j in ipairs(hb) do
-          local v = wa + net.D[i][j] + (WalkCost(net.hubs[j].p, b, net, plevel))
-          if v < best then best, choice = v, { i = i, j = j } end
-        end
-      end
-    end
-  end
-  if best == math.huge then best = K.CROSS_CONTINENT end
-  return best, choice
-end
-
 -- Readable directions to go from a to b.
+-- net: a network of the live world (Geo.Net).
 local function RouteText(a, b, net, plevel)
   if not a or not b then return nil end
-  local _, choice = Route(a, b, net, plevel)
+  local W = Geo.World()
+  local _, choice = Solver.Route(W, a, b, net, plevel)
   local parts = {}
   local function walk(p, q, toName)
     local d, way = Geo.WalkWay(p, q)
     if not d or d < 40 then return end
-    local _, warn = WalkCost(p, q, net, plevel)
+    local _, worst, zone = Solver.WalkCost(W, p, q, net.speed, plevel)
     local s = toName and string.format(L["walk to %s (%.0f m)"], toName, d) or string.format(L["walk %.0f m"], d)
     if way then s = s .. string.format(L[" through %d zone pass(es)"], #way) end
-    if warn then s = s .. Color("ff6060", L[" [crosses "] .. (warn.name or "?") .. L[", level "] .. warn.min .. "+]") end
+    if worst and worst > plevel + K.DANGER_MARGIN then
+      s = s .. Color("ff6060", L[" [crosses "] .. (W.zones[zone].name or "?") .. L[", level "] .. worst .. "+]")
+    end
     parts[#parts + 1] = s
   end
   if not choice then
@@ -1270,7 +1026,7 @@ local function UnitTime(tg)
 end
 
 -- Shared with the next files.
-ns.AllInstance, ns.BuildNetwork, ns.Dist, ns.EntityPoints, ns.Geo, ns.GeoReady = AllInstance, BuildNetwork, Dist, EntityPoints, Geo, GeoReady
+ns.AllInstance, ns.Dist, ns.EntityPoints, ns.Geo, ns.GeoReady = AllInstance, Dist, EntityPoints, Geo, GeoReady
 ns.Nearest, ns.PlayerPos, ns.PointText, ns.QuestTargets, ns.RemainingTargets = Nearest, PlayerPos, PointText, QuestTargets, RemainingTargets
-ns.Route, ns.RouteText, ns.StartPoints, ns.TaxiCount, ns.KnownFlights, ns.TravelSpeed = Route, RouteText, StartPoints, TaxiCount, KnownFlights, TravelSpeed
+ns.RouteText, ns.StartPoints, ns.TaxiCount, ns.KnownFlights, ns.TravelSpeed = RouteText, StartPoints, TaxiCount, KnownFlights, TravelSpeed
 ns.UnitTime, ns.WorldPos = UnitTime, WorldPos
