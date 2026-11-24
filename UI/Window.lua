@@ -26,176 +26,66 @@ function Geo.RenderBusy(panel)
   return busy
 end
 
--- Category of a quest of the list, as in the Quest log tab (byLog: category of the quests of the log,
--- from Analyze): "done" (turned in), "turnin", "zone" (name), "dungeon" (name), "later" (level too high).
--- A quest not in the log: its dungeon, Professions / Class, the zone of its quest giver.
-function Geo.ListCategory(it, byLog, plevel)
-  if IsCompleted(it.id) then return "done" end
-  local c = byLog[it.id]
-  if c then return c.kind, c.name end
-  local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
-  local dg = sort > 0 and QDB.dungeonOf[sort]
-  if dg then return "dungeon", AreaName(dg) or L["Dungeon"] end
-  local m = QuestMeta(it.id)
-  local level = it.level or Geo.QuestLevelOf(it.id) or 0
-  local kind, name = QuestCategory(nil, level, plevel, m and IsProfMeta(m), m and IsClassMeta(m))
-  if kind == "later" or name then return kind, name end
-  local zone = sort > 0 and AreaName(sort) or nil
-  if not zone then
-    local _, starterZone = GiverText(QGet(QDB.Quest, it.id, "startedBy"))
-    zone = starterZone
+-- Line of a quest of the list: its state and notes (facts: Geo.RoadbookQuests).
+local function RoadbookQuestText(it)
+  local D, q = K.DESC, it.log
+  local status
+  if it.done then status = Color(D.good, L["turned in"])
+  elseif q and q.complete then status = Color(D.good, L["ready to turn in"])
+  elseif q then status = Color(D.action, L["in the quest log"])
+  else status = Color(D.action, L["to pick up"]) end
+  local notes = {}
+  if it.reqLevel then notes[#notes + 1] = Color(D.warn, string.format(L["level %d required"], it.reqLevel)) end
+  if it.prereqOf then notes[#notes + 1] = Color(D.chain, string.format(L["prerequisite of \"%s\""], it.prereqOf)) end
+  if it.dungeon then notes[#notes + 1] = Geo.WithLevel(Color(D.meta, L["dungeon: "] .. it.dungeon), it.dungeon) end
+  local text = "  " .. StateIcons(it.id) .. Geo.QuestTitle(it.title, { id = it.id, level = it.level, doubts = it.doubts }) ..
+    Geo.DescLine(status, unpack(notes))
+  local rest = q and not q.complete and RemainingObjectives(q) or ""
+  if rest ~= "" then text = text .. Geo.DescLine(Color(D.action, rest)) end
+  text = text .. Geo.DoubtLine(it.doubts)
+  if not it.forPlayer then text = text .. Geo.DescLine(Color(D.bad, L["not for your class or race"])) end
+  if it.unplanned then
+    text = text .. Geo.DescLine(Color(D.bad, it.reason and (L["Cannot be planned: "] .. it.reason) or L["not planned yet"]))
   end
-  return "zone", zone or L["No zone"]
+  return text
 end
 
--- Quests of the list, in the categories of the Quest log tab with "Turned in" first: turned in, to
--- turn in, zones (2 quests or more, the biggest first), dungeons, single quests, level too high. In a
--- category: the quests of the log in its order, then the others by level (a dungeon: by level).
--- Without a Roadbook (fz nil), the list as it is; with one, the quests it does not plan show why.
--- One line each with its state; the ones not turned in can be removed (CP.SkipQuest: out of the list,
--- the Roadbook computed again). Returns the number of quests shown.
+-- Quests of the list under their categories (Geo.RoadbookCategories), with the search. One line each
+-- with its state; the ones not turned in can be removed (CP.SkipQuest: out of the list, the Roadbook
+-- computed again). Returns the number of quests of the list.
 function Geo.RoadbookQuestItems(items, fz, query)
-  local D = K.DESC
-  local quests, seen = {}, {}
-  local function add(task)
-    local id = task and task.id
-    if not id or seen[id] then return end
-    seen[id] = true
-    quests[#quests + 1] = { id = id, title = task.title, level = task.level }
-  end
-  local route = fz and fz.route or {}
-  for i = 2, #route do
-    local st = route[i]
-    if st.kind == "dungeon" then
-      for _, m in ipairs(st.task.members or {}) do add(m.task) end
-    else
-      add(st.task)
-    end
-  end
-  local list, entry, why = Geo.CustomList(), {}, {}
-  for _, it in ipairs(list) do entry[it.id] = it end
-  for _, u in ipairs((fz and fz.info.unplanned) or State.customUnplanned or {}) do why[u.id] = u.reason end
-  for _, it in ipairs(list) do
-    if not seen[it.id] then
-      seen[it.id] = true
-      quests[#quests + 1] = { id = it.id, title = it.title, level = it.level, unplanned = fz ~= nil }
-    end
-  end
-  local logById = LogById()
-  local plevel = UnitLevel("player")
-  local lines = {}
-  for qi, it in ipairs(quests) do
-    local q = logById[it.id]
-    local done = IsCompleted(it.id)
-    local status
-    if done then status = Color(D.good, L["turned in"])
-    elseif q and q.complete then status = Color(D.good, L["ready to turn in"])
-    elseif q then status = Color(D.action, L["in the quest log"])
-    else status = Color(D.action, L["to pick up"]) end
-    local notes = {}
-    local req = not q and not done and QGet(QDB.Quest, it.id, "requiredLevel")
-    if type(req) == "number" and req > plevel then notes[#notes + 1] = Color(D.warn, string.format(L["level %d required"], req)) end
-    local en = entry[it.id]
-    if en and en.pre then
-      local by = entry[en.pre]
-      notes[#notes + 1] = Color(D.chain, string.format(L["prerequisite of \"%s\""], (by and by.title) or ("#" .. en.pre)))
-    end
-    local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
-    local dg = sort > 0 and QDB.dungeonOf[sort]
-    if dg then notes[#notes + 1] = Geo.WithLevel(Color(D.meta, L["dungeon: "] .. (AreaName(dg) or "?")), AreaName(dg)) end
-    local doubts = ns.QuestDoubts(it.id, ns.PlayerFaction())
-    local text = "  " .. StateIcons(it.id) .. Geo.QuestTitle(it.title, { id = it.id, level = it.level, doubts = doubts }) ..
-      Geo.DescLine(status, unpack(notes))
-    local rest = q and not q.complete and RemainingObjectives(q) or ""
-    if rest ~= "" then text = text .. Geo.DescLine(Color(D.action, rest)) end
-    text = text .. Geo.DoubtLine(doubts)
-    if not Geo.ForPlayer(it.id) then text = text .. Geo.DescLine(Color(D.bad, L["not for your class or race"])) end
-    if it.unplanned then
-      text = text .. Geo.DescLine(Color(D.bad, why[it.id] and (L["Cannot be planned: "] .. why[it.id]) or L["not planned yet"]))
-    end
+  local quests = Geo.RoadbookQuests(fz)
+  local shown, lines = {}, {}
+  for _, it in ipairs(quests) do
+    local text = RoadbookQuestText(it)
     if #query == 0 or MatchWords(Normalize(text), query) then
       local id, title = it.id, it.title
-      lines[#lines + 1] = { it = it, qi = qi, item = { text = text, questID = q and id or nil, linkQuest = id,
-        b3 = not done and { text = L["Remove"], fn = function() CP.ConfirmSkipQuest({ task = { id = id, title = title } }) end,
-          tip = { L["Remove"], L["Removes the quest from the list (with the prerequisites added only for it); the steps to come of the Roadbook are computed again."] } } or nil } }
+      shown[#shown + 1] = it
+      lines[it] = { text = text, questID = it.log and id or nil, linkQuest = id,
+        b3 = not it.done and { text = L["Remove"], fn = function() CP.ConfirmSkipQuest({ task = { id = id, title = title } }) end,
+          tip = { L["Remove"], L["Removes the quest from the list (with the prerequisites added only for it); the steps to come of the Roadbook are computed again."] } } or nil }
     end
   end
-  if #lines == 0 then return #quests end
-
-  -- Categories of the log (Analyze), and the order of its quests.
-  local a = Analyze()
-  local byLog, logIndex = {}, {}
-  for i, q in ipairs(LogQuests()) do logIndex[q.id] = i end
-  for _, q in ipairs(a.turnIn) do byLog[q.id] = { kind = "turnin" } end
-  for _, g in ipairs(a.groups) do
-    for _, q in ipairs(g.quests) do byLog[q.id] = { kind = "zone", name = g.name } end
-  end
-  for _, g in ipairs(a.dungeons) do
-    for _, q in ipairs(g.quests) do byLog[q.id] = { kind = "dungeon", name = g.name } end
-  end
-  for _, q in ipairs(a.later) do byLog[q.id] = { kind = "later" } end
-  local cats, byKey = {}, {}
-  local function cat(kind, name)
-    local key = kind .. ":" .. (name or "")
-    if not byKey[key] then
-      byKey[key] = { kind = kind, name = name, key = key, lines = {} }
-      cats[#cats + 1] = byKey[key]
-    end
-    return byKey[key]
-  end
-  for _, line in ipairs(lines) do
-    local kind, name = Geo.ListCategory(line.it, byLog, plevel)
-    table.insert(cat(kind, name).lines, line)
-  end
-  -- Zones of a single quest: "Doable single quests", as in the log.
-  local singles = cat("singles")
-  for _, c in ipairs(cats) do
-    if c.kind == "zone" and #c.lines < 2 then
-      for _, line in ipairs(c.lines) do table.insert(singles.lines, line) end
-      c.lines = {}
-    end
-  end
-  local RANK = { done = 1, turnin = 2, zone = 3, dungeon = 4, singles = 5, later = 6 }
-  table.sort(cats, function(x, y)
-    if RANK[x.kind] ~= RANK[y.kind] then return RANK[x.kind] < RANK[y.kind] end
-    if #x.lines ~= #y.lines then return #x.lines > #y.lines end
-    return tostring(x.name) < tostring(y.name)
-  end)
+  if #shown == 0 then return #quests end
   local LABEL = { done = L["Turned in"], turnin = L["To turn in"], singles = L["Doable single quests"],
     later = L["Later - level too high"] }
   local following = CP.CurrentFocus() ~= nil
-  for _, c in ipairs(cats) do
-    if #c.lines > 0 then
-      if c.kind == "dungeon" then
-        table.sort(c.lines, function(x, y)
-          if (x.it.level or 0) ~= (y.it.level or 0) then return (x.it.level or 0) < (y.it.level or 0) end
-          return x.qi < y.qi
-        end)
-      elseif c.kind ~= "done" then -- turned in: in route order
-        table.sort(c.lines, function(x, y)
-          local lx, ly = logIndex[x.it.id], logIndex[y.it.id]
-          if lx and ly then return lx < ly end
-          if lx or ly then return lx ~= nil end
-          if (x.it.level or 0) ~= (y.it.level or 0) then return (x.it.level or 0) < (y.it.level or 0) end
-          return x.qi < y.qi
-        end)
-      end
-      local label
-      if c.kind == "zone" then label = Geo.WithLevel(c.name, c.name)
-      elseif c.kind == "dungeon" then label = Geo.WithLevel(L["Dungeon: "] .. c.name, c.name)
-      else label = LABEL[c.kind] end
-      -- Collapsed while the Roadbook is followed (the route matters more).
-      -- "Remove all" on a category (not the turned in ones: nothing left to remove).
-      local b3
-      if c.kind ~= "done" then
-        local ids = {}
-        for _, line in ipairs(c.lines) do ids[#ids + 1] = { id = line.it.id } end
-        b3 = select(2, Geo.CustomBulkButtons(ids))
-      end
-      items[#items + 1] = { header = true, kind = c.kind == "done" and "info" or c.kind, key = "rbq:" .. c.key,
-        open = not following, label = label .. " - " .. Plural(#c.lines, L["quest"]), b3 = b3 }
-      for _, line in ipairs(c.lines) do items[#items + 1] = line.item end
+  for _, c in ipairs(Geo.RoadbookCategories(shown)) do
+    local label
+    if c.kind == "zone" then label = Geo.WithLevel(c.name, c.name)
+    elseif c.kind == "dungeon" then label = Geo.WithLevel(L["Dungeon: "] .. c.name, c.name)
+    else label = LABEL[c.kind] end
+    -- "Remove all" on a category (not the turned in ones: nothing left to remove).
+    local b3
+    if c.kind ~= "done" then
+      local ids = {}
+      for _, it in ipairs(c.quests) do ids[#ids + 1] = { id = it.id } end
+      b3 = select(2, Geo.CustomBulkButtons(ids))
     end
+    -- Collapsed while the Roadbook is followed (the route matters more).
+    items[#items + 1] = { header = true, kind = c.kind == "done" and "info" or c.kind, key = "rbq:" .. c.key,
+      open = not following, label = label .. " - " .. Plural(#c.quests, L["quest"]), b3 = b3 }
+    for _, it in ipairs(c.quests) do items[#items + 1] = lines[it] end
   end
   return #quests
 end

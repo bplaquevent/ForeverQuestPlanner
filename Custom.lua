@@ -11,6 +11,13 @@ local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDo
 local State = ns.State
 local PlayerBits = ns.PlayerBits
 local QuestAllowed = ns.QuestAllowed
+local Analyze = ns.Analyze
+local IsClassMeta = ns.IsClassMeta
+local IsProfMeta = ns.IsProfMeta
+local LogById = ns.LogById
+local LogQuests = ns.LogQuests
+local QuestCategory = ns.QuestCategory
+local QuestMeta = ns.QuestMeta
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.DUNGEON_WAVE_DEPTH = 20 -- safety: dungeon visits following one another
@@ -784,3 +791,141 @@ StaticPopupDialogs["FQP_TRIM_LIST"] = {
   hideOnEscape = true,
   preferredIndex = 3,
 }
+
+---------------------------------------------------------------------------
+-- The list's quests as the Roadbook tab shows them: facts and categories
+---------------------------------------------------------------------------
+-- Category of a quest of the list, as in the Quest log tab (byLog: category of the quests of the log,
+-- from Analyze): "done" (turned in), "turnin", "zone" (name), "dungeon" (name), "later" (level too high).
+-- A quest not in the log: its dungeon, Professions / Class, the zone of its quest giver.
+function Geo.ListCategory(it, byLog, plevel)
+  if IsCompleted(it.id) then return "done" end
+  local c = byLog[it.id]
+  if c then return c.kind, c.name end
+  local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
+  local dg = sort > 0 and QDB.dungeonOf[sort]
+  if dg then return "dungeon", AreaName(dg) or L["Dungeon"] end
+  local m = QuestMeta(it.id)
+  local level = it.level or Geo.QuestLevelOf(it.id) or 0
+  local kind, name = QuestCategory(nil, level, plevel, m and IsProfMeta(m), m and IsClassMeta(m))
+  if kind == "later" or name then return kind, name end
+  local zone = sort > 0 and AreaName(sort) or nil
+  if not zone then
+    local _, starterZone = GiverText(QGet(QDB.Quest, it.id, "startedBy"))
+    zone = starterZone
+  end
+  return "zone", zone or L["No zone"]
+end
+
+-- The quests of the Roadbook (fz, or nil) and of the list: those of the route in its order, then the
+-- others of the list. Each: { id, title, level, order, unplanned, reason (why it cannot be planned),
+-- done, log (captured quest, or nil), reqLevel (when above yours), prereqOf (title of the quest it
+-- was added for), dungeon (name), doubts, forPlayer }.
+function Geo.RoadbookQuests(fz)
+  local quests, seen = {}, {}
+  local function add(id, title, level, unplanned)
+    if not id or seen[id] then return end
+    seen[id] = true
+    quests[#quests + 1] = { id = id, title = title, level = level, unplanned = unplanned, order = #quests + 1 }
+  end
+  local route = fz and fz.route or {}
+  for i = 2, #route do
+    local st = route[i]
+    local tasks = st.kind == "dungeon" and (st.task.members or {}) or { st }
+    for _, m in ipairs(tasks) do
+      if m.task then add(m.task.id, m.task.title, m.task.level) end
+    end
+  end
+  local list, entry, why = Geo.CustomList(), {}, {}
+  for _, it in ipairs(list) do entry[it.id] = it end
+  for _, u in ipairs((fz and fz.info.unplanned) or State.customUnplanned or {}) do why[u.id] = u.reason end
+  for _, it in ipairs(list) do add(it.id, it.title, it.level, fz ~= nil) end
+  local logById, plevel = LogById(), UnitLevel("player")
+  for _, it in ipairs(quests) do
+    it.reason = why[it.id]
+    it.log = logById[it.id]
+    it.done = IsCompleted(it.id)
+    local req = not it.log and not it.done and QGet(QDB.Quest, it.id, "requiredLevel")
+    if type(req) == "number" and req > plevel then it.reqLevel = req end
+    local en = entry[it.id]
+    if en and en.pre then
+      local by = entry[en.pre]
+      it.prereqOf = (by and by.title) or ("#" .. en.pre)
+    end
+    local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
+    local dg = sort > 0 and QDB.dungeonOf[sort]
+    if dg then it.dungeon = AreaName(dg) or "?" end
+    it.doubts = QuestDoubts(it.id, PlayerFaction())
+    it.forPlayer = Geo.ForPlayer(it.id)
+  end
+  return quests
+end
+
+-- Those quests in the categories of the Quest log tab with "Turned in" first: turned in, to turn in,
+-- zones (2 quests or more, the biggest first), dungeons, single quests, level too high. In a category:
+-- the quests of the log in its order, then the others by level (a dungeon: by level).
+-- Returns { { kind, name, key, quests } }, the empty categories left out.
+function Geo.RoadbookCategories(quests)
+  -- Categories of the log (Analyze), and the order of its quests.
+  local a = Analyze()
+  local byLog, logIndex = {}, {}
+  for i, q in ipairs(LogQuests()) do logIndex[q.id] = i end
+  for _, q in ipairs(a.turnIn) do byLog[q.id] = { kind = "turnin" } end
+  for _, g in ipairs(a.groups) do
+    for _, q in ipairs(g.quests) do byLog[q.id] = { kind = "zone", name = g.name } end
+  end
+  for _, g in ipairs(a.dungeons) do
+    for _, q in ipairs(g.quests) do byLog[q.id] = { kind = "dungeon", name = g.name } end
+  end
+  for _, q in ipairs(a.later) do byLog[q.id] = { kind = "later" } end
+  local cats, byKey = {}, {}
+  local function cat(kind, name)
+    local key = kind .. ":" .. (name or "")
+    if not byKey[key] then
+      byKey[key] = { kind = kind, name = name, key = key, quests = {} }
+      cats[#cats + 1] = byKey[key]
+    end
+    return byKey[key]
+  end
+  local plevel = UnitLevel("player")
+  for _, it in ipairs(quests) do
+    local kind, name = Geo.ListCategory(it, byLog, plevel)
+    table.insert(cat(kind, name).quests, it)
+  end
+  -- Zones of a single quest: "Doable single quests", as in the log.
+  local singles = cat("singles")
+  for _, c in ipairs(cats) do
+    if c.kind == "zone" and #c.quests < 2 then
+      for _, it in ipairs(c.quests) do table.insert(singles.quests, it) end
+      c.quests = {}
+    end
+  end
+  local RANK = { done = 1, turnin = 2, zone = 3, dungeon = 4, singles = 5, later = 6 }
+  table.sort(cats, function(x, y)
+    if RANK[x.kind] ~= RANK[y.kind] then return RANK[x.kind] < RANK[y.kind] end
+    if #x.quests ~= #y.quests then return #x.quests > #y.quests end
+    return tostring(x.name) < tostring(y.name)
+  end)
+  local function ByLevel(x, y)
+    if (x.level or 0) ~= (y.level or 0) then return (x.level or 0) < (y.level or 0) end
+    return x.order < y.order
+  end
+  local out = {}
+  for _, c in ipairs(cats) do
+    if #c.quests > 0 then
+      if c.kind == "dungeon" then
+        table.sort(c.quests, ByLevel)
+      elseif c.kind ~= "done" then -- turned in: in route order
+        table.sort(c.quests, function(x, y)
+          local lx, ly = logIndex[x.id], logIndex[y.id]
+          if lx and ly then return lx < ly end
+          if lx or ly then return lx ~= nil end
+          return ByLevel(x, y)
+        end)
+      end
+      out[#out + 1] = c
+    end
+  end
+  return out
+end
+
