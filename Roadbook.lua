@@ -1398,65 +1398,74 @@ function CP.OnGameEvent(event, a1, a2)
   end
 end
 
--- Summary of the focused step, for the floating button: title + detail.
+-- Summary of a step: its title, then the parts of its description (each display joins them its way).
 function CP.StepSummary(s)
   local task = s.task
   local function nameOnly(t) return t and (t:match("^(.-) %- ") or t) or nil end
+  -- Parts as a list, the missing ones left out.
+  local function parts(...)
+    local out = {}
+    for i = 1, select("#", ...) do
+      local part = select(i, ...)
+      if part then out[#out + 1] = part end
+    end
+    return out
+  end
   local place = PointText(s.p)
   if s.kind == "bind" then
     return "|TInterface\\Minimap\\Tracking\\Innkeeper:14:14|t " .. (task.title or "?"),
-      L["Talk to "] .. (task.npc or "?") .. " · " .. place
+      parts(L["Talk to "] .. (task.npc or "?"), place)
   elseif s.kind == "hearth" then
-    local icon, _, action = Geo.RecallText(s)
+    local icon, action = Geo.RecallText(s)
     return icon .. " " .. (task.title or "?"), action
   elseif s.kind == "travel" then
     return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.mode == "vol" and L["Flight"] or K.MODE_NAME[task.mode] or task.mode or L["Transport"]) ..
-      L[" to "] .. (task.dest or "?"), L["Departure: "] .. (task.from or "?") .. " · " .. place
+      L[" to "] .. (task.dest or "?"), parts(L["Departure: "] .. (task.from or "?"), place)
   elseif s.kind == "dungeon" then
     local left = 0
     for _, m in ipairs(task.members or {}) do if not CP.StepDone(m) then left = left + 1 end end
     return K.DUNGEON_ICON .. " " .. (task.title or "?"),
-      string.format(L["%d quest step(s) inside"], left) .. " · " .. place .. " · ~" .. FormatTime(s.work or 0)
+      parts(string.format(L["%d quest step(s) inside"], left), place, "~" .. FormatTime(s.work or 0))
   elseif s.kind == "skill" then
     local sk = s.skill
     return "|TInterface\\Icons\\INV_Misc_Book_11:14:14|t " .. string.format(L["Raise the %s skill to level %d"], sk.name, sk.need),
-      (s.npc and (L["Train with "] .. s.npc .. " · " .. place) or L["trainer not located"])
-        .. " · " .. string.format(L["skill %d/%d"], sk.have, sk.need) .. " · " .. task.title
+      parts(s.npc and (L["Train with "] .. s.npc) or L["trainer not located"], s.npc and place or nil,
+        string.format(L["skill %d/%d"], sk.have, sk.need), task.title)
   elseif s.kind == "service" then
     local icon = "Interface\\Icons\\INV_Misc_Coin_01"
     for _, def in ipairs(K.SERVICES) do if def.key == task.service then icon = def.icon end end
-    return "|T" .. icon .. ":14:14|t " .. (task.title or "?"), L["Talk to "] .. (task.npc or "?") .. " · " .. place
+    return "|T" .. icon .. ":14:14|t " .. (task.title or "?"), parts(L["Talk to "] .. (task.npc or "?"), place)
   elseif s.kind == "fm" then
     return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.title or L["Flight Master"]),
-      L["Talk to "] .. (task.npc or "?") .. " · " .. place
+      parts(L["Talk to "] .. (task.npc or "?"), place)
   elseif s.escort and CP.IsFailed(task.id) then
     return K.ESCORT_ICON .. " " .. (task.title or "?"),
-      Color(K.DESC.bad, L["Escort failed: abandon the quest and pick it up again"])
+      parts(Color(K.DESC.bad, L["Escort failed: abandon the quest and pick it up again"]))
   elseif s.escort then
     local dest = s.kind == "turnin" and (L[", then turn in to "] .. (nameOnly(TurnInText(task.id)) or "?")) or ""
     local xp = s.kind == "turnin" and Geo.XPText(task.xp) or nil
     return K.ESCORT_ICON .. " " .. L["Escort: "] .. (task.title or "?"),
-      L["Stay close to "] .. CP.EscortNpc(task) .. dest .. " · " .. place .. (xp and (" · " .. xp) or "")
+      parts(L["Stay close to "] .. CP.EscortNpc(task) .. dest, place, xp)
   elseif s.kind == "take" then
-    local esc = Geo.IsEscort(task.id) and (" · " .. Color(K.DESC.warn, L["escort"])) or ""
-    if CP.IsFailed(task.id) then esc = " · " .. Color(K.DESC.bad, L["failed: abandon it first"]) end
-    if task.reqLevel then esc = esc .. " · " .. Color(K.DESC.warn, string.format(L["level %d required"], task.reqLevel)) end
+    local out = parts((s.search and L["Look for "] or L["Pick up from "]) .. (nameOnly(task.starter) or "?"), place)
     if s.search then
-      esc = " · " .. Color(K.DESC.warn, string.format(L["possible place %d/%d"], s.search.i, s.search.n)) .. esc
+      out[#out + 1] = Color(K.DESC.warn, string.format(L["possible place %d/%d"], s.search.i, s.search.n))
     end
-    return ICON.available .. " " .. (task.title or "?"),
-      (s.search and L["Look for "] or L["Pick up from "]) .. (nameOnly(task.starter) or "?") .. " · " .. place .. esc
+    if CP.IsFailed(task.id) then out[#out + 1] = Color(K.DESC.bad, L["failed: abandon it first"])
+    elseif Geo.IsEscort(task.id) then out[#out + 1] = Color(K.DESC.warn, L["escort"]) end
+    if task.reqLevel then out[#out + 1] = Color(K.DESC.warn, string.format(L["level %d required"], task.reqLevel)) end
+    return ICON.available .. " " .. (task.title or "?"), out
   elseif s.kind == "obj" then
     local name = s.r and s.r.tg.name or L["objective"]
     local prog = "x" .. (s.r and s.r.count or "?")
     local o = task.id and IsInLog(task.id) and Geo.TargetObjective(task.id, s.r and s.r.tg, GetObjectives(task.id))
     if o and o.need then prog = (o.have or 0) .. "/" .. o.need end
-    local multi = (s.spots and s.spots > 1) and (L[" · multiple spots ("] .. s.spots .. ")") or ""
-    return ICON.inprogress .. " " .. (task.title or "?"), name .. " " .. prog .. " · " .. place .. multi
+    local multi = (s.spots and s.spots > 1) and (L["multiple spots ("] .. s.spots .. ")") or nil
+    return ICON.inprogress .. " " .. (task.title or "?"), parts(name .. " " .. prog, place, multi)
   end
   local xp = Geo.XPText(task.xp)
   return ICON.turnin .. " " .. (task.title or "?"),
-    L["Turn in to "] .. (nameOnly(TurnInText(task.id)) or "?") .. " · " .. place .. (xp and (" · " .. xp) or "")
+    parts(L["Turn in to "] .. (nameOnly(TurnInText(task.id)) or "?"), place, xp)
 end
 
 function CP.RefreshButton()
@@ -1536,12 +1545,13 @@ function CP.Capitalize(line)
   return prefix .. (K.UPPER_ACCENTS[first] or first:upper()) .. tail
 end
 
--- "info · info · info" wider than maxW: one information per line (never cut inside one), each
--- line starting with an upper case letter.
-function CP.PackInfos(fs, text, maxW)
-  if not text or CP.TextWidth(fs, text) <= maxW then return text end
+-- The parts of a description on one line, or, wider than maxW, one per line (never cut inside one),
+-- each line starting with an upper case letter.
+function CP.PackInfos(fs, parts, maxW)
+  local text = table.concat(parts or {}, K.DESC_SEP)
+  if CP.TextWidth(fs, text) <= maxW then return text end
   local lines = {}
-  for info in (text .. " · "):gmatch("(.-) · ") do lines[#lines + 1] = CP.Capitalize(info) end
+  for i, part in ipairs(parts) do lines[i] = CP.Capitalize(part) end
   return table.concat(lines, "\n")
 end
 

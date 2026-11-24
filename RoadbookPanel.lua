@@ -78,16 +78,10 @@ end
 function Geo.StepDetailLines(st)
   local D = K.DESC
   local lines = {}
-  local ok, _, desc = pcall(CP.StepSummary, st)
+  local ok, _, parts = pcall(CP.StepSummary, st)
   local xp = Geo.StepXP(st)
-  if ok and desc and desc ~= "" then
-    if xp then -- the XP comes on its own line
-      local a, b = desc:find(K.DESC_SEP .. xp, 1, true)
-      if a then desc = desc:sub(1, a - 1) .. desc:sub(b + 1) end
-    end
-    for piece in (desc .. K.DESC_SEP):gmatch("(.-)" .. K.DESC_SEP:gsub("%p", "%%%0")) do
-      if piece ~= "" then lines[#lines + 1] = Color(D.action, CP.Capitalize(piece)) end
-    end
+  for _, piece in ipairs(ok and parts or {}) do
+    if piece ~= xp then lines[#lines + 1] = Color(D.action, CP.Capitalize(piece)) end -- the XP: its own line
   end
   local dur = Geo.StepDuration(st)
   local figures = Geo.DescLine(xp, dur and Color(D.meta, "~" .. FormatTime(dur)))

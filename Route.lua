@@ -580,16 +580,16 @@ function Geo.RequestPlan(goal, cb, opts)
   end)
 end
 
--- Teleport step (kind "hearth"): icon, tag and what to do, for the lists and the Objective button.
+-- Teleport step (kind "hearth"): icon and what to do (parts of the description).
 function Geo.RecallText(s)
   local spell = s.task and s.task.spell
-  local saves = L[" · saves ~"] .. FormatTime(s.gain or 0)
+  local saves = L["saves ~"] .. FormatTime(s.gain or 0)
   if not spell then
-    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", L["[Hearthstone]"], L["Use the hearthstone"] .. saves
+    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", { L["Use the hearthstone"], saves }
   end
   local tex = Geo.SpellIcon(spell) or "Interface\\Icons\\Spell_Arcane_TeleportStormWind"
   local name = Geo.SpellName(spell) or ("#" .. spell)
-  return "|T" .. tex .. ":14:14|t", L["[Teleport]"], L["Cast "] .. name .. saves
+  return "|T" .. tex .. ":14:14|t", { L["Cast "] .. name, saves }
 end
 
 -- Shared with the next files.

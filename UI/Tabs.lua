@@ -222,7 +222,7 @@ function Geo.RewardLine(id)
     parts[#parts + 1] = Color("aaaaaa", L["Reputation: "]) .. Geo.FactionName(p.faction) .. " +" .. p.value
   end
   if #parts == 0 then return nil end
-  return Color("bbbbbb", L["Possible rewards: "]) .. table.concat(parts, Color("888888", " · "))
+  return Color("bbbbbb", L["Possible rewards: "]) .. table.concat(parts, Color("888888", K.DESC_SEP))
 end
 
 local function RenderAvailable()

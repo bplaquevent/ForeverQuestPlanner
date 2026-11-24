@@ -875,7 +875,7 @@ end
 function Geo.QuestTypesText(id)
   local types, parts = Geo.QuestTypes(id), {}
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = Color("80c0ff", K.QUEST_TYPE_LABEL[types[i]]) end
-  return table.concat(parts, Color("80c0ff", " · "))
+  return table.concat(parts, Color("80c0ff", K.DESC_SEP))
 end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
