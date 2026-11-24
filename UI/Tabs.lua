@@ -9,6 +9,7 @@ local Plural, PointText, QDB, QGet, QuestHaystack, Refresh = ns.Plural, ns.Point
 local RemainingObjectives, RenderList, Settings = ns.RemainingObjectives, ns.RenderList, ns.Settings
 local ShowMessage, StartPoints, StartScan, State, StateIcons = ns.ShowMessage, ns.StartPoints, ns.StartScan, ns.State, ns.StateIcons
 local journalStates, nearStates, panels, scan = ns.journalStates, ns.nearStates, ns.panels, ns.scan
+local PointInMaps = ns.PointInMaps
 
 ---------------------------------------------------------------------------
 -- Quest log tab (to do / to abandon)
@@ -222,7 +223,7 @@ function Geo.RewardLine(id)
     parts[#parts + 1] = Color("aaaaaa", L["Reputation: "]) .. Geo.FactionName(p.faction) .. " +" .. p.value
   end
   if #parts == 0 then return nil end
-  return Color("bbbbbb", L["Possible rewards: "]) .. table.concat(parts, Color("888888", " · "))
+  return Color(K.DESC.action, L["Possible rewards: "]) .. table.concat(parts, Color(K.DESC.meta, K.DESC_SEP))
 end
 
 local function RenderAvailable()
@@ -245,8 +246,7 @@ local function RenderAvailable()
   local function StartsHere(e)
     if not GeoReady() then return false end
     for _, pt in ipairs(StartPoints(e.id)) do
-      local ui = Geo.areaToUi[pt.area] or (Geo.parent[pt.area] and Geo.areaToUi[Geo.parent[pt.area]])
-      if ui and hereMaps[ui] then return true end
+      if PointInMaps(pt, hereMaps) then return true end
     end
     return false
   end

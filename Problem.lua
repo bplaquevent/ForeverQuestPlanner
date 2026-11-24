@@ -11,6 +11,7 @@ local OM, PlayerPos, Print, QDB, QGet, Settings = ns.OM, ns.PlayerPos, ns.Print,
 local AllPrereqs = ns.AllPrereqs
 local StartScan, State, TravelSpeed, UnitTime, scan = ns.StartScan, ns.State, ns.TravelSpeed, ns.UnitTime, ns.scan
 local LogById = ns.LogById
+local WaitScan = ns.WaitScan
 
 local Pb = {}
 K.BENCH_VERSION = 2
@@ -343,12 +344,10 @@ end
 function Pb.Player(P, pos)
   local plevel = UnitLevel("player")
   local maxLevel = Geo.MaxLevel()
-  local needed = {}
-  for lv = 1, maxLevel do needed[lv] = Geo.XPNeeded(lv) end
   local st = Settings()
   local g = State.xpGoal
   P.player = { level = plevel, xp = UnitXP("player"), xpMax = UnitXPMax("player"),
-    rested = GetXPExhaustion and GetXPExhaustion() or 0, maxLevel = maxLevel, xpNeeded = needed,
+    rested = GetXPExhaustion and GetXPExhaustion() or 0, maxLevel = maxLevel, xpNeeded = Geo.XPNeededTable(),
     speed = TravelSpeed(), pos = Geo.CopyPoint(pos), faction = UnitFactionGroup("player"),
     class = select(2, UnitClass("player")), race = select(2, UnitRace("player")),
     goal = g and { kind = g.kind, value = g.value } or nil,
@@ -396,30 +395,17 @@ function Pb.Capture(P)
 end
 
 function Pb.Run(P)
-  local co = coroutine.create(function() Pb.Capture(P) end)
-  State.co = co
-  local function step()
-    if State.co ~= co then
-      Print(L["Capture interrupted by a Roadbook computation: try again."])
-      return
-    end
-    State.sliceStart = debugprofilestop()
-    local ok, err = coroutine.resume(co)
-    if not ok then
-      State.co = nil
-      Print(L["Capture error: "] .. tostring(err))
-    elseif coroutine.status(co) == "dead" then
-      State.co = nil
-      P.later = nil -- game objects
-      ForeverQuestPlannerBench = ForeverQuestPlannerBench or {}
-      ForeverQuestPlannerBench[P.char] = P
-      Print(string.format(L["Test bench capture done: %d quests, %d map cells. Type /reload to write it to the file."],
-        #P.tasks, P.cells))
-    else
-      C_Timer.After(0, step)
-    end
-  end
-  step()
+  Geo.RunSliced(coroutine.create(function() Pb.Capture(P) end), function()
+    P.later = nil -- game objects
+    ForeverQuestPlannerBench = ForeverQuestPlannerBench or {}
+    ForeverQuestPlannerBench[P.char] = P
+    Print(string.format(L["Test bench capture done: %d quests, %d map cells. Type /reload to write it to the file."],
+      #P.tasks, P.cells))
+  end, function(err)
+    Print(L["Capture error: "] .. tostring(err))
+  end, function()
+    Print(L["Capture interrupted by a Roadbook computation: try again."])
+  end)
 end
 
 -- Roadbooks of the planner on the same problem (comparison base): the duration or level goal
@@ -455,16 +441,7 @@ function Geo.BenchDump(attempt)
     return
   end
   -- The available quests must be scanned (candidates of the automatic Roadbook).
-  if scan.running or scan.dirty or not scan.entries then
-    if not scan.running then StartScan() end
-    attempt = (attempt or 0) + 1
-    if attempt > 40 then
-      Print(L["Quest scan is taking too long: try again in a moment."])
-      return
-    end
-    C_Timer.After(0.5, function() Geo.BenchDump(attempt) end)
-    return
-  end
+  if WaitScan(attempt, Geo.BenchDump) then return end
   local pos = PlayerPos()
   if not pos then
     Print(L["Unknown position (in an instance or map unavailable)."])

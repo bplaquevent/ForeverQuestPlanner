@@ -43,11 +43,7 @@ local function CreateButton(host, getQuest, place)
   b.getQuest = getQuest
   b:SetScript("OnClick", function(self) Geo.CustomToggle(self.getQuest()) end)
   b:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    local title, text = Geo.CustomTip(self.getQuest())
-    GameTooltip:AddLine(title)
-    GameTooltip:AddLine(text, 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    Geo.ShowTip(self, Geo.CustomTip(self.getQuest()))
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
   buttons[host] = b
@@ -104,6 +100,7 @@ function Geo.QuestLogButtonSync()
 end
 
 local function Sync() pcall(Geo.QuestLogButtonSync) end
+Geo.SyncQuestLogButton = Sync -- after a change of the list or of a computation
 local function SyncNext() C_Timer.After(0, Sync) end
 
 -- Hooks (once each); the world map may load after this file.

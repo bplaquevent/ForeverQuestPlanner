@@ -7,6 +7,7 @@ local K, L, PlayerPos, Print, Settings = ns.K, ns.L, ns.PlayerPos, ns.Print, ns.
 local SharedData, Solver, TaxiCount, TravelSpeed, WorldPos, scan = ns.SharedData, ns.Solver, ns.TaxiCount, ns.TravelSpeed, ns.WorldPos, ns.scan
 local LogQuests = ns.LogQuests
 local State = ns.State
+local FormatTime = ns.FormatTime
 
 ---------------------------------------------------------------------------
 -- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
@@ -564,9 +565,7 @@ function Geo.RequestPlan(goal, cb, opts)
     if goal == "custom" then return Geo.PlanCustom(opts) end
     return Geo.PlanGenerate(goal, opts)
   end)
-  State.co = co
   local function finish(route, err, info)
-    State.co = nil
     State.lastPlanError = not route and err or nil
     local cbs = State.planCbs or {}
     State.planCbs = nil
@@ -575,46 +574,22 @@ function Geo.RequestPlan(goal, cb, opts)
       if not ok then Print(L["Error after computing the Roadbook: "] .. tostring(e)) end
     end
   end
-  local function step()
-    if State.co ~= co then return end -- replaced by a more recent computation
-    State.sliceStart = debugprofilestop and debugprofilestop() or 0
-    local ok, route, err, info = coroutine.resume(co)
-    if not ok then
-      Print(L["|cffff6060Roadbook computation error|r: "] .. tostring(route))
-      finish(nil, L["Computation error: "] .. tostring(route))
-    elseif coroutine.status(co) == "dead" then
-      finish(route, err, info)
-    else
-      C_Timer.After(0, step)
-    end
-  end
-  step()
+  Geo.RunSliced(co, finish, function(message)
+    Print(L["|cffff6060Roadbook computation error|r: "] .. tostring(message))
+    finish(nil, L["Computation error: "] .. tostring(message))
+  end)
 end
 
-local function FormatTime(sec)
-  sec = math.floor(sec + 0.5)
-  if sec < 60 then return sec .. L[" s"] end
-  if sec < 3600 then return math.floor(sec / 60 + 0.5) .. L[" min"] end
-  return string.format("%d h %02d", math.floor(sec / 3600), math.floor((sec % 3600) / 60))
-end
-
-local function FormatNumber(n)
-  local s = tostring(math.floor(n + 0.5))
-  local out = s:reverse():gsub("(%d%d%d)", "%1 "):reverse()
-  return (out:gsub("^ ", ""))
-end
-
--- Teleport step (kind "hearth"): icon, tag and what to do, for the lists and the Objective button.
+-- Teleport step (kind "hearth"): icon and what to do (parts of the description).
 function Geo.RecallText(s)
   local spell = s.task and s.task.spell
-  local saves = L[" · saves ~"] .. FormatTime(s.gain or 0)
+  local saves = L["saves ~"] .. FormatTime(s.gain or 0)
   if not spell then
-    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", L["[Hearthstone]"], L["Use the hearthstone"] .. saves
+    return "|TInterface\\Icons\\INV_Misc_Rune_01:14:14|t", { L["Use the hearthstone"], saves }
   end
   local tex = Geo.SpellIcon(spell) or "Interface\\Icons\\Spell_Arcane_TeleportStormWind"
   local name = Geo.SpellName(spell) or ("#" .. spell)
-  return "|T" .. tex .. ":14:14|t", L["[Teleport]"], L["Cast "] .. name .. saves
+  return "|T" .. tex .. ":14:14|t", { L["Cast "] .. name, saves }
 end
 
 -- Shared with the next files.
-ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime

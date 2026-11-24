@@ -9,9 +9,8 @@ local QGet, QuestTargets, RemainingTargets, Settings, TravelSpeed = ns.QGet, ns.
 local QuestPrereqs = ns.QuestPrereqs
 local Color, PlayerFaction, QuestDoubts = ns.Color, ns.PlayerFaction, ns.QuestDoubts
 local State = ns.State
-local AllowedForPlayer = ns.AllowedForPlayer
 local PlayerBits = ns.PlayerBits
-local QuestMeta = ns.QuestMeta
+local QuestAllowed = ns.QuestAllowed
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.MAX_PREREQ_DEPTH = 15   -- safety: prerequisite chain added with a quest
@@ -129,9 +128,7 @@ end
 
 -- Quest that the character's class and race can do.
 function Geo.ForPlayer(id)
-  local m = QuestMeta(id)
-  if not m then return true end
-  return AllowedForPlayer(m, PlayerBits())
+  return QuestAllowed(id, PlayerBits())
 end
 
 -- Prerequisite quests still to turn in (QuestieDB), the first ones of the chain first.
@@ -381,9 +378,7 @@ function Geo.ChainLevelCheck(ids)
     quests[#quests + 1] = { id = q, row = QDB.xp[q], reqLevel = QGet(QDB.Quest, q, "requiredLevel") or 0,
       pres = pres, anyPres = not met and #anyPres > 0 and anyPres or nil, inLog = IsInLog(q) }
   end
-  local needed = {}
-  for lv = 1, Geo.MaxLevel() do needed[lv] = Geo.XPNeeded(lv) end
-  return ns.Solver.LevelReach({ level = UnitLevel("player"), xp = UnitXP("player"), xpNeeded = needed,
+  return ns.Solver.LevelReach({ level = UnitLevel("player"), xp = UnitXP("player"), xpNeeded = Geo.XPNeededTable(),
     maxLevel = Geo.MaxLevel() }, quests)
 end
 
@@ -443,7 +438,7 @@ function Geo.CustomChanged()
     end)
   end
   if ns.Refresh then ns.Refresh() end
-  if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
+  Geo.SyncQuestLogButton()
 end
 
 ---------------------------------------------------------------------------
@@ -767,7 +762,7 @@ function Geo.AcceptGenerated(route, info, done, prepare)
     State.customToken = (State.customToken or 0) + 1 -- no pending recompute of the former list
     State.customUnplanned = info.unplanned
     Geo.Freeze(prepare and prepare(route) or route, info)
-    if Geo.QuestLogButtonSync then pcall(Geo.QuestLogButtonSync) end
+    Geo.SyncQuestLogButton()
     done(true)
   end
   if dropped == 0 then

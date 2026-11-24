@@ -11,6 +11,7 @@ local TrivialRange, TurnInText, StartPoints, EntityPoints = ns.TrivialRange, ns.
 local LogRecord = ns.LogRecord
 local LogQuests = ns.LogQuests
 local LogEntry = ns.LogEntry
+local IsQuestComplete = ns.IsQuestComplete
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -128,6 +129,14 @@ local function UpdateScrollBar(scroll)
   end
   apply()
   C_Timer.After(0, apply) -- after the next frame's layout
+end
+
+-- Tooltip of a widget: a title, then a grey text (optional). anchor: ANCHOR_TOP by default.
+function Geo.ShowTip(owner, title, text, anchor)
+  GameTooltip:SetOwner(owner, anchor or "ANCHOR_TOP")
+  GameTooltip:AddLine(title)
+  if text then GameTooltip:AddLine(text, 0.8, 0.8, 0.8, true) end
+  GameTooltip:Show()
 end
 
 local function CreateScrollPanel(parent, child, top)
@@ -309,12 +318,7 @@ local function SetButton(b, spec)
     b:SetEnabled(not spec.disabled)
     b:SetScript("OnClick", spec.fn)
     local tip = spec.tip
-    b:SetScript("OnEnter", tip and function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_TOP")
-      GameTooltip:AddLine(tip[1])
-      if tip[2] then GameTooltip:AddLine(tip[2], 0.8, 0.8, 0.8, true) end
-      GameTooltip:Show()
-    end or nil)
+    b:SetScript("OnEnter", tip and function(self) Geo.ShowTip(self, tip[1], tip[2]) end or nil)
     b:SetScript("OnLeave", tip and function() GameTooltip:Hide() end or nil)
     b:Show()
   else
@@ -409,10 +413,7 @@ local function RenderList(panel, tabKey, items, forceOpen)
       r.trash:SetShown(trash and true or false)
       r.trash:SetScript("OnClick", trash and trash.fn or nil)
       r.trash:SetScript("OnEnter", trash and trash.tip and function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(trash.tip[1])
-        if trash.tip[2] then GameTooltip:AddLine(trash.tip[2], 0.8, 0.8, 0.8, true) end
-        GameTooltip:Show()
+        Geo.ShowTip(self, trash.tip[1], trash.tip[2])
       end or nil)
       r.trash:SetScript("OnLeave", trash and function() GameTooltip:Hide() end or nil)
       r.text:ClearAllPoints()
@@ -747,24 +748,6 @@ function Geo.ToAbandon(questId)
   return State.abandonIds[questId] or false
 end
 
-local function StateIcons(questId)
-  if not questId then return "" end
-  local icons = {}
-  if IsInLog(questId) then
-    local done = C_QuestLog.IsComplete and C_QuestLog.IsComplete(questId)
-    icons[#icons + 1] = done and ICON.turnin or ICON.inprogress
-    if IsWatched(questId) then icons[#icons + 1] = ICON.watched end
-  elseif IsCompleted(questId) then
-    icons[#icons + 1] = ICON.done
-  else
-    icons[#icons + 1] = ICON.available
-  end
-  if IsPinned(questId) then icons[#icons + 1] = PinIcon() end
-  if Geo.InCustom(questId) then icons[#icons + 1] = ICON.custom end
-  if IsInLog(questId) and Geo.ToAbandon(questId) then icons[#icons + 1] = ICON.abandon end -- last: before "[To abandon]"
-  return table.concat(icons, "") .. " "
-end
-
 ---------------------------------------------------------------------------
 -- Quest line shown the same way in every tab: title, level, elite, types
 ---------------------------------------------------------------------------
@@ -789,7 +772,7 @@ K.QUEST_TYPE_WORDS = {
 -- Unique NPC (to assassinate): rare, rare elite or boss, or a single known spawn point.
 function Geo.UniqueNpc(id)
   local rank = QGet(QDB.Npc, id, "rank")
-  if rank == 2 or rank == 3 or rank == 4 then return true end
+  if K.UNIQUE_RANKS[rank] then return true end
   local spawns, n = QGet(QDB.Npc, id, "spawns"), 0
   if type(spawns) == "table" then
     for _, pts in pairs(spawns) do n = n + (type(pts) == "table" and #pts or 0) end
@@ -808,7 +791,7 @@ function Geo.QuestTypes(id)
   if type(obj) == "table" then
     for _, o in ipairs(obj[1] or {}) do
       local icon = o[3]
-      if icon == 3 or icon == 5 or icon == 17 then has.talk = true
+      if K.TALK_ICONS[icon] then has.talk = true
       elseif Geo.UniqueNpc(o[1]) then has.assassination = true
       else has.slaying = true end
     end
@@ -874,7 +857,7 @@ end
 function Geo.QuestTypesText(id)
   local types, parts = Geo.QuestTypes(id), {}
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = Color("80c0ff", K.QUEST_TYPE_LABEL[types[i]]) end
-  return table.concat(parts, Color("80c0ff", " · "))
+  return table.concat(parts, Color("80c0ff", K.DESC_SEP))
 end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
@@ -969,7 +952,7 @@ local function QuestStates(questId)
   local st = {}
   if not questId then return st end
   if IsInLog(questId) then
-    if C_QuestLog.IsComplete and C_QuestLog.IsComplete(questId) then st.turnin = true else st.inprogress = true end
+    if IsQuestComplete(questId) then st.turnin = true else st.inprogress = true end
     if IsWatched(questId) then st.watched = true end
   else
     st.available = true
@@ -977,6 +960,23 @@ local function QuestStates(questId)
   if IsPinned(questId) then st.pinned = true end
   if Geo.InCustom(questId) then st.custom = true end
   return st
+end
+
+-- State icons in front of a quest title.
+local function StateIcons(questId)
+  if not questId then return "" end
+  local st, icons = QuestStates(questId), {}
+  local inLog = st.turnin or st.inprogress
+  if inLog then
+    icons[#icons + 1] = st.turnin and ICON.turnin or ICON.inprogress
+  else
+    icons[#icons + 1] = IsCompleted(questId) and ICON.done or ICON.available
+  end
+  if st.watched then icons[#icons + 1] = ICON.watched end
+  if st.pinned then icons[#icons + 1] = PinIcon() end
+  if st.custom then icons[#icons + 1] = ICON.custom end
+  if inLog and Geo.ToAbandon(questId) then icons[#icons + 1] = ICON.abandon end -- last: before "[To abandon]"
+  return table.concat(icons, "") .. " "
 end
 
 -- State filters: none checked = everything; otherwise the quest must have at least one checked state.
@@ -1023,10 +1023,7 @@ end
 
 -- Map (uiMap) of a point, or nil.
 function Geo.PointUi(p)
-  if not p then return nil end
-  local ui = p.ui or Geo.areaToUi[p.area]
-  if (not ui or ui == 0) and Geo.parent[p.area] then ui = Geo.areaToUi[Geo.parent[p.area]] end
-  return (ui and ui ~= 0) and ui or nil
+  return p and (p.ui or Geo.AreaUi(p.area)) or nil
 end
 
 -- Map of the quest's zone (QuestieDB zoneOrSort), when no position is known.
