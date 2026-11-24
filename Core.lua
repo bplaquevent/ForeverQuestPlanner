@@ -7,9 +7,8 @@
 --    (flight network, boats and zeppelins, zone and dungeon levels): both are read directly.
 
 local ADDON_NAME, ns = ...
-ns = ns or {}
--- Localization: English by default, other languages in Locales/*.lua.
-local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
+-- Localization (Locales/*.lua): English by default.
+local L = ns.L
 local PREFIX = "|cff33ccffForeverQuestPlanner|r: "
 
 local function Print(msg)
@@ -67,6 +66,22 @@ local function MigrateSettings(root, key)
   return st
 end
 
+-- A zone pass as saved: its place and its two zones (a damaged entry would break every walk).
+local function ValidPass(ps)
+  return type(ps) == "table" and type(ps.a) == "number" and type(ps.b) == "number" and type(ps.c) == "number"
+    and type(ps.x) == "number" and type(ps.y) == "number"
+end
+
+local function KeepValidPasses(list)
+  local out = {}
+  for _, ps in ipairs(type(list) == "table" and list or {}) do
+    if ValidPass(ps) then out[#out + 1] = ps end
+  end
+  return out
+end
+
+local checkedShared -- the shared data checked this session
+
 -- Learned about the world, shared by every character: zone passes walked ({ c, x, y, a, b, n }) and
 -- the places really reached by the teleport spells (spell -> point). Created once from what was saved
 -- before (account-wide, then per character in 2.56.16): the same pass seen twice is kept once.
@@ -76,11 +91,18 @@ local function SharedData()
     root = {}
     ForeverQuestPlannerSettings = root
   end
-  if root.shared then return root.shared end
+  if root.shared then
+    if checkedShared ~= root.shared then
+      root.shared.passes = KeepValidPasses(root.shared.passes)
+      root.shared.teleportArrivals = type(root.shared.teleportArrivals) == "table" and root.shared.teleportArrivals or {}
+      checkedShared = root.shared
+    end
+    return root.shared
+  end
   local shared = { passes = {}, teleportArrivals = {} }
   local function take(t)
     if type(t) ~= "table" then return end
-    for _, ps in ipairs(type(t.passes) == "table" and t.passes or {}) do
+    for _, ps in ipairs(KeepValidPasses(t.passes)) do
       local same
       for _, q in ipairs(shared.passes) do
         if q.a == ps.a and q.b == ps.b and q.c == ps.c and math.abs(q.x - ps.x) < 150 and math.abs(q.y - ps.y) < 150 then
@@ -97,7 +119,7 @@ local function SharedData()
   end
   take(root)
   for _, st in pairs(root.chars or {}) do take(st) end
-  root.shared = shared
+  root.shared, checkedShared = shared, shared
   return shared
 end
 
@@ -515,25 +537,17 @@ local function TurnInText(id)
   return (GiverText(QGet(QDB.Quest, id, "finishedBy")))
 end
 
--- Profession names by skill line id (for missing prerequisites).
-K.SKILL_NAMES = {
-  [164] = L["Blacksmithing"], [165] = L["Leatherworking"], [171] = L["Alchemy"], [182] = L["Herbalism"],
-  [185] = L["Cooking"], [186] = L["Mining"], [197] = L["Tailoring"], [202] = L["Engineering"],
-  [333] = L["Enchanting"], [356] = L["Fishing"], [393] = L["Skinning"], [129] = L["First Aid"],
-  [762] = L["Riding"],
-}
--- Profession skill line ids.
-local PROFESSION_SKILLS = {
-  [164] = true, [165] = true, [171] = true, [182] = true, [185] = true, [186] = true, [197] = true,
-  [202] = true, [333] = true, [356] = true, [393] = true, [129] = true, [755] = true, [773] = true,
-  [794] = true, [762] = true,
-}
+-- Name of a profession (Data/GameData.lua), nil if unknown.
+local function SkillName(id)
+  local p = ns.PROFESSIONS[id]
+  return p and p.name
+end
 
 -- Professions known by the character: skillLine -> rank, localized names, and whether reading succeeded.
 -- Forever uses C_SkillInfo (like Questie); the other APIs are fallbacks.
 local skillCache, skillCacheTime = nil, 0
 local function PlayerSkills(fresh) -- fresh: read again (a skill changed)
-  local now = GetTime and GetTime() or 0
+  local now = GetTime()
   if not fresh and skillCache and now - skillCacheTime < 5 then return skillCache[1], skillCache[2], skillCache[3] end
   local skills, names, known = {}, {}, false
   if C_SkillInfo and C_SkillInfo.GetNumSkillLines and C_SkillInfo.GetSkillLineInfo then
@@ -546,7 +560,7 @@ local function PlayerSkills(fresh) -- fresh: read again (a skill changed)
     end
     for i = 1, C_SkillInfo.GetNumSkillLines() do
       local line = C_SkillInfo.GetSkillLineInfo(i)
-      if line and not line.isHeader and line.skillID and PROFESSION_SKILLS[line.skillID] then
+      if line and not line.isHeader and line.skillID and ns.PROFESSIONS[line.skillID] then
         skills[line.skillID] = line.rank or 0
         if line.name then names[line.name] = true end
       end
@@ -872,7 +886,9 @@ local function DungeonOf(q)
   if q.instanceName then return q.instanceName end
   if q.zone and DungeonNames()[q.zone] then return q.zone end
   if q.isInstance then return q.zone or L["Dungeon"] end
-  if q.tag and (q.tag:find("Donjon") or q.tag:find("Dungeon") or q.tag:find("Raid")) then return q.zone or L["Dungeon"] end
+  for _, word in ipairs(q.tag and ns.DUNGEON_TAG_WORDS or {}) do
+    if q.tag:find(word) then return q.zone or L["Dungeon"] end
+  end
   return nil
 end
 
@@ -1017,7 +1033,7 @@ end
 ns.Analyze, ns.AreaName, ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color = Analyze, AreaName, ChainInfo, ChainText, CharKey, Color
 ns.DBXP, ns.EVENT_SORTS, ns.GetItemInfoCompat, ns.GetObjectives, ns.GiverText = DBXP, EVENT_SORTS, GetItemInfoCompat, GetObjectives, GiverText
 ns.HasBit, ns.InitDeps, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMeta = HasBit, InitDeps, IsClassMeta, IsCompleted, IsInLog, IsProfMeta
-ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PROFESSION_SKILLS, ns.PlayerBits = K, L, MoneyText, NextQuests, PROFESSION_SKILLS, PlayerBits
+ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PlayerBits = K, L, MoneyText, NextQuests, PlayerBits
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
 ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
@@ -1028,3 +1044,4 @@ ns.WornItemLevel = WornItemLevel
 ns.QuestCategory = QuestCategory
 ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime
 ns.IsQuestComplete = IsQuestComplete
+ns.SkillName = SkillName

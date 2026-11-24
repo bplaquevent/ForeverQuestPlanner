@@ -118,7 +118,7 @@ function Geo.StepDetailLines(st)
   if i then
     if st.kind ~= "hearth" then
       local okW, way = pcall(function()
-        return RouteText(route[i - 1].p, st.p, Geo.NetFor(route, i, info.speed or 7), info.plevel)
+        return RouteText(route[i - 1].p, st.p, Geo.NetFor(route, i, info.speed or K.RUN_SPEED), info.plevel)
       end)
       if okW and way and way ~= L["right here"] then lines[#lines + 1] = Color("ffffff", L["Route: "]) .. way end
     end

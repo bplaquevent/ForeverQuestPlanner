@@ -6,7 +6,6 @@
 --               custom = {...}, baseline = {...} }
 
 local ADDON_NAME, ns = ...
-ns = ns or {}
 local S = {}
 
 ---------------------------------------------------------------------------
@@ -669,7 +668,7 @@ end
 function S.AddRecalls(P, core, base)
   local sources = P.world.recall or {}
   if #sources == 0 then return core end
-  local W, minGain = P.W, P.k.HEARTH_MIN_GAIN or 120
+  local W, minGain = P.W, P.k.HEARTH_MIN_GAIN
   local cands = {}
   for i = 2, #core do
     local st = core[i]
@@ -1000,7 +999,7 @@ function S.Additions(P, core)
           if x and (not d or x < d) then d = x end
         end
       end
-      local cost = (t.work or 0) + (d and 2 * d * (k.PATH_FACTOR or 1.35) / speed or 2 * (k.CROSS_CONTINENT or 480))
+      local cost = (t.work or 0) + (d and 2 * d * k.PATH_FACTOR / speed or 2 * k.CROSS_CONTINENT)
       pool[#pool + 1] = { t = t, score = (t.chainValue or 0) / math.max(cost, 30) }
     end
   end
@@ -1499,7 +1498,7 @@ function S.Optimize(P, goal, opts)
       if fm.node and not known[fm.node] and not inCore[fm.node] then
         local i, d = NearestStep(core, fm.p)
         if i and d <= O.FM_SEARCH then
-          local st = { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, work = (P.k.OVERHEAD or 20) / 2,
+          local st = { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, work = P.k.OVERHEAD / 2,
             title = "Flight path: " .. tostring(fm.name) }
           if try(InsertAt(core, i, st)) then any, inCore[fm.node] = true, true end
         end
@@ -1520,11 +1519,11 @@ function S.Optimize(P, goal, opts)
       if not (same and same < 60) then
         -- Every place near the inn is tried (after each step within the detour, the start included):
         -- the nearest step is often too late (a turn-in in town, after the hearth back).
-        local st = { kind = "bind", p = inn.p, inn = inn, work = P.k.BIND_WORK or 20, title = "Bind: " .. tostring(inn.name) }
+        local st = { kind = "bind", p = inn.p, inn = inn, work = P.k.BIND_WORK, title = "Bind: " .. tostring(inn.name) }
         local places = {}
         for i, s in ipairs(core) do
           local d = S.Dist(s.p, inn.p)
-          if d and d <= (P.k.INN_DETOUR or 500) then places[#places + 1] = i end
+          if d and d <= P.k.INN_DETOUR then places[#places + 1] = i end
         end
         for _, i in ipairs(places) do
           if out() then break end
@@ -1617,7 +1616,7 @@ function S.Optimize(P, goal, opts)
     for _, st in ipairs(core) do if st.kind == "fm" then inCore[st.fmNode] = true end end
     for _, fm in ipairs(P.world.fms or {}) do
       if fm.node and not known[fm.node] and not inCore[fm.node] then
-        local st = { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, near = true, work = (P.k.OVERHEAD or 20) / 2,
+        local st = { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, near = true, work = P.k.OVERHEAD / 2,
           title = "Flight path: " .. tostring(fm.name) }
         local bc, bs, br, bscore
         for i, s in ipairs(core) do

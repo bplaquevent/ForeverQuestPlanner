@@ -15,23 +15,19 @@ local AllIds = ns.AllIds
 local NpcFriendly = ns.NpcFriendly
 local PlayerFaction = ns.PlayerFaction
 local WornItemLevel = ns.WornItemLevel
+local SkillName = ns.SkillName
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
 -- Herbalism"): QuestieDB's requiredSkill, else the quest texts (QuestieDB's English ones, the
 -- log's localized objectives and description) naming a profession next to a number.
 ---------------------------------------------------------------------------
-K.SKILL_NAMES_EN = {
-  [164] = "blacksmithing", [165] = "leatherworking", [171] = "alchemy", [182] = "herbalism", [185] = "cooking",
-  [186] = "mining", [197] = "tailoring", [202] = "engineering", [333] = "enchanting", [356] = "fishing",
-  [393] = "skinning", [129] = "first aid",
-}
 K.SKILL_TEXT_GAP = 30 -- characters: a number this close to a profession name is its level
 
 function Geo.SkillFromText(text)
   text = text:lower()
-  for skill, en in pairs(K.SKILL_NAMES_EN) do
-    for _, name in ipairs({ en, (K.SKILL_NAMES[skill] or en):lower() }) do
+  for skill, p in pairs(ns.PROFESSIONS) do
+    for _, name in ipairs(p.en and { p.en, p.name:lower() } or {}) do
       local a, b = text:find(name, 1, true)
       if a then
         local around = text:sub(math.max(1, a - K.SKILL_TEXT_GAP), b + K.SKILL_TEXT_GAP)
@@ -57,8 +53,8 @@ function Geo.SkillNeed(id, q)
   if type(req) == "table" and req[1] and (req[2] or 0) > 0 then skill, need = req[1], req[2] end
   local parts = {}
   local Q = QDB.Quest
-  local okR, raw = false, nil
-  if Q and Q.GetRaw then okR, raw = pcall(Q.GetRaw, id, "objectivesText") end
+  local okR, raw
+  okR, raw = pcall(Q.GetRaw, id, "objectivesText")
   for _, list in ipairs({ okR and raw or QGet(Q, id, "objectivesText"), q and q.objectivesText }) do
     if type(list) == "table" then
       for _, t in ipairs(list) do parts[#parts + 1] = tostring(t) end
@@ -78,7 +74,7 @@ function Geo.SkillNeed(id, q)
   if not skill then return nil end
   local have = skills[skill] or 0
   if have >= need then return nil end
-  return { skill = skill, need = need, have = have, name = K.SKILL_NAMES[skill] or (L["profession"] .. " " .. skill) }
+  return { skill = skill, need = need, have = have, name = SkillName(skill) or (L["profession"] .. " " .. skill) }
 end
 
 -- Warning line of a quest whose turn-in waits for a profession level.
@@ -86,25 +82,19 @@ function Geo.SkillNeedText(n)
   return string.format(L["%s %d required to turn in (you: %d)"], n.name, n.need, n.have)
 end
 
+-- QuestieDB npcFlags (vanilla 1.12 values).
+K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_BANKER, K.NPC_FLAG_REPAIR = 4, 16, 256, 16384
+K.NPC_FLAG_FLIGHT, K.NPC_FLAG_INNKEEPER = 8, 128
+
 -- Time to raise a profession by one point, averaged over every profession (setting "Time per skill point").
 K.SKILL_TIME = 20
--- Words of a profession trainer's sub title (QuestieDB subName, English and French), by skill id.
-K.SKILL_STEMS = {
-  [164] = { "blacksmith", "forgeron", "forge" }, [165] = { "leatherwork", "travail du cuir" },
-  [171] = { "alchem", "alchim" }, [182] = { "herbalis", "herboris" }, [185] = { "cook", "cuisin" },
-  [186] = { "mining", "mineur", "minage" }, [197] = { "tailor", "couture", "tailleur" },
-  [202] = { "engineer", "ingénieur", "ingenieur" }, [333] = { "enchant" },
-  [356] = { "fishing", "fisher", "pêch", "peche" }, [393] = { "skinning", "dépeçage", "depecage" },
-  [129] = { "first aid", "premiers soins" },
-}
-
 -- Trainers of a profession (player's faction), read once per skill: { id, name, p } per place.
 function Geo.SkillTrainers(skill)
   Geo.skillTrainers = Geo.skillTrainers or {}
   if Geo.skillTrainers[skill] then return Geo.skillTrainers[skill] end
   local out = {}
   Geo.skillTrainers[skill] = out
-  local stems = K.SKILL_STEMS[skill]
+  local stems = ns.PROFESSIONS[skill] and ns.PROFESSIONS[skill].stems
   if not (PlayerFaction() and stems) then return out end
   local npcs = QDB.Npc
   for _, id in ipairs(AllIds(npcs) or {}) do
@@ -223,11 +213,6 @@ State.xpGoal = { kind = "time", value = 7200 }
 K.MAX_TAKE_CANDIDATES = 1500      -- safety: quests to pick up considered by the Roadbook, at most
 K.MAX_FOLLOW_DEPTH = 12  -- safety: maximum length of an evaluated quest chain
 K.SLICE_MS = 15          -- maximum computation time per frame (the computation is spread over several frames)
-K.XP_TABLE = { 400, 900, 1400, 2100, 2800, 3600, 4500, 5400, 6500, 7600, 8800, 10100, 11400, 12900, 14400,
-  16000, 17700, 19400, 21300, 23200, 25200, 27300, 29400, 31700, 34000, 36400, 38900, 41400, 44300, 47400,
-  50800, 54500, 58600, 62800, 67100, 71600, 76100, 80800, 85700, 90700, 95800, 101000, 106300, 111800, 117500,
-  123200, 129100, 135100, 141200, 147500, 153900, 160400, 167100, 173900, 180800, 187900, 195000, 202300, 209800 }
-
 -- Spread computation: yields back to the game when the time slice is used up.
 function Geo.Yield()
   if State.co and debugprofilestop and coroutine.running() == State.co then
@@ -263,9 +248,9 @@ end
 
 -- XP to go from the given level to the next one (Classic table, scaled to the game's actual value).
 function Geo.XPNeeded(level)
-  local base = K.XP_TABLE[level]
+  local base = ns.XP_TABLE[level]
   if not base then return nil end
-  local here = K.XP_TABLE[UnitLevel("player")]
+  local here = ns.XP_TABLE[UnitLevel("player")]
   local real = UnitXPMax and UnitXPMax("player")
   return base * ((here and real and real > 0) and real / here or 1)
 end
@@ -571,40 +556,6 @@ function Geo.Followers(task, ctx, plevel)
 end
 
 
--- Armor (subclasses) and weapons usable per class (Classic). Mail / plate from level 40.
-K.ARMOR = {
-  WARRIOR = { [1] = true, [2] = true, [3] = true, [4] = 40, [6] = true },
-  PALADIN = { [1] = true, [2] = true, [3] = true, [4] = 40, [6] = true },
-  HUNTER = { [1] = true, [2] = true, [3] = 40 },
-  SHAMAN = { [1] = true, [2] = true, [3] = 40, [6] = true },
-  ROGUE = { [1] = true, [2] = true },
-  DRUID = { [1] = true, [2] = true },
-  PRIEST = { [1] = true }, MAGE = { [1] = true }, WARLOCK = { [1] = true },
-}
-K.WEAPONS = {
-  WARRIOR = { [0] = true, [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [10] = true, [13] = true, [15] = true, [16] = true, [18] = true },
-  PALADIN = { [0] = true, [1] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true },
-  HUNTER = { [0] = true, [1] = true, [2] = true, [3] = true, [6] = true, [7] = true, [8] = true, [10] = true, [13] = true, [15] = true, [16] = true, [18] = true },
-  ROGUE = { [2] = true, [3] = true, [4] = true, [7] = true, [13] = true, [15] = true, [16] = true, [18] = true },
-  SHAMAN = { [0] = true, [1] = true, [4] = true, [5] = true, [10] = true, [13] = true, [15] = true },
-  DRUID = { [4] = true, [5] = true, [10] = true, [13] = true, [15] = true },
-  PRIEST = { [4] = true, [10] = true, [15] = true, [19] = true },
-  MAGE = { [7] = true, [10] = true, [15] = true, [19] = true },
-  WARLOCK = { [7] = true, [10] = true, [15] = true, [19] = true },
-}
--- Main stats per class and talent tree (Classic tab order).
-K.SPEC_STATS = {
-  SHAMAN = { { "INTELLECT" }, { "AGILITY", "STRENGTH" }, { "INTELLECT", "SPIRIT" } },
-  PALADIN = { { "INTELLECT", "SPIRIT" }, { "STAMINA", "STRENGTH" }, { "STRENGTH", "AGILITY" } },
-  DRUID = { { "INTELLECT" }, { "AGILITY", "STRENGTH" }, { "INTELLECT", "SPIRIT" } },
-  WARRIOR = { { "STRENGTH", "AGILITY" }, { "STRENGTH", "AGILITY" }, { "STAMINA", "STRENGTH" } },
-  HUNTER = { { "AGILITY" }, { "AGILITY" }, { "AGILITY" } },
-  ROGUE = { { "AGILITY" }, { "AGILITY" }, { "AGILITY" } },
-  PRIEST = { { "INTELLECT", "SPIRIT" }, { "INTELLECT", "SPIRIT" }, { "INTELLECT" } },
-  MAGE = { { "INTELLECT" }, { "INTELLECT" }, { "INTELLECT" } },
-  WARLOCK = { { "INTELLECT", "STAMINA" }, { "INTELLECT", "STAMINA" }, { "INTELLECT", "STAMINA" } },
-}
-
 -- Main talent tree (the one with the most points), nil before level 10.
 function Geo.SpecIndex()
   if not (GetNumTalentTabs and GetTalentTabInfo) then return nil end
@@ -665,9 +616,6 @@ function Geo.BuildRewardIndexAsync()
   step()
 end
 
--- Recipe item (class 9) subclass -> profession skill line (Classic). Subclass 0 = book.
-K.RECIPE_SKILL = { [1] = 165, [2] = 197, [3] = 202, [4] = 164, [5] = 185, [6] = 171, [7] = 129, [8] = 333, [9] = 356 }
-
 -- QuestieDB "teachesSpell" field: a spell ID, or the default 0 (truthy in Lua!) when the item teaches nothing.
 function Geo.ItemTeachesSpell(itemId)
   local v = QGet(QDB.Item, itemId, "teachesSpell")
@@ -679,9 +627,11 @@ end
 function Geo.TeachesSkill(classID, subclassID)
   if classID ~= 9 then return false end
   if subclassID == 0 then return true end
-  local line = K.RECIPE_SKILL[subclassID]
   local skills = PlayerSkills()
-  return line and skills[line] ~= nil or false
+  for line, p in pairs(ns.PROFESSIONS) do
+    if p.recipe == subclassID then return skills[line] ~= nil end
+  end
+  return false
 end
 
 -- Interest of a reward item while leveling: 1 + reason, or 0 (an item useful now is not kept for max level).
@@ -699,14 +649,14 @@ function Geo.ItemInterest(itemId, plevel)
   if not worst then return 0 end
   local _, cls = UnitClass("player")
   if classID == 4 and subclassID and subclassID > 0 then
-    local ok = K.ARMOR[cls] and K.ARMOR[cls][subclassID]
+    local ok = ns.ARMOR[cls] and ns.ARMOR[cls][subclassID]
     if not ok or (type(ok) == "number" and plevel < ok) then return 0 end
   elseif classID == 2 then
-    if not (K.WEAPONS[cls] and K.WEAPONS[cls][subclassID]) then return 0 end
+    if not (ns.WEAPONS[cls] and ns.WEAPONS[cls][subclassID]) then return 0 end
   end
   local specOK = true
   local spec = Geo.SpecIndex()
-  local wanted = spec and K.SPEC_STATS[cls] and K.SPEC_STATS[cls][spec]
+  local wanted = spec and ns.SPEC_STATS[cls] and ns.SPEC_STATS[cls][spec]
   if wanted and link and GetItemStats then
     local ok, stats = pcall(GetItemStats, link)
     if ok and type(stats) == "table" then
@@ -798,12 +748,17 @@ function Geo.DungeonCombat(id)
   return false
 end
 
+-- The game tag saying a quest is elite.
+function Geo.IsEliteTag(tag)
+  return tag ~= nil and (tag == ELITE or tag:find(ns.ELITE_TAG_PATTERN) ~= nil)
+end
+
 -- Elite quest: tagged "Elite" by the game (quest log), otherwise most of the monsters of its
 -- objectives (to kill, or dropping the requested items) are elites in QuestieDB.
 Geo.elite = {}
 function Geo.IsEliteQuest(id, tag)
   -- A quest has a single game tag ("Dungeon" wins over "Elite"): it only settles the "Elite" case.
-  if tag and (tag == ELITE or tag:find("[EÉ]lite")) then return true end
+  if Geo.IsEliteTag(tag) then return true end
   if not id then return false end
   local v = Geo.elite[id]
   if v ~= nil then return v end
@@ -933,6 +888,14 @@ end
 
 K.FM_KNOWN_RADIUS = 150 -- yards: the QuestieDB flight master NPC standing at a flight node
 
+-- Does the text contain one of the words (Lua patterns; plain: literal text)?
+local function MatchesAny(text, words, plain)
+  for _, word in ipairs(words) do
+    if text:find(word, 1, plain) then return true end
+  end
+  return false
+end
+
 -- Service NPCs of the player's faction (QuestieDB), read once per session:
 -- flight masters (Geo.fm) and innkeepers (Geo.inn).
 function Geo.ScanServices()
@@ -941,14 +904,13 @@ function Geo.ScanServices()
   if not PlayerFaction() then return end
   for _, id in ipairs(AllIds(QDB.Npc) or {}) do
     local flags = QGet(QDB.Npc, id, "npcFlags")
-    local isFM = type(flags) == "number" and HasBit(flags, 8)
-    local isInn = type(flags) == "number" and HasBit(flags, 128)
+    local isFM = type(flags) == "number" and HasBit(flags, K.NPC_FLAG_FLIGHT)
+    local isInn = type(flags) == "number" and HasBit(flags, K.NPC_FLAG_INNKEEPER)
     if not (isFM or isInn) then
       local sub = QGet(QDB.Npc, id, "subName")
       if type(sub) == "string" then
-        isFM = (sub:find("Flight Master") or sub:find("Gryphon Master") or sub:find("Wind Rider Master")
-          or sub:find("Hippogryph Master") or sub:find("Bat Handler") or sub:find("[Mm]aître de vol")) and true or false
-        isInn = (sub:find("Innkeeper") or sub:find("[Aa]ubergiste")) and true or false
+        isFM = MatchesAny(sub, ns.SUBNAMES_FLIGHT_MASTER)
+        isInn = MatchesAny(sub, ns.SUBNAMES_INNKEEPER)
       end
     end
     if isFM or isInn then
@@ -967,8 +929,6 @@ end
 ---------------------------------------------------------------------------
 -- Service NPCs of the shortcuts under the Objective button: any vendor, repair NPC, class trainer
 ---------------------------------------------------------------------------
--- QuestieDB npcFlags (vanilla 1.12 values, like the flight master 8 and innkeeper 128 above).
-K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_BANKER, K.NPC_FLAG_REPAIR = 4, 16, 256, 16384
 K.SERVICE_TIME = 60          -- seconds spent at a service NPC (selling, repairing, training)
 K.SERVICE_NEAR = 12          -- candidates kept per continent, nearest in a straight line
 K.SERVICE_CACHE = 20         -- seconds a nearest NPC stays valid (tooltips)
@@ -1086,7 +1046,7 @@ function Geo.ServiceNpcs()
     local name = QGet(QDB.Object, id, "name")
     if type(name) == "string" then
       local low = name:lower()
-      if low:find("mailbox", 1, true) or low:find("boîte aux lettres", 1, true) or low:find("boite aux lettres", 1, true) then
+      if MatchesAny(low, ns.MAILBOX_NAMES, true) then
         for _, p in ipairs(EntityPoints("object", id)) do -- the same object stands in many places
           if not p.instance then table.insert(svc.mail, { id = id, name = name, p = p }) end
         end
@@ -1131,7 +1091,7 @@ function Geo.NearestService(kind, pos)
   pos = pos or PlayerPos()
   if not pos then return nil end
   local cache = Geo.svcNear and Geo.svcNear[kind]
-  local now = GetTime and GetTime() or 0
+  local now = GetTime()
   if cache and now - cache.at < K.SERVICE_CACHE and cache.pos and (Dist(pos, cache.pos) or math.huge) < 100 then
     return cache.best
   end

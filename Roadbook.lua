@@ -638,7 +638,6 @@ end
 -- with them first (Geo.ApplyNearFirst). Only steps already in the Roadbook; nothing is added.
 K.NEARBY_RADIUS = 150 -- yards: about one minute of detour at most
 K.NEARBY_KINDS = { take = 1, skill = 2, obj = 2, turnin = 3, dungeon = 2 } -- quest steps, in order of a quest
-K.CITY_MAPS = ns.CITY_MAPS -- (Data/Supplements.lua)
 CP.nearSeen = {} -- StepKey of the steps already brought first (forgotten once they are no longer on the spot)
 
 -- The step can be done at the player's level: pick-up with the level required, objective or dungeon with
@@ -664,7 +663,7 @@ function CP.NearbyCheck()
   if not pos then return end
   local plevel = UnitLevel("player")
   local zone = Geo.ZoneIdAt(pos)
-  local city = zone and K.CITY_MAPS[zone] and zone or nil
+  local city = zone and ns.CITY_MAPS[zone] and zone or nil
   local route = fz.route
   -- Candidates: quest steps not done, on the spot and possible at this level.
   local C, todo = {}, {}
@@ -893,7 +892,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
     if CP.RefuseWhileComputing() then return end -- one computation at a time: a request meanwhile is refused, not queued
     CP.computeToken = (CP.computeToken or 0) + 1
     token = CP.computeToken
-    State.computing, State.computeStart = true, GetTime and GetTime() or 0
+    State.computing, State.computeStart = true, GetTime()
     Geo.SyncQuestLogButton() -- the list is locked
     if not keep then Geo.ClearFrozen() end
     if Refresh then Refresh() end
@@ -1699,7 +1698,7 @@ function CP.CreateCheckpointButton()
   end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
-    self.dragEnd = GetTime and GetTime() or 0 -- the release of a Shift-drag must not count as a click
+    self.dragEnd = GetTime() -- the release of a Shift-drag must not count as a click
     local point, _, _, x, y = self:GetPoint()
     Settings().checkpointPos = { point, x, y }
   end)

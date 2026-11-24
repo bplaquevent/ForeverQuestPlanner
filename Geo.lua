@@ -22,6 +22,7 @@ local function LoadDataString(v)
   if type(v) == "string" and loadstring then
     local fn = loadstring(v)
     if fn then
+      setfenv(fn, {}) -- a table written as code: it needs, and gets, no global
       local ok, t = pcall(fn)
       if ok and type(t) == "table" then return t end
     end
@@ -381,7 +382,7 @@ end
 function Geo.TaxiNames()
   if Geo.taxiNames then return Geo.taxiNames end
   local byName, byId = {}, {}
-  for _, mapID in ipairs({ 1414, 1415 }) do
+  for _, mapID in ipairs(ns.CONTINENT_MAPS) do
     local ok, list = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
     for _, info in ipairs(ok and type(list) == "table" and list or {}) do
       if info.nodeID and type(info.name) == "string" and info.name ~= "" then
@@ -569,7 +570,7 @@ end
 
 -- Passes from QuestieDB's patrols: two ends of a patrol's paths in two zones, close to each other.
 local function PatrolPasses(out)
-  for _, id in ipairs(ns.PASS_PATROLS or {}) do
+  for _, id in ipairs(ns.PASS_PATROLS) do
     local ends = {}
     local wp = QGet(QDB.Npc, id, "waypoints")
     for area, paths in pairs(type(wp) == "table" and wp or {}) do
@@ -603,7 +604,7 @@ function Geo.Passes()
     learned[ps.a .. ":" .. ps.b] = true
   end
   if GeoReady() then pcall(PatrolPasses, others) end
-  for _, s in ipairs(ns.PASSES or {}) do
+  for _, s in ipairs(ns.PASSES) do
     local ok, c, w = pcall(C_Map.GetWorldPosFromMapPos, s[1], CreateVector2D(s[2] / 100, s[3] / 100))
     if ok and c and w then
       local x, y = w:GetXY()

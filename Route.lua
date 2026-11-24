@@ -149,9 +149,8 @@ K.BIND_WORK = 20        -- talking to the innkeeper
 K.INN_DETOUR = 500      -- maximum detour (m, as the crow flies) to go and bind
 K.RECALL_TOLERANCE = 60 -- a cooldown that moved by more than this (s) changes the plan
 K.TELEPORT_MAX_GAP = 1500 -- a place farther than this (m) from the default arrival is not the arrival
-K.RECALL_SPELLS = ns.RECALL_SPELLS -- (Data/Supplements.lua)
 K.RECALL_BY_SPELL = {}
-for _, e in ipairs(K.RECALL_SPELLS) do K.RECALL_BY_SPELL[e.spell] = e end
+for _, e in ipairs(ns.RECALL_SPELLS) do K.RECALL_BY_SPELL[e.spell] = e end
 
 function Geo.BindStore()
   local st = Settings()
@@ -186,21 +185,8 @@ function Geo.ZonesNamed(name)
   return zones
 end
 
--- Bind point of a new character: the start position of its race (no inn there). `areas` are the
--- AreaIDs (AreaTable) of the names GetBindLocation can give there ("Shadow Grave" seen in game for an
--- Undead; the others cover the start area and its subzones). Position: world coordinates of the
--- server table playercreateinfo (same as Geo's world points: c = continent, x, y).
-K.START_BINDS = {
-  { areas = { 2117, 154 }, c = 0, x = 1676.71, y = 1678.31 },   -- Undead: Shadow Grave, Deathknell
-  { areas = { 24, 9 }, c = 0, x = -8949.95, y = -132.493 },     -- Human: Northshire Abbey / Valley
-  { areas = { 77, 132 }, c = 0, x = -6240.32, y = 331.033 },    -- Dwarf, Gnome: Anvilmar, Coldridge Valley
-  { areas = { 256, 188 }, c = 1, x = 10311.3, y = 832.463 },    -- Night Elf: Aldrassil, Shadowglen
-  { areas = { 363 }, c = 1, x = -618.518, y = -4251.67 },       -- Orc, Troll: Valley of Trials
-  { areas = { 221, 220 }, c = 1, x = -2917.58, y = -257.98 },   -- Tauren: Camp Narache, Red Cloud Mesa
-}
-
 function Geo.StartBind(name)
-  for _, e in ipairs(K.START_BINDS) do
+  for _, e in ipairs(ns.START_BINDS) do
     for _, a in ipairs(e.areas) do
       if AreaName(a) == name then return Geo.MapPoint({ c = e.c, x = e.x, y = e.y }) end
     end
@@ -349,7 +335,7 @@ function Geo.RecallSources()
     end
   end
   if Settings().noRecallSpells then return out end
-  for _, e in ipairs(K.RECALL_SPELLS) do
+  for _, e in ipairs(ns.RECALL_SPELLS) do
     if Geo.SpellKnown(e.spell) then
       local charges = e.reagent and Geo.ItemCount(e.reagent) or nil
       local p = not e.bind and Geo.TeleportDest(e) or nil
@@ -430,7 +416,7 @@ function Geo.PreloadRewardItems()
   end
   for _, q in ipairs(LogQuests()) do want(q.id) end
   for _, en in ipairs(scan.entries or {}) do want(en.id) end
-  local start = GetTime and GetTime() or 0
+  local start = GetTime()
   while #missing > 0 and State.co and coroutine.running() == State.co and (GetTime() - start) < K.ITEM_WAIT do
     coroutine.yield() -- next frame
     local still = {}

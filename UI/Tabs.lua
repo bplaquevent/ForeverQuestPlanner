@@ -252,6 +252,12 @@ local function RenderAvailable()
   end
   local groups, byKey = {}, {}
   local showLow = Settings().showLowLevel
+  -- The groups apart from the places: id (never a place's name) -> title and place in the list.
+  local special = { ["#class"] = { name = L["Class"], rank = 1 }, ["#prof"] = { name = L["Professions"], rank = 2 } }
+  local function Place(e) return e.dungeon or e.area or e.starterZone or L["Other"] end
+  local function ClassOrPlace(e)
+    return (e.isClass and "#class") or (e.isProf and "#prof") or Place(e)
+  end
   for _, e in ipairs(scan.entries) do
     local keep, key, kind
     local customOnly = State.availFilter == "custom"
@@ -261,36 +267,33 @@ local function RenderAvailable()
     if State.availFilter == "zone" then
       keep = StartsHere(e) or (e.area and zoneNames[e.area]) or (e.starterZone and zoneNames[e.starterZone])
         or (e.dungeon and zoneNames[e.dungeon])
-      key = e.dungeon or e.area or e.starterZone or L["Other"]
+      key = Place(e)
     elseif State.availFilter == "dungeon" then
       keep = e.dungeon ~= nil and not e.pvp -- battlegrounds have their own filter
       key = e.dungeon
     elseif State.availFilter == "pvp" then
       keep = e.pvp
-      key = e.dungeon or e.area or e.starterZone or L["Other"]
+      key = Place(e)
     elseif customOnly then
       keep = Geo.InCustom(e.id)
-      if e.isClass then key = L["Class"]
-      elseif e.isProf then key = L["Professions"]
-      else key = e.dungeon or e.area or e.starterZone or L["Other"] end
+      key = ClassOrPlace(e)
     elseif State.availFilter == "class" then
       keep = e.isClass or e.isProf
-      key = e.isClass and L["Class"] or L["Professions"]
+      key = e.isClass and "#class" or "#prof"
     else
       keep = true
       -- "All": class and profession quests in their own groups (some are not tied to a place,
       -- e.g. the Forever "Crafting" writs), the others by zone.
-      if e.isClass then key = L["Class"]
-      elseif e.isProf then key = L["Professions"]
-      else key = e.dungeon or e.area or e.starterZone or L["Other"] end
+      key = ClassOrPlace(e)
     end
     if keep and searching then keep = MatchWords(EntryHaystack(e), State.availQuery) end
     end
     if keep then
-      kind = e.dungeon and key == e.dungeon and "dungeon" or ((key == L["Class"] or key == L["Professions"]) and "class") or "zone"
+      kind = e.dungeon and key == e.dungeon and "dungeon" or (special[key] and "class") or "zone"
       local g = byKey[key]
       if not g then
-        g = { name = key, kind = kind, list = {} }
+        local s = special[key]
+        g = { name = s and s.name or key, rank = s and s.rank, kind = kind, list = {} }
         byKey[key] = g
         groups[#groups + 1] = g
       end
@@ -301,8 +304,7 @@ local function RenderAvailable()
 
   -- Order of the categories: class, professions, dungeons, standard zones, PvP; then alphabetical.
   local function Rank(g)
-    if g.name == L["Class"] then return 1 end
-    if g.name == L["Professions"] then return 2 end
+    if g.rank then return g.rank end -- class, professions
     if g.pvp then return 5 end
     if g.kind == "dungeon" then return 3 end
     return 4
@@ -369,7 +371,7 @@ local function RenderNear()
     local _, zoneName = CurrentMapSet()
     where = L["In the whole current zone"] .. (zoneName and (" (" .. zoneName .. ")") or "")
   else
-    where = L["Within "] .. State.nearRadius .. L[" m"]
+    where = string.format(L["Within %d m"], State.nearRadius)
   end
   local info = where .. L[" - updated automatically every 3 s."]
   if scan.running then info = info .. "\n" .. Color("ff8040", L["Scanning available quests: \"Available quests\" will fill in."]) end
@@ -385,7 +387,7 @@ local function RenderNear()
   local function row(it)
     local D = K.DESC
     local take = it.kind == "take"
-    local figures = Geo.DescLine(take and Geo.XPText(it.xp, true) or nil, Color(D.meta, string.format("%.0f m", it.d)),
+    local figures = Geo.DescLine(take and Geo.XPText(it.xp, true) or nil, Color(D.meta, string.format(L["%.0f m"], it.d)),
       (take and it.lowLevel) and Color(D.meta, L["low level"]) or nil)
     local who = (take and L["Given by: "] or L["Turn in to: "]) .. (it.giver or "?")
     local text = "  " .. StateIcons(it.id) ..
@@ -404,7 +406,7 @@ local function RenderNear()
     local text = "  " .. StateIcons(g.id) .. Geo.QuestTitle(g.label, g.id and { id = g.id, level = g.level } or nil)
     for _, it in ipairs(g.steps) do
       text = text .. Geo.DescLine(Color(D.action, L["Objective: "] .. (it.extra or "?") .. K.DESC_SEP .. PointText(it.p)),
-        Color(D.meta, string.format("%.0f m", it.d)))
+        Color(D.meta, string.format(L["%.0f m"], it.d)))
     end
     text = text .. Geo.ChainTextLine(g.id)
     local first = g.steps[1]

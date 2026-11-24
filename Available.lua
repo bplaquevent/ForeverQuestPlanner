@@ -4,13 +4,14 @@
 local ADDON_NAME, ns = ...
 local AreaName, DBXP, EVENT_SORTS, GiverText, HasBit, IsClassMeta = ns.AreaName, ns.DBXP, ns.EVENT_SORTS, ns.GiverText, ns.HasBit, ns.IsClassMeta
 local IsCompleted, IsInLog, IsProfMeta, K, L, NextQuests = ns.IsCompleted, ns.IsInLog, ns.IsProfMeta, ns.K, ns.L, ns.NextQuests
-local PROFESSION_SKILLS, PlayerBits, PlayerSkills, QDB, QGet, QuestMeta = ns.PROFESSION_SKILLS, ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta
+local PlayerBits, PlayerSkills, QDB, QGet, QuestMeta = ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet, ns.QuestMeta
 local QuestPrereqs = ns.QuestPrereqs
 local State, TrivialRange = ns.State, ns.TrivialRange
 local AllIds = ns.AllIds
 local PlayerFaction = ns.PlayerFaction
 local QuestAllowed = ns.QuestAllowed
 local Print = ns.Print
+local SkillName = ns.SkillName
 
 ---------------------------------------------------------------------------
 -- Available quests (QuestieDB), scan spread over several frames
@@ -226,7 +227,7 @@ local function CheckAvailable(id, ctx)
   if type(skill) == "table" and ctx.skillsKnown then
     local have = ctx.skills[skill[1]]
     if not have or have < (skill[2] or 0) then
-      missing.texts[#missing.texts + 1] = (K.SKILL_NAMES[skill[1]] or (L["profession"] .. " " .. skill[1])) ..
+      missing.texts[#missing.texts + 1] = (SkillName(skill[1]) or (L["profession"] .. " " .. skill[1])) ..
         ((skill[2] or 0) > 0 and (" " .. skill[2]) or "")
     end
   end
@@ -234,8 +235,8 @@ local function CheckAvailable(id, ctx)
     -- Specialization: a profession id (the profession is required) or a specialization spell.
     local spec = QGet(Q, id, "requiredSpecialization")
     if spec and spec > 0 then
-      if PROFESSION_SKILLS[spec] then
-        if not ctx.skills[spec] then missing.texts[#missing.texts + 1] = K.SKILL_NAMES[spec] or L["profession"] end
+      if ns.PROFESSIONS[spec] then
+        if not ctx.skills[spec] then missing.texts[#missing.texts + 1] = SkillName(spec) or L["profession"] end
       elseif IsSpellKnown and not IsSpellKnown(spec) then
         return nil
       end
@@ -254,7 +255,7 @@ local function CheckAvailable(id, ctx)
         local names = {}
         for _, pair in ipairs(ranks) do
           if type(pair) == "table" and pair[1] and (pair[2] or 0) > 0 then
-            names[#names + 1] = (K.SKILL_NAMES[pair[1]] or tostring(pair[1])) .. " " .. pair[2]
+            names[#names + 1] = (SkillName(pair[1]) or tostring(pair[1])) .. " " .. pair[2]
           end
         end
         missing.texts[#missing.texts + 1] = table.concat(names, L[" or "])
@@ -396,7 +397,7 @@ function StartScan()
 end
 
 -- /fqp quest <id or part of a name>: what QuestieDB says about the quests that match, and why each is
--- listed or not as available (debugging aid).
+-- listed or not as available (debugging aid: in English on purpose, as /fqp npc, to be reported as it is).
 local function QuestDiag(text)
   local _, race, raceID = UnitRace("player")
   local _, rbit = PlayerBits()

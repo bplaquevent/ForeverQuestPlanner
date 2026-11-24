@@ -197,7 +197,7 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     local s = Settings()
     s.hideMinimap = not s.hideMinimap
     if State.minimapButton then State.minimapButton:SetShown(not s.hideMinimap) end
-    Print(L["Minimap icon "] .. (s.hideMinimap and L["hidden."] or L["shown."]))
+    Print(s.hideMinimap and L["Minimap icon hidden."] or L["Minimap icon shown."])
   elseif msg == "abandon" then
     ToggleMainFrame("groups")
   elseif msg == "near" or msg == "around" or msg == "autour" then

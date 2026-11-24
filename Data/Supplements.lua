@@ -58,3 +58,32 @@ ns.RECALL_SPELLS = {
   { spell = 3566, area = 1638, x = 22.5, y = 16.5, cast = 30, reagent = RUNE },    -- Teleport: Thunder Bluff
   { spell = 18960, area = 493, x = 44.0, y = 45.0, cast = 30 },                    -- Teleport: Moonglade (druid)
 }
+
+-- Bind point of a new character: the start position of its race (no inn there). `areas` are the
+-- AreaIDs (AreaTable) of the names GetBindLocation can give there ("Shadow Grave" seen in game for an
+-- Undead; the others cover the start area and its subzones). Position: world coordinates of the
+-- server table playercreateinfo (same as Geo's world points: c = continent, x, y).
+ns.START_BINDS = {
+  { areas = { 2117, 154 }, c = 0, x = 1676.71, y = 1678.31 },   -- Undead: Shadow Grave, Deathknell
+  { areas = { 24, 9 }, c = 0, x = -8949.95, y = -132.493 },     -- Human: Northshire Abbey / Valley
+  { areas = { 77, 132 }, c = 0, x = -6240.32, y = 331.033 },    -- Dwarf, Gnome: Anvilmar, Coldridge Valley
+  { areas = { 256, 188 }, c = 1, x = 10311.3, y = 832.463 },    -- Night Elf: Aldrassil, Shadowglen
+  { areas = { 363 }, c = 1, x = -618.518, y = -4251.67 },       -- Orc, Troll: Valley of Trials
+  { areas = { 221, 220 }, c = 1, x = -2917.58, y = -257.98 },   -- Tauren: Camp Narache, Red Cloud Mesa
+}
+
+-- uiMapID of the two continents, whose flight nodes the game lists (C_TaxiMap).
+ns.CONTINENT_MAPS = { 1414, 1415 }
+
+-- Words of QuestieDB's texts (English, and French where the client or Forever's data give it), for what
+-- no flag says: a flight master or an innkeeper without npcFlags (Lua patterns on the NPC's subName),
+-- a mailbox (object name, plain text, lower case).
+ns.SUBNAMES_FLIGHT_MASTER = { "Flight Master", "Gryphon Master", "Wind Rider Master", "Hippogryph Master",
+  "Bat Handler", "[Mm]aître de vol" }
+ns.SUBNAMES_INNKEEPER = { "Innkeeper", "[Aa]ubergiste" }
+ns.MAILBOX_NAMES = { "mailbox", "boîte aux lettres", "boite aux lettres" }
+
+-- Game quest tags (localized by the client): of a dungeon or raid quest, when the game gives no tag
+-- id for it, and of an elite quest.
+ns.DUNGEON_TAG_WORDS = { "Donjon", "Dungeon", "Raid" }
+ns.ELITE_TAG_PATTERN = "[EÉ]lite"
