@@ -13,6 +13,7 @@ local PlayerBits = ns.PlayerBits
 local QuestAllowed = ns.QuestAllowed
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
+K.DUNGEON_WAVE_DEPTH = 20 -- safety: dungeon visits following one another
 K.MAX_PREREQ_DEPTH = 15   -- safety: prerequisite chain added with a quest
 K.DUNGEON_ICON = "|TInterface\\Icons\\INV_Misc_Key_03:14:14|t"
 
@@ -501,7 +502,7 @@ function Geo.GroupDungeons(tasks)
     task.waves = task.waves or {}
     if task.waves[d] then return task.waves[d] end
     local w = 0
-    if depth < 20 then
+    if depth < K.DUNGEON_WAVE_DEPTH then
       for _, a in ipairs(task.pres) do
         local wa = wave(a, d, depth + 1)
         local inside = false

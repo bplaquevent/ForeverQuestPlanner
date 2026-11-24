@@ -515,19 +515,11 @@ local function TurnInText(id)
   return (GiverText(QGet(QDB.Quest, id, "finishedBy")))
 end
 
--- Profession names by skill line id (for missing prerequisites).
-K.SKILL_NAMES = {
-  [164] = L["Blacksmithing"], [165] = L["Leatherworking"], [171] = L["Alchemy"], [182] = L["Herbalism"],
-  [185] = L["Cooking"], [186] = L["Mining"], [197] = L["Tailoring"], [202] = L["Engineering"],
-  [333] = L["Enchanting"], [356] = L["Fishing"], [393] = L["Skinning"], [129] = L["First Aid"],
-  [762] = L["Riding"],
-}
--- Profession skill line ids.
-local PROFESSION_SKILLS = {
-  [164] = true, [165] = true, [171] = true, [182] = true, [185] = true, [186] = true, [197] = true,
-  [202] = true, [333] = true, [356] = true, [393] = true, [129] = true, [755] = true, [773] = true,
-  [794] = true, [762] = true,
-}
+-- Name of a profession (Data/GameData.lua), nil if unknown.
+local function SkillName(id)
+  local p = ns.PROFESSIONS[id]
+  return p and p.name
+end
 
 -- Professions known by the character: skillLine -> rank, localized names, and whether reading succeeded.
 -- Forever uses C_SkillInfo (like Questie); the other APIs are fallbacks.
@@ -546,7 +538,7 @@ local function PlayerSkills(fresh) -- fresh: read again (a skill changed)
     end
     for i = 1, C_SkillInfo.GetNumSkillLines() do
       local line = C_SkillInfo.GetSkillLineInfo(i)
-      if line and not line.isHeader and line.skillID and PROFESSION_SKILLS[line.skillID] then
+      if line and not line.isHeader and line.skillID and ns.PROFESSIONS[line.skillID] then
         skills[line.skillID] = line.rank or 0
         if line.name then names[line.name] = true end
       end
@@ -872,7 +864,9 @@ local function DungeonOf(q)
   if q.instanceName then return q.instanceName end
   if q.zone and DungeonNames()[q.zone] then return q.zone end
   if q.isInstance then return q.zone or L["Dungeon"] end
-  if q.tag and (q.tag:find("Donjon") or q.tag:find("Dungeon") or q.tag:find("Raid")) then return q.zone or L["Dungeon"] end
+  for _, word in ipairs(q.tag and ns.DUNGEON_TAG_WORDS or {}) do
+    if q.tag:find(word) then return q.zone or L["Dungeon"] end
+  end
   return nil
 end
 
@@ -1017,7 +1011,7 @@ end
 ns.Analyze, ns.AreaName, ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color = Analyze, AreaName, ChainInfo, ChainText, CharKey, Color
 ns.DBXP, ns.EVENT_SORTS, ns.GetItemInfoCompat, ns.GetObjectives, ns.GiverText = DBXP, EVENT_SORTS, GetItemInfoCompat, GetObjectives, GiverText
 ns.HasBit, ns.InitDeps, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMeta = HasBit, InitDeps, IsClassMeta, IsCompleted, IsInLog, IsProfMeta
-ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PROFESSION_SKILLS, ns.PlayerBits = K, L, MoneyText, NextQuests, PROFESSION_SKILLS, PlayerBits
+ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PlayerBits = K, L, MoneyText, NextQuests, PlayerBits
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
 ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
@@ -1028,3 +1022,4 @@ ns.WornItemLevel = WornItemLevel
 ns.QuestCategory = QuestCategory
 ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime
 ns.IsQuestComplete = IsQuestComplete
+ns.SkillName = SkillName

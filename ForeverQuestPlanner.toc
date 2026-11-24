@@ -13,6 +13,7 @@ Locales\Locales.lua
 Locales\frFR.lua
 Data\Passes.lua
 Data\Supplements.lua
+Data\GameData.lua
 Solver.lua
 Core.lua
 Available.lua

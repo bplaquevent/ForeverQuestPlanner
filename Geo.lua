@@ -381,7 +381,7 @@ end
 function Geo.TaxiNames()
   if Geo.taxiNames then return Geo.taxiNames end
   local byName, byId = {}, {}
-  for _, mapID in ipairs({ 1414, 1415 }) do
+  for _, mapID in ipairs(ns.CONTINENT_MAPS) do
     local ok, list = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
     for _, info in ipairs(ok and type(list) == "table" and list or {}) do
       if info.nodeID and type(info.name) == "string" and info.name ~= "" then

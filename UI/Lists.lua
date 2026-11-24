@@ -874,7 +874,7 @@ function Geo.QuestBadges(o)
   local parts = {}
   if id and Geo.IsFollowUp(id) then parts[#parts + 1] = Color(K.DESC.chain, L["Follow-up"]) end
   if id and Geo.IsEliteQuest(id, tag) then parts[#parts + 1] = Color("ff8040", L["Elite"]) end
-  if tag and tag ~= "" and not tag:find("[EÉ]lite") and tag ~= ELITE then parts[#parts + 1] = tag
+  if tag and tag ~= "" and not Geo.IsEliteTag(tag) then parts[#parts + 1] = tag
   elseif o.dungeon then parts[#parts + 1] = Geo.WithLevel(Color("80c0ff", L["Dungeon"]), o.dungeon) end
   local isClass = o.isClass
   if isClass == nil and id then
