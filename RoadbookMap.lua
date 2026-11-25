@@ -4,9 +4,12 @@
 -- A Roadbook "holds" the map while it is followed (mode "track") or previewed (mode "preview", a click
 -- on a step of the Roadbook): its remaining steps are drawn as numbered pins joined by its route, in
 -- pin sets of its own on OpenMap's stitched map (only it creates, updates or clears them), the
--- current objective highlighted. Meanwhile the player's OpenMap pins are hidden and no pin can be
--- added; when the Roadbook lets the map go, the map gets back exactly what it showed before
--- (the player's pins shown or hidden as they were, and the waypoint followed before tracking).
+-- current objective highlighted. Meanwhile the player's OpenMap pins are hidden (OpenMap's own
+-- switch: the player can show them again and add pins); when the Roadbook lets the map go, the map
+-- gets back what it showed before (the player's pins shown or hidden as they were, and the waypoint
+-- followed before tracking). OpenMap's functions are called, never replaced.
+-- The drawing uses OpenMap's own pin sets (MapStitch, checked at load, Core.lua): its public API
+-- places frames on the game's map canvas, which OpenMap makes see-through in a fight.
 
 local ADDON_NAME, ns = ...
 local CP, CharKey, ClearPin, Geo, K, L, OM, IsInLog = ns.CP, ns.CharKey, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM, ns.IsInLog
@@ -45,12 +48,6 @@ function Geo.MapOwner()
   return OwnerStore()[CharKey()]
 end
 
--- OpenMap functions as they were before the locks (Geo.MapInstallLocks).
-Geo.mapOrig = {}
-local function Orig(name)
-  return Geo.mapOrig[name] or OM.worldmap[name]
-end
-
 -- The Roadbook takes the map. The map's state is saved only the first time: a preview that
 -- becomes the tracking keeps the state from before the preview.
 function Geo.MapClaim(mode)
@@ -61,7 +58,7 @@ function Geo.MapClaim(mode)
     local m, x, y = wm.WaypointPoint()
     saved = { hidden = wm.PinsHidden() and true or false, wp = (m and x) and { m, x, y } or nil }
     store[ck] = saved
-    pcall(Orig("SetPinsHidden"), true)
+    pcall(wm.SetPinsHidden, true)
   end
   if mode == "track" then saved.tookWp = true end -- the tracking moves the waypoint
   saved.mode, saved.kind = mode, nil -- (kind: versions with two Roadbooks)
@@ -77,55 +74,13 @@ function Geo.MapRelease()
   store[ck] = nil
   local wm = OM.worldmap
   Geo.MapClear()
-  pcall(Orig("SetPinsHidden"), saved.hidden)
+  pcall(wm.SetPinsHidden, saved.hidden)
   if saved.tookWp then
     ClearPin()
     if saved.wp then pcall(wm.TrackPoint, saved.wp[1], saved.wp[2], saved.wp[3]) end
   end
   pcall(wm.RefreshWaypoint)
   if Geo.MapPanelSync then pcall(Geo.MapPanelSync) end -- the panel goes back to the active Roadbook
-end
-
----------------------------------------------------------------------------
--- Locks: while a Roadbook holds the map, OpenMap adds no pin (Ctrl-click, its pin button, its menu)
--- and its pins stay hidden; its waypoint marker is not drawn over the Roadbook's current pin (it
--- would clear it on a click). Pins shared or imported meanwhile join the hidden list.
----------------------------------------------------------------------------
-function Geo.MapInstallLocks()
-  if next(Geo.mapOrig) then return end
-  local wm, orig = OM.worldmap, Geo.mapOrig
-  local function Refuse()
-    Print(L["A Roadbook holds the map: no map pin until its tracking is off (or its preview closed)."])
-  end
-  orig.AddPin, orig.DropWaypoint, orig.SetPinMode = wm.AddPin, wm.DropWaypoint, wm.SetPinMode
-  orig.SetPinsHidden, orig.PinAt = wm.SetPinsHidden, wm.PinAt
-  wm.AddPin = function(...)
-    if Geo.MapOwner() then return Refuse() end
-    return orig.AddPin(...)
-  end
-  wm.DropWaypoint = function(...)
-    if Geo.MapOwner() then return Refuse() end
-    return orig.DropWaypoint(...)
-  end
-  wm.SetPinMode = function(on, ...)
-    if on and Geo.MapOwner() then
-      Refuse()
-      on = false
-    end
-    return orig.SetPinMode(on, ...)
-  end
-  wm.SetPinsHidden = function(hidden, ...)
-    if not hidden and Geo.MapOwner() then return Refuse() end
-    return orig.SetPinsHidden(hidden, ...)
-  end
-  wm.PinAt = function(mapID, x, y, ...)
-    local o, r = Geo.MapOwner(), Geo.PinRecord()
-    if o and o.mode == "track" and r and r.ui == mapID and x and y
-      and math.abs(r.x - x) < 1e-3 and math.abs(r.y - y) < 1e-3 then
-      return r
-    end
-    return orig.PinAt(mapID, x, y, ...)
-  end
 end
 
 -- USER_WAYPOINT_UPDATED while a Roadbook is followed: another waypoint replaced ours, ours goes
@@ -356,10 +311,8 @@ function Geo.MapSync()
     if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
   end
   if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
-  if OM.stitch then
-    local ok, err = pcall(Geo.MapDraw)
-    if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
-  end
+  local ok, err = pcall(Geo.MapDraw)
+  if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
 end
 
 -- Glides OpenMap's view to a point (the map opens first: next frame).
@@ -417,10 +370,9 @@ function Geo.MapHookWorldMap()
   end)
 end
 
--- At login: locks, a map still held from before a /reload given back (the focus is not kept),
--- redraw on each opening, preview ended when the map closes, option in OpenMap's menu.
+-- At login: a map still held from before a /reload given back (the focus is not kept), redraw on
+-- each opening, preview ended when the map closes, option in OpenMap's menu.
 function Geo.MapInit()
-  Geo.MapInstallLocks()
   if Geo.MapOwner() then pcall(Geo.MapRelease) end
   Geo.MapHookWorldMap()
   pcall(OM.api.RegisterCallback, ADDON_NAME, "OpenMap_StitchedChanged", function() Geo.MapSync() end)

@@ -26,7 +26,7 @@ Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cas
 | `UI/Tabs.lua` | Quest log (`RenderTodo`), Available (`RenderAvailable`, rewards line), Nearby (`RenderNear`) tabs |
 | `UI/QuestLogHook.lua` | "+ Roadbook" button in the game's quest log (`Geo.QuestLogButtonInit` at login, `Geo.QuestLogButtonSync`) |
 | `Roadbook.lua` | `CP` table: checkpoints/focus, saved Roadbook (`Geo.Freeze`, `Geo.SaveRoute` after its steps change, saved fields `STEP_FIELDS` / `TASK_FIELDS`), auto-advance on game events, teleport cooldown checks (`CP.RecallCheck`, `CP.ScheduleRecallCheck`), Roadbook adapted `CP.Replan` (removed quest, skipped transport, quest giver found `CP.GiverFound`, steps on the spot first `CP.NearbyCheck`), step order `CP.StepReady`, step description `CP.StepSummary` (title and list of parts), guards `CP.Busy` / `CP.RefuseWhileComputing`, floating Objective button |
-| `RoadbookMap.lua` | Roadbook on OpenMap's map: map ownership (`Geo.MapClaim` / `MapRelease`, `Geo.MapOwner`), locks on OpenMap's pin functions, drawing (`Geo.MapSync` / `MapDraw`) |
+| `RoadbookMap.lua` | Roadbook on OpenMap's map: map ownership (`Geo.MapClaim` / `MapRelease`, `Geo.MapOwner`; OpenMap's functions are called, never replaced), drawing (`Geo.MapSync` / `MapDraw`) |
 | `RoadbookPanel.lua` | Roadbook steps panel, a window of its own (`Geo.MapPanelSync`, header `Geo.MapPanelHeader`, placement `Geo.MapPanelPlace`, shown `Geo.MapPanelOpen` / `MapPanelShow`), step details `Geo.StepDetailLines` (tooltips of the panel and the map pins), right-click actions |
 | `UI/Window.lua` | Roadbook tab (`RenderXP`: quests of the list `Geo.RoadbookQuestItems`), filter bars, `SelectTab`, `Refresh` |
 | `UI/Settings.lua` | `K.PARAMS` and the settings window |
