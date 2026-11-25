@@ -98,7 +98,7 @@ end)
 On({ "PLAYER_LOGOUT" }, function() Snapshot() end)
 
 On({ "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "SPELLS_CHANGED" }, function(event)
-  Geo.recallDest = nil
+  Geo.ForgetTeleportDests()
   pcall(CP.ScheduleRecallCheck, 3)
   if event == "BAG_UPDATE_DELAYED" then pcall(CP.OnGameEvent, event) end -- source item looted
 end)

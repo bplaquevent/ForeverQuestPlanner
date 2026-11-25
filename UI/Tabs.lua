@@ -137,7 +137,7 @@ end
 ---------------------------------------------------------------------------
 -- "Possible rewards: [Item] · [Item] · Reputation: Orgrimmar +250"
 function Geo.RewardLine(id)
-  if not Geo.rewards then -- index still being built in the background: the list is refreshed when ready
+  if not Geo.RewardsReady() then -- index still being built in the background: the list is refreshed when ready
     Geo.BuildRewardIndexAsync()
     return nil
   end

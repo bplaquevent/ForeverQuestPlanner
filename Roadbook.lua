@@ -764,7 +764,7 @@ function CP.SkipStep(s)
   -- Transport skipped: the steps to come are planned again without it for the way to the next step
   -- (only this time: it can be proposed again later).
   if s.kind == "travel" then
-    local fz, inside = Geo.frozen, false
+    local fz, inside = Geo.Frozen(), false
     for i = 2, fz and #fz.route or 0 do if fz.route[i] == s then inside = true end end
     local ban = { mode = s.task.mode, from = s.p, to = s.task.destP }
     if inside and CP.Replan(L["Transport skipped: the Roadbook is adapted without it. "], { ban = ban }) then
