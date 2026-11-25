@@ -179,7 +179,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   -- To watch: one line each.
   local unplanned = #(info.unplanned or {})
   if unplanned > 0 then
-    lines[#lines + 1] = Color(K.DESC.bad, Plural(unplanned, L["quest"]) .. L[" cannot be planned"])
+    lines[#lines + 1] = Color(K.DESC.bad, string.format(L["%s cannot be planned"], Plural(unplanned, L["quest"])))
   end
   if info.taxi == 0 then
     lines[#lines + 1] = Color("ff8040", CP.Capitalize(L["no flight master recorded (open a flight map)"]))

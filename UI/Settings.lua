@@ -101,7 +101,7 @@ function Geo.SettingsSlider(box, d, x, y, panel)
   sl:SetScript("OnValueChanged", function(self, v, userInput)
     v = math.floor(v / d.step + 0.5) * d.step
     self.valueText:SetText(Geo.ParamText(d, v) .. ((math.abs(v - d.default) < 1e-6) and "" or
-      Color(K.DESC.meta, L["  (default "] .. Geo.ParamText(d, d.default) .. ")")))
+      Color(K.DESC.meta, string.format(L["  (default %s)"], Geo.ParamText(d, d.default)))))
     if userInput ~= false and not panel.updating then Geo.SetParam(d, v) end
   end)
   sl:SetScript("OnEnter", function(self)
