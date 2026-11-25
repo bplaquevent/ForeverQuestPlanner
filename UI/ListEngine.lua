@@ -72,6 +72,7 @@ local CAT_COLORS = {
   turnin = { 0.30, 0.80, 0.30 },
   zone = { 0.90, 0.75, 0.20 },
   dungeon = { 0.62, 0.45, 0.90 },
+  raid = { 0.78, 0.40, 0.75 },
   singles = { 0.80, 0.70, 0.40 },
   later = { 0.85, 0.35, 0.35 },
   pvp = { 0.95, 0.55, 0.45 },
@@ -532,7 +533,7 @@ end
 
 local function EntryHaystack(e)
   if not e._hay then
-    e._hay = Normalize(table.concat({ e.name or "", e.area or "", e.dungeon or "", e.starter or "", e.starterZone or "" }, " "))
+    e._hay = Normalize(table.concat({ e.name or "", e.area or "", e.instance or "", e.starter or "", e.starterZone or "" }, " "))
   end
   return e._hay
 end

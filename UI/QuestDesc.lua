@@ -52,7 +52,8 @@ function Geo.QuestTypesText(id)
 end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
--- isClass, isProf, dungeon, noTypes (types left out, shown apart with Geo.QuestTypesText) }.
+-- isClass, isProf, kind (dungeon, raid, PvP) and instance, noTypes (types left out, shown apart with
+-- Geo.QuestTypesText) }.
 function Geo.QuestBadges(o)
   local id = o.id
   local tag = o.tag
@@ -61,7 +62,10 @@ function Geo.QuestBadges(o)
   if id and Geo.IsFollowUp(id) then parts[#parts + 1] = Color(K.DESC.chain, L["Follow-up"]) end
   if id and Geo.IsEliteQuest(id) then parts[#parts + 1] = Color("ff8040", L["Elite"]) end
   if tag and tag ~= "" and not (id and Geo.IsGameElite(id)) then parts[#parts + 1] = tag -- "Elite": said above
-  elseif o.dungeon then parts[#parts + 1] = Geo.WithLevel(Color("80c0ff", L["Dungeon"]), o.dungeon) end
+  elseif o.kind then
+    local label = Color("80c0ff", K.KIND_LABEL[o.kind])
+    parts[#parts + 1] = o.instance and Geo.WithLevel(label, o.instance) or label
+  end
   local isClass = o.isClass
   if isClass == nil and id then
     local m = QuestMeta(id)

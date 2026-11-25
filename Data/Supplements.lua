@@ -33,8 +33,6 @@ ns.SORT_PROFESSION = { [-398] = true, [-377] = true, [-373] = true, [-371] = tru
 ns.SORT_EVENT = { [-1000] = true, [-404] = true, [-402] = true, [-378] = true, [-376] = true, [-375] = true,
   [-374] = true, [-370] = true, [-369] = true, [-366] = true, [-364] = true, [-41] = true, [-22] = true,
   [-21] = true, [-368] = true, [-365] = true, [-241] = true }
--- Battleground quest areas: Alterac Valley, Warsong Gulch, Arathi Basin, Darkspear Islands (Forever).
-ns.SORT_PVP = { [-25] = true, [2597] = true, [3277] = true, [3358] = true, [16606] = true }
 
 -- Quest log headers that are professions' (the client's languages), besides the names of the character's skills.
 ns.PROFESSION_HEADERS = { ["Artisanat"] = true, ["Métiers"] = true, ["Professions"] = true, ["Crafting"] = true }
@@ -82,7 +80,3 @@ ns.SUBNAMES_FLIGHT_MASTER = { "Flight Master", "Gryphon Master", "Wind Rider Mas
   "Bat Handler", "[Mm]aître de vol" }
 ns.SUBNAMES_INNKEEPER = { "Innkeeper", "[Aa]ubergiste" }
 ns.MAILBOX_NAMES = { "mailbox", "boîte aux lettres", "boite aux lettres" }
-
--- Game quest tags (localized by the client) of a dungeon or raid quest, when the game gives no tag id
--- for it.
-ns.DUNGEON_TAG_WORDS = { "Donjon", "Dungeon", "Raid" }

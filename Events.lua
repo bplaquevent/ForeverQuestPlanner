@@ -5,7 +5,7 @@ local ADDON_NAME, ns = ...
 local CP, CreateMinimapButton, ExportAndSave, Geo, InitDeps, K = ns.CP, ns.CreateMinimapButton, ns.ExportAndSave, ns.Geo, ns.InitDeps, ns.K
 local L, OnWaypointChanged, PlayerPos, Print, Color, Refresh = ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print, ns.Color, ns.Refresh
 local ScheduleSnapshot, Settings, Snapshot, State = ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State
-local ToggleMainFrame, scan = ns.ToggleMainFrame, ns.scan
+local ToggleMainFrame, MarkScanDirty = ns.ToggleMainFrame, ns.MarkScanDirty
 local CheckDataVersion, EraseData, LearnedChar = ns.CheckDataVersion, ns.EraseData, ns.LearnedChar
 
 ---------------------------------------------------------------------------
@@ -22,6 +22,7 @@ f:RegisterEvent("PLAYER_LEVEL_UP")
 pcall(f.RegisterEvent, f, "UPDATE_FACTION")
 pcall(f.RegisterEvent, f, "SKILL_LINES_CHANGED")
 f:RegisterEvent("TAXIMAP_OPENED")
+f:RegisterEvent("QUEST_DATA_LOAD_RESULT") -- quest tags (QuestTags.lua)
 -- Service shortcuts (vendor, repair, class trainer): the Roadbook step is done when the NPC window opens.
 pcall(f.RegisterEvent, f, "MERCHANT_SHOW")
 pcall(f.RegisterEvent, f, "TRAINER_SHOW")
@@ -161,10 +162,14 @@ On({ "UPDATE_FACTION", "SKILL_LINES_CHANGED" }, function(event)
     f.rescanPending = true
     C_Timer.After(10, function()
       f.rescanPending = nil
-      scan.dirty = true
+      MarkScanDirty()
       if WindowShown("xp") then Refresh() end
     end)
   end
+end)
+
+On({ "QUEST_DATA_LOAD_RESULT" }, function(_, questID)
+  ns.QuestDataLoaded(questID)
 end)
 
 On({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD" }, function()
@@ -201,7 +206,7 @@ On({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "
     end
     return
   end
-  scan.dirty = true
+  MarkScanDirty()
   if WindowShown("export") then C_Timer.After(0.5, Refresh) end
 end)
 

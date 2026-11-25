@@ -33,7 +33,11 @@ local function RoadbookQuestText(it)
   local notes = {}
   if it.reqLevel then notes[#notes + 1] = Color(D.warn, string.format(L["level %d required"], it.reqLevel)) end
   if it.prereqOf then notes[#notes + 1] = Color(D.chain, string.format(L["prerequisite of \"%s\""], it.prereqOf)) end
-  if it.dungeon then notes[#notes + 1] = Geo.WithLevel(Color(D.meta, L["dungeon: "] .. it.dungeon), it.dungeon) end
+  if it.kind then
+    local place = it.kindPlace
+    notes[#notes + 1] = place and Geo.WithLevel(Color(D.meta, K.KIND_NOTE[it.kind] .. place), place)
+      or Color(D.meta, K.KIND_LABEL[it.kind])
+  end
   local text = "  " .. StateIcons(it.id) .. Geo.QuestTitle(it.title, { id = it.id, level = it.level, doubts = it.doubts }) ..
     Geo.DescLine(status, unpack(notes))
   local rest = q and not q.complete and RemainingObjectives(q) or ""
@@ -70,7 +74,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
   for _, c in ipairs(Geo.RoadbookCategories(shown)) do
     local label
     if c.kind == "zone" then label = Geo.WithLevel(c.name, c.name)
-    elseif c.kind == "dungeon" then label = Geo.WithLevel(L["Dungeon: "] .. c.name, c.name)
+    elseif K.KIND_TITLE[c.kind] then label = Geo.WithLevel(K.KIND_TITLE[c.kind] .. c.name, c.name)
     else label = LABEL[c.kind] end
     -- "Remove all" on a category (not the turned in ones: nothing left to remove).
     local b3

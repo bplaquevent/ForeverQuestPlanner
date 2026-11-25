@@ -7,7 +7,7 @@ local ClearPin, Color, Dist, Geo, GeoReady, GetObjectives = ns.ClearPin, ns.Colo
 local IsCompleted, IsInLog, K, L, PinPoint, PlayerPos, Print = ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.PinPoint, ns.PlayerPos, ns.Print
 local QDB, QGet, Refresh, Settings, Snapshot, KnownFlights = ns.QDB, ns.QGet, ns.Refresh, ns.Settings, ns.Snapshot, ns.KnownFlights
 local State, TravelSpeed, WatchOnly, IsWatched, SetWatched = ns.State, ns.TravelSpeed, ns.WatchOnly, ns.IsWatched, ns.SetWatched
-local scan, LogEntry, IsQuestComplete, WaitScan = ns.scan, ns.LogEntry, ns.IsQuestComplete, ns.WaitScan
+local MarkScanDirty, LogEntry, IsQuestComplete, WaitScan = ns.MarkScanDirty, ns.LogEntry, ns.IsQuestComplete, ns.WaitScan
 
 ---------------------------------------------------------------------------
 -- Roadbook checkpoints: focus on the next step from a floating button
@@ -47,7 +47,7 @@ function CP.EscortFailed(s)
 end
 
 function CP.StepPinLabel(s)
-  if s.kind == "dungeon" then return L["enter the dungeon"] end
+  if s.kind == "dungeon" then return L["enter the instance"] end
   if s.kind == "fm" then return L["activate the flight master"] end
   if s.kind == "bind" then return L["bind the hearthstone"] end
   if s.kind == "skill" then return L["raise the skill"] end
@@ -667,7 +667,7 @@ function CP.SetGoal(kind, value)
   if g.kind == kind and g.value == value then return end
   State.xpGoal = { kind = kind, value = value }
   st.goal = { kind = kind, value = value }
-  scan.dirty = true -- the levels scanned for the Roadbook follow the goal
+  MarkScanDirty() -- the levels scanned for the Roadbook follow the goal
   Refresh()
 end
 
@@ -983,7 +983,7 @@ function CP.GiverFound(a1, a2)
       Geo.SaveRoute()
       handled = true
       local msg = L["Quest giver found: "] .. (title or "?") .. ". "
-      scan.dirty = true -- the quest left the available ones: scanned again before the computation
+      MarkScanDirty() -- the quest left the available ones: scanned again before the computation
       if not CP.Replan(msg) then
         Print(msg)
         if Geo.Tracking() then
@@ -1113,7 +1113,7 @@ end
 
 function STEP_EVENTS.dungeon(s, event)
   if (event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED") and CP.StepDone(s) then
-    CP.AutoUpdate(L["Dungeon done"])
+    CP.AutoUpdate(L["Instance done"])
   end
 end
 

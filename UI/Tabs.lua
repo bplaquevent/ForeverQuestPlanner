@@ -111,8 +111,8 @@ local function RenderTodo(a)
     end
   end
 
-  for _, g in ipairs(a.dungeons) do
-    category("dungeon", "dungeon:" .. g.name, Geo.WithLevel(L["Dungeon: "] .. g.name, g.name), g.quests, normalDetail)
+  for _, g in ipairs(a.instances) do
+    category(g.kind, g.kind .. ":" .. g.name, Geo.WithLevel(K.KIND_TITLE[g.kind] .. g.name, g.name), g.quests, normalDetail)
   end
 
   if #singles > 0 then
@@ -153,6 +153,13 @@ function Geo.RewardLine(id)
   return Color(K.DESC.action, L["Possible rewards: "]) .. table.concat(parts, Color(K.DESC.meta, K.DESC_SEP))
 end
 
+-- What the running scan is doing: text, then the loading of the quest types once it started.
+local function ScanText(text)
+  local loaded, total = ns.TagProgress()
+  if loaded >= total then return text end
+  return string.format(L["Loading quest types: %d / %d"], loaded, total)
+end
+
 local function RenderAvailable()
   local panel = panels.avail
   if scan.error then
@@ -162,7 +169,7 @@ local function RenderAvailable()
   if scan.dirty or not scan.entries then
     if not scan.running then StartScan() end
     if scan.running or scan.dirty then
-      ShowMessage(panel, "avail", L["Scanning the QuestieDB database…"])
+      ShowMessage(panel, "avail", ScanText(L["Scanning the QuestieDB database…"]))
       return
     end
   end
@@ -184,7 +191,7 @@ local function RenderAvailable()
     for _, e in ipairs(g.list) do
       local D = K.DESC
       local text = "  " .. StateIcons(e.id) ..
-        Geo.QuestTitle(e.name, { id = e.id, level = e.level, isClass = e.isClass, isProf = e.isProf, dungeon = e.dungeon, doubts = e.doubts }) ..
+        Geo.QuestTitle(e.name, { id = e.id, level = e.level, isClass = e.isClass, isProf = e.isProf, kind = e.kind, instance = e.instance, doubts = e.doubts }) ..
         Geo.DescLine(e.starter and Color(D.action, L["Given by: "] .. e.starter) or nil) ..
         Geo.DescLine(Geo.XPText(e.xp, true), Color(D.meta, L["requires level "] .. e.reqLevel),
           e.lowLevel and Color(D.meta, L["low level"]) or nil, e.repeatable and Color(D.meta, L["repeatable"]) or nil,
@@ -229,7 +236,7 @@ local function RenderNear()
     where = string.format(L["Within %d m"], State.nearRadius)
   end
   local info = where .. L[" - updated automatically every 3 s."]
-  if scan.running then info = info .. "\n" .. Color("ff8040", L["Scanning available quests: \"Available quests\" will fill in."]) end
+  if scan.running then info = info .. "\n" .. Color("ff8040", ScanText(L["Scanning available quests: \"Available quests\" will fill in."])) end
   local items = { { text = Color("aaaaaa", info) } }
 
   local function matches(it)
