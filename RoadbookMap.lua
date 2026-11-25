@@ -148,12 +148,31 @@ function Geo.StepTooltip(owner, st, n, hint, anchor)
   GameTooltip:Show()
 end
 
+-- A click on a step, its pin on the map or its line in the steps panel: the map centered on it, the
+-- quest log on its quest. Map closed: it opens on the step (Geo.ShowStep).
+function Geo.ClickStep(st)
+  if not (WorldMapFrame and WorldMapFrame:IsShown()) then
+    Geo.ShowStep(st)
+    return
+  end
+  local u, v = Geo.MapUV(st.p)
+  local qid = st.task and st.task.id
+  if qid and IsInLog(qid) then
+    -- The quest log opens on the quest (it moves the map to the quest's zone): the step is centered after it.
+    OpenQuestDetails(qid)
+    if u then C_Timer.After(0, function() pcall(OM.api.ShowWorld, u, v) end) end
+  elseif u then
+    pcall(OM.api.ShowWorld, u, v)
+  end
+end
+K.CLICK_STEP_TIP = L["Click: center the map and select the quest in the quest log"]
+
 function Geo.MapPinEnter(self)
-  if self.data then Geo.StepTooltip(self, self.data, self.fqpN or 0, L["Click: open the Roadbook"]) end
+  if self.data then Geo.StepTooltip(self, self.data, self.fqpN or 0, K.CLICK_STEP_TIP) end
 end
 
 function Geo.MapPinClick(self)
-  if CP.OpenWindow then CP.OpenWindow("xp") end
+  if self.data then Geo.ClickStep(self.data) end
 end
 
 local looks = {} -- pin looks, made once: step kind (.. "!" for the current objective)

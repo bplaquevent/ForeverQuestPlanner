@@ -10,8 +10,7 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K
-local L, IsInLog, OM, OpenQuestDetails, Plural, RouteText = ns.L, ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Plural, ns.RouteText
-local Settings, UpdateScrollBar, State = ns.Settings, ns.UpdateScrollBar, ns.State
+local L, Plural, RouteText, Settings, UpdateScrollBar, State = ns.L, ns.Plural, ns.RouteText, ns.Settings, ns.UpdateScrollBar, ns.State
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line
@@ -217,7 +216,7 @@ end
 local function RowEnter(self)
   if self.step then
     Geo.StepTooltip(self, self.step, self.n,
-      L["Click: center the map and select the quest in the quest log"] .. "\n" .. L["Right-click: actions of the step"],
+      K.CLICK_STEP_TIP .. "\n" .. L["Right-click: actions of the step"],
       "ANCHOR_LEFT")
   end
 end
@@ -271,19 +270,7 @@ local function RowClick(self, button)
     end)
     return
   end
-  if not (WorldMapFrame and WorldMapFrame:IsShown()) then
-    Geo.ShowStep(st) -- map closed: it opens on the step
-    return
-  end
-  local u, v = Geo.MapUV(st.p)
-  local qid = st.task and st.task.id
-  if qid and IsInLog(qid) then
-    -- The quest log opens on the quest (it moves the map to the quest's zone): the step is centered after it.
-    OpenQuestDetails(qid)
-    if u then C_Timer.After(0, function() pcall(OM.api.ShowWorld, u, v) end) end
-  elseif u then
-    pcall(OM.api.ShowWorld, u, v)
-  end
+  Geo.ClickStep(st)
 end
 
 local function NewRow(parent)
