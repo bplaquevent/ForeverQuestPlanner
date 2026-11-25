@@ -705,7 +705,7 @@ function Geo.AcceptGenerated(route, info, done, prepare)
     Geo.CustomSetList(list)
     State.customToken = (State.customToken or 0) + 1 -- no pending recompute of the former list
     State.customUnplanned = info.unplanned
-    Geo.Freeze(prepare and prepare(route) or route, info)
+    Geo.AdoptPlan(prepare and prepare(route) or route, info)
     Geo.SyncQuestLogButton()
     done(true)
   end

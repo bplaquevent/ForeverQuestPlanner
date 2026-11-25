@@ -183,6 +183,27 @@ function CP.StepReady(st, route)
   return true
 end
 
+-- A new or adapted plan becomes the Roadbook: saved, then redrawn on the map if it is there.
+function Geo.AdoptPlan(route, info)
+  Geo.Freeze(route, info)
+  Geo.MapSync()
+end
+
+-- Steps to come removed, the steps done kept (history): the custom Roadbook whose list was emptied.
+-- Returns false when no step is done (nothing to keep).
+function Geo.KeepOnlyDone()
+  local fz = Geo.Frozen()
+  if not fz then return false end
+  local start = { { kind = "start", p = fz.route[1].p, work = 0 } }
+  local info = {}
+  for k, v in pairs(fz.info) do info[k] = v end
+  local route = Geo.KeepDone(fz, CP.StepDone, start, { total = 0, levels = { UnitLevel("player") } }, info)
+  if #route < 2 then return false end
+  info.dungeons, info.discovered, info.skipped, info.unplanned = nil, nil, nil, nil
+  Geo.AdoptPlan(route, info)
+  return true
+end
+
 -- Option chosen in the Roadbook tab, for the next "Adapt": { kind = "time" | "level", value } (the
 -- list completed or trimmed for it).
 function Geo.SelectedGoal()
@@ -220,7 +241,7 @@ function Geo.Recompute(goal, cb, keepDone, re)
         route = Geo.KeepDone(old, CP.StepDone, route, info, info)
         info.later = old.info.later
       end
-      Geo.Freeze(route, info)
+      Geo.AdoptPlan(route, info)
     end
     if cb then cb(route, err, info) end
     if Refresh then C_Timer.After(0.1, Refresh) end
