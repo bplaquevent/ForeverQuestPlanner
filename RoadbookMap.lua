@@ -156,14 +156,34 @@ local function StepZoom()
   return math.max(K.STEP_ZOOM_MIN, math.min(K.STEP_ZOOM_MAX, ok and zoom or K.STEP_ZOOM_MIN))
 end
 
--- The quest log on the step's quest, then the world map centered on the step, opened if needed.
--- The quest comes first: it opens the map on the quest's zone, and the game closes its details as
--- soon as the map changes; no map is changed after it (OpenMap's view centers on any point).
+-- The quest's details in the quest log beside the map, the view left where it is (as OpenMap's own
+-- quest icons do, Map/Quests.lua). Never when it would move the map: the game closes a quest's details
+-- as soon as the map changes (GetQuestUiMapID 0: the game ties this quest to no map). Not in combat,
+-- nor on the full screen map, which has no quest log beside it.
+local function ShowQuestDetails(qid)
+  if InCombatLockdown() or not IsInLog(qid) then return end
+  local questMap = GetQuestUiMapID and GetQuestUiMapID(qid)
+  if not questMap or (questMap ~= 0 and questMap ~= WorldMapFrame:GetMapID()) then return end
+  local log = WorldMapFrame.QuestLog
+  if not (log and QuestMapFrame_ShowQuestDetails) or (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then return end
+  if not log:IsShown() and WorldMapFrame.HandleUserActionOpenSidePanel then
+    pcall(WorldMapFrame.HandleUserActionOpenSidePanel, WorldMapFrame)
+    local toggle = WorldMapFrame.SidePanelToggle
+    if toggle and toggle.Refresh then pcall(toggle.Refresh, toggle) end
+  end
+  if log:IsShown() then pcall(QuestMapFrame_ShowQuestDetails, qid) end
+end
+
+-- Seconds between centering the map and showing the quest: OpenMap then puts the game's map under its
+-- view (about 1 s: its glide, then its wait), and that change would close the details.
+K.QUEST_SHOW_DELAY = 1.5
+
+-- The world map centered on the step, opened if needed, then the quest log on its quest. A later
+-- click, or the map closed, drops the quest still waited for (Geo.mapClick).
 local function CenterOn(st)
-  local zoom = StepZoom() -- read before the quest log changes the map, and with it the zoom
-  local qid = st.task and st.task.id
-  local details = qid and IsInLog(qid)
-  if details then OpenQuestDetails(qid) end
+  Geo.mapClick = (Geo.mapClick or 0) + 1
+  local click = Geo.mapClick
+  local zoom = StepZoom()
   if not (WorldMapFrame and WorldMapFrame:IsShown()) then Geo.OpenWorldMap(nil, true) end
   C_Timer.After(0.05, function() -- once the map is up and laid out
     if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
@@ -175,8 +195,14 @@ local function CenterOn(st)
     local u, v = Geo.MapUV(st.p)
     if u and OM.api.IsStitched() then
       pcall(OM.api.ShowWorld, u, v, zoom)
-    elseif not details then -- OpenMap's map off: the game's, on the step's zone
+    else -- OpenMap's map off: the game's, on the step's zone
       Geo.OpenWorldMap(Geo.PointUi(st.p), true)
+    end
+    local qid = st.task and st.task.id
+    if qid and IsInLog(qid) then
+      C_Timer.After(K.QUEST_SHOW_DELAY, function()
+        if click == Geo.mapClick and WorldMapFrame:IsShown() then ShowQuestDetails(qid) end
+      end)
     end
   end)
 end
@@ -370,7 +396,7 @@ end
 -- Preview (click on a step of the Roadbook) and the "Whole Roadbook on the map" option
 ---------------------------------------------------------------------------
 -- Shows a step (done or not): the world map opens centered on it, with the Roadbook drawn
--- (previewed when no Roadbook holds the map), and the quest log on its quest.
+-- (previewed when no Roadbook holds the map), then the quest log on its quest.
 -- The Forever Quest Planner window stays open.
 function Geo.ShowStep(st)
   if not (st and st.p) or st.nopin then return end
@@ -396,6 +422,7 @@ function Geo.MapHookWorldMap()
   WorldMapFrame:HookScript("OnShow", function() C_Timer.After(0, Geo.MapSync) end)
   WorldMapFrame:HookScript("OnUpdate", Geo.MapPlayerTick)
   WorldMapFrame:HookScript("OnHide", function()
+    Geo.mapClick = (Geo.mapClick or 0) + 1 -- no quest shown after the map closed
     local o = Geo.MapOwner()
     if o and o.mode == "preview" then Geo.MapRelease() end
   end)
