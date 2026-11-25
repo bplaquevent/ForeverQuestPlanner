@@ -50,14 +50,14 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
 - A file can only import from files loaded before it. For a call to a later file, call `ns.Name()` at runtime
   (example: `Refresh` in `Available.lua` forwards to the real one in `UI/Window.lua`).
 - Saved data: `Settings()` returns the character's own table (`ForeverQuestPlannerSettings.chars[CharKey()]`,
-  one record per thing: `custom`, `roadbook`, `bind`, `pin`, `mapSaved`);
-  only what is learned about the world and true for every character (zone passes, teleport arrivals, class
-  trainers) is shared:
-  `SharedData()`.
+  one record per thing: `custom`, `roadbook`, `pin`, `mapSaved`);
+  what is learned in game is apart, to be kept longer, in `LearnedData()` (zone passes, teleport arrivals, class
+  trainers, for every character) and `LearnedChar()` (mount speed, bind point: the current character's, dropped
+  when the game's identifier of the character differs).
 - No migration code: the code only knows the current form of the saved data. A change that makes saved data
   unusable (a field renamed, moved, of another type or meaning; not a new field that may be absent) raises the
-  number of its set (`Core.lua`): `DATA_VERSION` for the characters' data and the captures, `SHARED_VERSION` for
-  what was learned (`SharedData()`). The addon then erases that set at login, for every character. The
+  number of its set (`Core.lua`): `DATA_VERSION` for the characters' data and the captures, `LEARNED_VERSION` for
+  what was learned (`LearnedData()`, `LearnedChar()` included). The addon then erases that set at login, for every character. The
   developer's own data is converted outside the game by a throwaway script, never committed.
 - Mutable variables read by several files live in the `State` table (`State.mainFrame`, `State.currentTab`,
   `State.availFilter`, `State.xpHorizon`, `State.nearRadius`, search queries, the running computation

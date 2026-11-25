@@ -92,8 +92,9 @@ Optional: **Questie**.
 2. Make sure the folder is named exactly `ForeverQuestPlanner`.
 3. Start the game (or `/reload`).
 
-Settings and Roadbooks are saved per character; only what the addon learns about the world (zone passes
-walked, places reached by the teleport spells) is shared by all your characters.
+Settings and Roadbooks are saved per character. Of what the addon learns in game, zone passes walked and
+places reached by the teleport spells serve all your characters, class trainers those of the same class;
+hearthstone places and mount speeds are each character's own.
 
 ## Commands
 
@@ -114,8 +115,8 @@ walked, places reached by the teleport spells) is shared by all your characters.
 | `/fqp passes` | Number of zone passes known (learned on foot, in all) |
 | `/fqp passes reset` | Forget the zone passes learned on foot |
 | `/fqp npc` | Diagnose the targeted NPC for the service shortcuts (class trainer data) |
-| `/fqp reset` | Erase the saved data of **every character** (after confirmation) and reload the interface: settings, quest lists, Roadbooks, hearthstone places, mount speeds and captures. What was learned in game is kept |
-| `/fqp reset all` | The same, and erase what the addon learned in game too (zone passes, teleport arrivals, class trainers) |
+| `/fqp reset` | Erase the saved data of **every character** (after confirmation) and reload the interface: settings, quest lists, Roadbooks and captures. What was learned in game is kept |
+| `/fqp reset all` | The same, and erase what the addon learned in game too (zone passes, teleport arrivals, class trainers, hearthstone places, mount speeds) |
 | `/fqp dump` | Capture the Roadbook problem for the test bench (then `/reload`) |
 | `/fqp quest <id or name>` | What QuestieDB says about the matching quests (races, classes, prerequisites, exclusive quests, completed, quest givers: NPCs, objects, items) |
 
@@ -125,8 +126,8 @@ The French command names (`journal`, `dispo`, `autour`, `reglages`, `foyer`) sti
 
 Addon updates do not convert saved data. It is saved in two sets, each erased at login **only when a version cannot use it** (going back to a former version does the same), which the chat then says:
 
-- the **characters' data**, for **every character**: settings and window positions, quest lists, Roadbooks, hearthstone places recorded, mount speeds, and the captures (quest logs, test bench);
-- what the addon **learned in game**, common to every character: zone passes walked, teleport arrivals, class trainers.
+- the **characters' data**, for **every character**: settings and window positions, quest lists, Roadbooks, and the captures (quest logs, test bench);
+- what the addon **learned in game**: zone passes walked, teleport arrivals and class trainers, common to the characters, and each character's hearthstone place and mount speed. A character deleted and made again with the same name does not get the former one's.
 
 `/fqp reset` erases the first set on demand, `/fqp reset all` both.
 

@@ -3,7 +3,7 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, Dist, Geo, GetItemInfoCompat, K, L, Print = ns.AreaName, ns.Dist, ns.Geo, ns.GetItemInfoCompat, ns.K, ns.L, ns.Print
-local Settings, SharedData, Solver, TaxiCount, WorldPos, scan = ns.Settings, ns.SharedData, ns.Solver, ns.TaxiCount, ns.WorldPos, ns.scan
+local Settings, LearnedData, LearnedChar, Solver, TaxiCount, WorldPos, scan = ns.Settings, ns.LearnedData, ns.LearnedChar, ns.Solver, ns.TaxiCount, ns.WorldPos, ns.scan
 local LogQuests, State = ns.LogQuests, ns.State
 
 ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ function Geo.RecordBind(p)
   if not p then return end
   local stored = StoredPoint(p)
   stored.name = GetBindLocation and GetBindLocation() or nil
-  Settings().bind = stored
+  LearnedChar().bind = stored
 end
 
 -- Zones (zone ids) with this name (value true), or containing the subzone with this name (value "sub").
@@ -235,7 +235,7 @@ end
 -- Current bind location: remembered position, otherwise estimated from the location name.
 function Geo.CurrentBind()
   local name = GetBindLocation and GetBindLocation() or nil
-  local st = Settings().bind
+  local st = LearnedChar().bind
   if st and (not name or st.name == name) then return st, name end
   if name then return Geo.GuessBind(name), name end
   return nil, name
@@ -287,7 +287,7 @@ end
 
 -- Arrival of a teleport spell: the place reached after its last cast, otherwise the default one.
 function Geo.TeleportStore()
-  return SharedData().teleportArrivals
+  return LearnedData().teleportArrivals
 end
 
 function Geo.RecordTeleport(spell, p)

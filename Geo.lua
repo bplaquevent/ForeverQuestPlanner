@@ -3,7 +3,7 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, Color, HasBit, K, L, OM, QDB, QGet = ns.AreaName, ns.Color, ns.HasBit, ns.K, ns.L, ns.OM, ns.QDB, ns.QGet
-local Settings, SharedData, PlayerFaction, NpcFriendly = ns.Settings, ns.SharedData, ns.PlayerFaction, ns.NpcFriendly
+local Settings, LearnedData, LearnedChar, PlayerFaction, NpcFriendly = ns.Settings, ns.LearnedData, ns.LearnedChar, ns.PlayerFaction, ns.NpcFriendly
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
@@ -311,13 +311,13 @@ K.RUN_SPEED = 7 -- yards/s on foot
 function Geo.LearnMountSpeed()
   if GetUnitSpeed and IsMounted and IsMounted() then
     local _, run = GetUnitSpeed("player")
-    if run and run > K.RUN_SPEED then Settings().mountSpeed = run end
+    if run and run > K.RUN_SPEED then LearnedChar().mountSpeed = run end
   end
 end
 
 -- Travel speed: running, or the mount speed remembered the last time you were mounted.
 local function TravelSpeed()
-  return math.max(K.RUN_SPEED, Settings().mountSpeed or K.RUN_SPEED)
+  return math.max(K.RUN_SPEED, LearnedChar().mountSpeed or K.RUN_SPEED)
 end
 
 -- A point's own fields, in a new table (saved data, solver problem).
@@ -563,7 +563,7 @@ end
 
 -- Passes learned in game: { c, x, y, a, b, n } (world point, the zones' uiMapIDs a < b, times seen).
 function Geo.LearnedPasses()
-  return SharedData().passes
+  return LearnedData().passes
 end
 
 -- Passes from QuestieDB's patrols: two ends of a patrol's paths in two zones, close to each other.

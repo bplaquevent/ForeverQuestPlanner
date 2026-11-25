@@ -18,9 +18,9 @@ end
 -- Formats of the data the addon saves, apart: a number is raised by every change that makes the data
 -- it covers unusable (a field renamed, moved, or of another type or meaning; not a new field that may
 -- be absent). DATA_VERSION: the characters' data (Settings()) and the captures (quest logs, test
--- bench). SHARED_VERSION: what the addon learned about the world (SharedData()).
+-- bench). LEARNED_VERSION: what the addon learned in game (LearnedData()).
 local DATA_VERSION = 1
-local SHARED_VERSION = 1
+local LEARNED_VERSION = 1
 
 local function CharKey()
   local name, realm = UnitFullName("player")
@@ -28,8 +28,8 @@ local function CharKey()
   return (name or "?") .. "-" .. (realm or "?")
 end
 
--- What FQP saves is per character: ForeverQuestPlannerSettings.chars[CharKey()]; only what it learns
--- about the world, true for every character, is shared (SharedData).
+-- What FQP saves: each character's data, ForeverQuestPlannerSettings.chars[CharKey()] (Settings()),
+-- and apart from it, to be kept longer, what it learned in game (LearnedData()).
 
 -- A zone pass as saved: its place and its two zones (a damaged entry would break every walk).
 local function ValidPass(ps)
@@ -51,20 +51,37 @@ local function SettingsRoot()
   return ForeverQuestPlannerSettings
 end
 
-local checkedShared -- the shared data checked this session
+local checkedLearned -- the learned data checked this session
 
--- Learned about the world, shared by every character: zone passes walked ({ c, x, y, a, b, n }) and
--- the places really reached by the teleport spells (spell -> point).
-local function SharedData()
+-- Learned in game. True for every character: zone passes walked ({ c, x, y, a, b, n }), the places
+-- really reached by the teleport spells (spell -> point), class trainers. True for one character only:
+-- chars[CharKey()], read through LearnedChar().
+local function LearnedData()
   local root = SettingsRoot()
-  root.shared = type(root.shared) == "table" and root.shared or {}
-  local shared = root.shared
-  if checkedShared ~= shared then
-    shared.passes = KeepValidPasses(shared.passes)
-    shared.teleportArrivals = type(shared.teleportArrivals) == "table" and shared.teleportArrivals or {}
-    checkedShared = shared
+  root.learned = type(root.learned) == "table" and root.learned or {}
+  local learned = root.learned
+  if checkedLearned ~= learned then
+    learned.passes = KeepValidPasses(learned.passes)
+    learned.teleportArrivals = type(learned.teleportArrivals) == "table" and learned.teleportArrivals or {}
+    learned.chars = type(learned.chars) == "table" and learned.chars or {}
+    checkedLearned = learned
   end
-  return shared
+  return learned
+end
+
+-- What was learned for the current character alone: { guid, mountSpeed, bind }. Saved under its name
+-- with the game's identifier of the character: another character of the same name (one deleted, then
+-- made again) starts afresh. Without the identifier, nothing is read nor kept.
+local function LearnedChar()
+  local guid = UnitGUID and UnitGUID("player")
+  if not guid then return {} end
+  local chars, key = LearnedData().chars, CharKey()
+  local rec = chars[key]
+  if type(rec) ~= "table" or rec.guid ~= guid then
+    rec = { guid = guid }
+    chars[key] = rec
+  end
+  return rec
 end
 
 local settingsCache = {}
@@ -83,13 +100,13 @@ local function Settings()
   return st
 end
 
--- Erases, for every character, their data and the captures (characters), what the addon learned
--- about the world (learned), or both; what is not erased is kept as it is.
-local function EraseData(characters, learned)
+-- Erases, for every character, their data and the captures (characters), what the addon learned in
+-- game (learned), or both; what is not erased is kept as it is.
+local function EraseData(characters, learnedToo)
   local old = SettingsRoot()
-  local root = { dataVersion = DATA_VERSION, sharedVersion = SHARED_VERSION }
+  local root = { dataVersion = DATA_VERSION, learnedVersion = LEARNED_VERSION }
   if not characters then root.chars = old.chars end
-  if not learned then root.shared = old.shared end
+  if not learnedToo then root.learned = old.learned end
   ForeverQuestPlannerSettings = root -- a new table: what was cached from the former one is read again
   if characters then ForeverQuestPlannerDB, ForeverQuestPlannerBench = nil, nil end
 end
@@ -99,11 +116,11 @@ end
 -- (false when there was none to lose).
 local function CheckDataVersion()
   local root = SettingsRoot()
-  local oldCharacters, oldLearned = root.dataVersion ~= DATA_VERSION, root.sharedVersion ~= SHARED_VERSION
+  local oldCharacters, oldLearned = root.dataVersion ~= DATA_VERSION, root.learnedVersion ~= LEARNED_VERSION
   if not (oldCharacters or oldLearned) then return false, false end
   local lostCharacters = oldCharacters
     and (root.chars ~= nil or ForeverQuestPlannerDB ~= nil or ForeverQuestPlannerBench ~= nil)
-  local lostLearned = oldLearned and root.shared ~= nil
+  local lostLearned = oldLearned and root.learned ~= nil
   EraseData(oldCharacters, oldLearned)
   return lostCharacters, lostLearned
 end
@@ -1019,7 +1036,8 @@ ns.HasBit, ns.InitDeps, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMet
 ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PlayerBits = K, L, MoneyText, NextQuests, PlayerBits
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
-ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
+ns.OM, ns.LearnedData, ns.TurnInText = OM, LearnedData, TurnInText
+ns.LearnedChar = LearnedChar
 ns.CheckDataVersion, ns.EraseData = CheckDataVersion, EraseData
 ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
 ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQuests, LogRecord
