@@ -77,9 +77,9 @@ end
 function Geo.StepDetailLines(st)
   local D = K.DESC
   local lines = {}
-  local ok, _, parts = pcall(CP.StepSummary, st)
+  local _, parts = CP.StepSummary(st)
   local xp = Geo.StepXP(st)
-  for _, piece in ipairs(ok and parts or {}) do
+  for _, piece in ipairs(parts or {}) do
     if piece ~= xp then lines[#lines + 1] = Color(D.action, CP.Capitalize(piece)) end -- the XP: its own line
   end
   local dur = Geo.StepDuration(st)
@@ -581,8 +581,7 @@ function Geo.MapPanelSync()
       r:SetPoint("TOPLEFT", 0, -(total - 1) * K.MAP_PANEL_ROW)
       r:SetWidth(width)
       local isDone = CP.StepDone(st)
-      local ok, title = pcall(CP.StepSummary, st)
-      if not (ok and title) then title = CP.StepText(st) end
+      local title = CP.StepSummary(st)
       local c = K.MAP_COLOR[st.kind] or K.MAP_COLOR.other
       local grey = isDone or not following -- not tracked: the steps are greyed (not updated)
       r.bar:SetColorTexture(c[1], c[2], c[3], grey and 0.3 or 0.9)
