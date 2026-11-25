@@ -26,10 +26,10 @@ end
 -- Former versions saved most settings for the whole account: each character takes them over once,
 -- at its first use (its own entries of the tables keyed by character move to it, the other values
 -- are copied as its defaults), except the values tied to another character.
-local CHAR_TABLES = { roadbook = true, bind = true, pins = true, mapSaved = true, activeRoadbook = true,
-  custom = true, roadbookMigrated = true }
+local CHAR_TABLES = { roadbook = true, bind = true, pins = true, mapSaved = true, custom = true }
 local NOT_INHERITED = { chars = true, shared = true, passes = true, teleportArrivals = true, goal = true, goalLevel = true, mountSpeed = true, lastTab = true,
-  horizon = true, keep = true, excluded = true, taxi = true, rewardFilter = true, collapsed = true, focus = true }
+  horizon = true, keep = true, excluded = true, taxi = true, rewardFilter = true, collapsed = true, focus = true, activeRoadbook = true,
+  roadbookMigrated = true }
 
 local function DeepCopy(v)
   if type(v) ~= "table" then return v end
@@ -45,7 +45,7 @@ local function MigrateSettings(root, key)
       if type(v) == "table" then
         st[k] = {}
         for sub, val in pairs(v) do
-          if sub == key or sub == key .. "|custom" then
+          if sub == key then
             st[k][sub] = val
             v[sub] = nil
           end
@@ -207,7 +207,7 @@ local QDB = {}
 local State = {} -- mutable state shared by the addon files (window, tabs, Roadbook horizon)
 local K = {} -- tuning constants (avoids the 200 local variables limit)
 -- Transport mode names (internal ids -> displayed text).
-K.MODE_NAME = { vol = L["flight"], zeppelin = L["zeppelin"], bateau = L["boat"], airship = L["airship"] }
+K.MODE_NAME = { flight = L["flight"], zeppelin = L["zeppelin"], boat = L["boat"], airship = L["airship"] }
 K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above (or below) yours (+1 for quests already in the log)
 K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your level
 -- Technical search bound: quests whose required level is up to this many levels above yours are

@@ -11,8 +11,7 @@
 local ADDON_NAME, ns = ...
 local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K
 local L, Plural, RouteText, Settings, UpdateScrollBar, State = ns.L, ns.Plural, ns.RouteText, ns.Settings, ns.UpdateScrollBar, ns.State
-local IsInLog = ns.IsInLog
-local OpenQuestDetails = ns.OpenQuestDetails
+local IsInLog, OpenQuestDetails = ns.IsInLog, ns.OpenQuestDetails
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line

@@ -2,13 +2,12 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local ActivePin, CharKey, ClearPin, Color, Dist, FormatTime = ns.ActivePin, ns.CharKey, ns.ClearPin, ns.Color, ns.Dist, ns.FormatTime
-local Geo, GeoReady, GetObjectives, ICON, IsCompleted, IsInLog = ns.Geo, ns.GeoReady, ns.GetObjectives, ns.ICON, ns.IsCompleted, ns.IsInLog
-local K, L, Nearest, PinPoint, PlayerPos, PointText, Print = ns.K, ns.L, ns.Nearest, ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print
-local QDB, QGet, Refresh, Settings, Snapshot, KnownFlights = ns.QDB, ns.QGet, ns.Refresh, ns.Settings, ns.Snapshot, ns.KnownFlights
-local State, TaxiCount, TravelSpeed, TurnInText, WatchOnly = ns.State, ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly
-local IsWatched, SetWatched, scan, LogEntry, IsQuestComplete = ns.IsWatched, ns.SetWatched, ns.scan, ns.LogEntry, ns.IsQuestComplete
-local WaitScan = ns.WaitScan
+local ActivePin, ClearPin, Color, Dist, FormatTime, Geo = ns.ActivePin, ns.ClearPin, ns.Color, ns.Dist, ns.FormatTime, ns.Geo
+local GeoReady, GetObjectives, ICON, IsCompleted, IsInLog, K = ns.GeoReady, ns.GetObjectives, ns.ICON, ns.IsCompleted, ns.IsInLog, ns.K
+local L, Nearest, PinPoint, PlayerPos, PointText, Print, QDB = ns.L, ns.Nearest, ns.PinPoint, ns.PlayerPos, ns.PointText, ns.Print, ns.QDB
+local QGet, Refresh, Settings, Snapshot, KnownFlights, State = ns.QGet, ns.Refresh, ns.Settings, ns.Snapshot, ns.KnownFlights, ns.State
+local TaxiCount, TravelSpeed, TurnInText, WatchOnly, IsWatched = ns.TaxiCount, ns.TravelSpeed, ns.TurnInText, ns.WatchOnly, ns.IsWatched
+local SetWatched, scan, LogEntry, IsQuestComplete, WaitScan = ns.SetWatched, ns.scan, ns.LogEntry, ns.IsQuestComplete, ns.WaitScan
 
 ---------------------------------------------------------------------------
 -- Roadbook checkpoints: focus on the next step from a floating button
@@ -192,18 +191,12 @@ function Geo.DeserializeStep(rec, tasks)
   return st
 end
 
-function Geo.FrozenStore()
-  local st = Settings()
-  st.roadbook = st.roadbook or {}
-  return st.roadbook
-end
-
 -- One Roadbook per character, with its progress: the fastest route doing every quest of the list
 -- (info.custom). "Adapt" completes or trims the list, the changes of the list adapt it.
 Geo.frozen = nil -- { route, info } (loaded plan)
 
 function Geo.FrozenRec()
-  return Geo.FrozenStore()[CharKey()]
+  return Settings().roadbook
 end
 
 local function SerializeRoute(route)
@@ -224,7 +217,7 @@ function Geo.Freeze(route, info)
   local slim = { count = info.count, xp = info.xp, total = info.total, mobXP = info.mobXP, levels = info.levels,
     speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.taxi,
     custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered }
-  Geo.FrozenStore()[CharKey()] = { saved = date and date("%H:%M") or "",
+  Settings().roadbook = { saved = date and date("%H:%M") or "",
     start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, recall = Geo.RecallState() }
   Geo.frozen = { route = route, info = info }
   Geo.Trace("freeze", string.format("plan saved: %d step(s), %d done%s", #steps,
@@ -253,7 +246,7 @@ end
 function Geo.ClearFrozen()
   if Geo.frozen or Geo.FrozenRec() then Geo.Trace("clear", "plan emptied") end
   Geo.frozen = nil
-  Geo.FrozenStore()[CharKey()] = nil
+  Settings().roadbook = nil
   State.lastPlanError = nil
 end
 
@@ -524,10 +517,6 @@ function CP.RecallCheck()
   local fz, rec = Geo.Frozen(), Geo.FrozenRec()
   if not (fz and rec) or State.computing then return false end
   local now = Geo.RecallState()
-  if not rec.recall then -- Roadbook from a former version: its state starts now
-    rec.recall = now
-    return false
-  end
   local route, first = fz.route, nil
   for i = 2, #route do if not CP.StepDone(route[i]) then first = i break end end
   if not first then return false end
@@ -1006,9 +995,7 @@ StaticPopupDialogs["FQP_SKIP_QUEST"] = {
 function CP.SkipQuest(s)
   local id = s and s.task and s.task.id
   if not id or Geo.ListLocked() then return end
-  if Geo.CustomRemove(id) then return end
-  -- Not in the list (a Roadbook from a former version): the Roadbook is computed again without it.
-  CP.Replan(L["Quest removed: "] .. (s.task.title or tostring(id)) .. ". ")
+  Geo.CustomRemove(id)
 end
 
 function CP.ObjectiveClick(button)
@@ -1075,13 +1062,13 @@ end
 function CP.TransportReached(s, pos)
   local dest = s.kind == "hearth" and s.p or (s.kind == "travel" and s.task.destP)
   local d = pos and dest and Dist(pos, dest)
-  return d ~= nil and d < (s.task.mode == "vol" and K.LANDING_RADIUS or K.ARRIVAL_RADIUS)
+  return d ~= nil and d < (s.task.mode == "flight" and K.LANDING_RADIUS or K.ARRIVAL_RADIUS)
 end
 
 -- Watches the position every 2 s while a zeppelin / boat / hearthstone step has the focus.
 function CP.WatchTransport(s)
   if CP.transportTicker then CP.transportTicker:Cancel() CP.transportTicker = nil end
-  local watched = s.kind == "hearth" or (s.kind == "travel" and s.task.mode ~= "vol")
+  local watched = s.kind == "hearth" or (s.kind == "travel" and s.task.mode ~= "flight")
   if not (watched and C_Timer.NewTicker) then return end
   CP.transportTicker = C_Timer.NewTicker(2, function()
     if not (CP.focused == s and CP.IsStepFocused(s)) then
@@ -1113,7 +1100,7 @@ function CP.TakeOff(s)
   local chosen = CP.taxiChosen
   CP.taxiChosen = nil
   CP.flightStep = s
-  if s.task.mode == "vol" and chosen and s.task.dest and chosen ~= s.task.dest and not CP.NearDest(chosen, s.task.destP) then
+  if s.task.mode == "flight" and chosen and s.task.dest and chosen ~= s.task.dest and not CP.NearDest(chosen, s.task.destP) then
     Print(string.format(L["Wrong destination: %s instead of %s. The route will be computed again on landing."], chosen, s.task.dest))
     return
   end
@@ -1126,7 +1113,7 @@ K.LANDING_RADIUS = 500
 function CP.CheckLanding(st)
   local t = st.task
   local pos = PlayerPos()
-  if not (t and t.mode == "vol" and t.dest and pos) then return end
+  if not (t and t.mode == "flight" and t.dest and pos) then return end
   local node, nd
   for _, n in pairs(KnownFlights()) do
     local d = Dist(n, pos)
@@ -1335,7 +1322,7 @@ function CP.OnGameEvent(event, a1, a2)
   elseif s.kind == "travel" then
     if event == "FQP_TAXI_TAKEOFF" then
       CP.TakeOff(s)
-    elseif s.task.mode ~= "vol" and (event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK") then
+    elseif s.task.mode ~= "flight" and (event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK") then
       CP.CheckArrival(s, L["Arrival of the "] .. (K.MODE_NAME[s.task.mode] or s.task.mode or L["transport"]))
     end
   elseif s.kind == "fm" then
@@ -1413,7 +1400,7 @@ function CP.StepSummary(s)
     local icon, action = Geo.RecallText(s)
     return icon .. " " .. (task.title or "?"), action
   elseif s.kind == "travel" then
-    return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.mode == "vol" and L["Flight"] or K.MODE_NAME[task.mode] or task.mode or L["Transport"]) ..
+    return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.mode == "flight" and L["Flight"] or K.MODE_NAME[task.mode] or task.mode or L["Transport"]) ..
       L[" to "] .. (task.dest or "?"), parts(L["Departure: "] .. (task.from or "?"), place)
   elseif s.kind == "dungeon" then
     local left = 0

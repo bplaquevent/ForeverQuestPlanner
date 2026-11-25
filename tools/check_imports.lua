@@ -1,9 +1,15 @@
 -- Every ns.X imported at the top of a file ("local A, B = ns.A, ns.B") is exported by a file loaded
--- before it: otherwise it is silently nil. Run from the repository root (tools/check.sh).
-local exported, problems = {}, 0
+-- before it: otherwise it is silently nil. A file listed twice in the .toc is reported too (the game
+-- warns and loads it again). Run from the repository root (tools/check.sh).
+local exported, listed, problems = {}, {}, 0
 for line in io.lines("ForeverQuestPlanner.toc") do
   local file = line:gsub("\r", ""):gsub("\\", "/")
   if file:match("%.lua$") and not file:match("^#") then
+    if listed[file:lower()] then
+      print(file .. ": listed twice in the .toc")
+      problems = problems + 1
+    end
+    listed[file:lower()] = true
     local source = {}
     for l in io.lines(file) do source[#source + 1] = l end
     for _, l in ipairs(source) do

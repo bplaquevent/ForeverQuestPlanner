@@ -2,9 +2,9 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, CharKey, Dist, Geo, GetItemInfoCompat, K, L = ns.AreaName, ns.CharKey, ns.Dist, ns.Geo, ns.GetItemInfoCompat, ns.K, ns.L
-local Print, Settings, SharedData, Solver, TaxiCount, WorldPos = ns.Print, ns.Settings, ns.SharedData, ns.Solver, ns.TaxiCount, ns.WorldPos
-local scan, LogQuests, State = ns.scan, ns.LogQuests, ns.State
+local AreaName, Dist, Geo, GetItemInfoCompat, K, L, Print = ns.AreaName, ns.Dist, ns.Geo, ns.GetItemInfoCompat, ns.K, ns.L, ns.Print
+local Settings, SharedData, Solver, TaxiCount, WorldPos, scan = ns.Settings, ns.SharedData, ns.Solver, ns.TaxiCount, ns.WorldPos, ns.scan
+local LogQuests, State = ns.LogQuests, ns.State
 
 ---------------------------------------------------------------------------
 -- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
@@ -57,7 +57,7 @@ function Geo.MapPoint(w)
   return { c = w.c, x = w.x, y = w.y, ui = ui, mx = mx * 100, my = my * 100, zoneName = zoneName }
 end
 
--- Boardings of a route: { hub, mode ("vol", "zeppelin", "bateau", "airship"), dest }.
+-- Boardings of a route: { hub, mode ("flight", "zeppelin", "boat", "airship"), dest }.
 function Geo.Boardings(choice, net)
   local out = {}
   local hubs, cur = net.hubs, choice.i
@@ -67,7 +67,7 @@ function Geo.Boardings(choice, net)
     local mode = net.via[cur][nx]
     if mode == "flight" then
       if not run then
-        run = { hub = hubs[cur], mode = "vol" }
+        run = { hub = hubs[cur], mode = "flight" }
         out[#out + 1] = run
       end
       run.dest = hubs[nx]
@@ -84,7 +84,7 @@ end
 
 -- "Take the flight / zeppelin / boat" step of a boarding (Geo.Boardings), planned at time `at`.
 function Geo.TravelStep(b, at)
-  local what = (b.mode == "vol" and L["Take the flight"]) or (L["Take the "] .. (K.MODE_NAME[b.mode] or b.mode))
+  local what = (b.mode == "flight" and L["Take the flight"]) or (L["Take the "] .. (K.MODE_NAME[b.mode] or b.mode))
   return { kind = "travel", p = Geo.MapPoint(b.hub.p), work = 0, at = at,
     task = { title = what .. L[": "] .. (b.hub.name or "?") .. " -> " .. (b.dest and b.dest.name or "?"),
       mode = b.mode, from = b.hub.name, dest = b.dest and b.dest.name, destP = b.dest and b.dest.p,
@@ -149,12 +149,6 @@ K.TELEPORT_MAX_GAP = 1500 -- a place farther than this (m) from the default arri
 K.RECALL_BY_SPELL = {}
 for _, e in ipairs(ns.RECALL_SPELLS) do K.RECALL_BY_SPELL[e.spell] = e end
 
-function Geo.BindStore()
-  local st = Settings()
-  st.bind = st.bind or {}
-  return st.bind
-end
-
 -- Remembers the bind location (inn position) for this character.
 -- A place reached (bind point, teleport arrival), as saved: with its map position.
 local function StoredPoint(p)
@@ -167,7 +161,7 @@ function Geo.RecordBind(p)
   if not p then return end
   local stored = StoredPoint(p)
   stored.name = GetBindLocation and GetBindLocation() or nil
-  Geo.BindStore()[CharKey()] = stored
+  Settings().bind = stored
 end
 
 -- Zones (zone ids) with this name (value true), or containing the subzone with this name (value "sub").
@@ -241,7 +235,7 @@ end
 -- Current bind location: remembered position, otherwise estimated from the location name.
 function Geo.CurrentBind()
   local name = GetBindLocation and GetBindLocation() or nil
-  local st = Geo.BindStore()[CharKey()]
+  local st = Settings().bind
   if st and (not name or st.name == name) then return st, name end
   if name then return Geo.GuessBind(name), name end
   return nil, name

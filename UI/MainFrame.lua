@@ -348,7 +348,6 @@ local function CreateMainFrame()
     -- Same sound as opening the game's quest log.
     if PlaySound then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_QUEST_LOG_OPEN) or 844) end
     for k in pairs(expandedCategories) do expandedCategories[k] = nil end
-    Settings().expanded = nil
     SelectTab(State.currentTab)
   end)
   f:SetScript("OnHide", function()

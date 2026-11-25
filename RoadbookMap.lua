@@ -12,8 +12,7 @@
 -- places frames on the game's map canvas, which OpenMap makes see-through in a fight.
 
 local ADDON_NAME, ns = ...
-local CP, CharKey, ClearPin, Geo, K, L, OM, IsInLog = ns.CP, ns.CharKey, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM, ns.IsInLog
-local OpenQuestDetails, Print, Settings = ns.OpenQuestDetails, ns.Print, ns.Settings
+local CP, ClearPin, Geo, K, L, OM, IsInLog, Print, Settings = ns.CP, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM, ns.IsInLog, ns.Print, ns.Settings
 
 K.MAP_SET = "fqp_roadbook"             -- OpenMap pin set of the steps
 K.MAP_ROUTE_SET = "fqp_roadbook_route" -- and of the route (under the pins)
@@ -23,7 +22,7 @@ K.MAP_PLAYER_SET = "fqp_roadbook_player" -- OpenMap pin set of the line from the
 -- Route colour by kind of move (r, g, b, a): the Roadbook's own colours.
 K.MAP_MOVE = {
   walk = { 1, 0.82, 0.2, 0.85 },       -- on foot
-  vol = { 0.4, 0.72, 1, 0.85 },        -- flight
+  flight = { 0.4, 0.72, 1, 0.85 },     -- flight
   ship = { 0.3, 0.9, 0.85, 0.85 },     -- boat, zeppelin, airship
   hearth = { 0.78, 0.56, 1, 0.8 },     -- hearthstone
   teleport = { 1, 0.5, 0.85, 0.8 },    -- teleport spells
@@ -38,40 +37,32 @@ K.MAP_COLOR = {
 -- Who holds the map: { mode = "track" | "preview", hidden, wp, tookWp }, saved per character
 -- (a /reload in the middle gives the map back at login). hidden / wp: the map's state before.
 ---------------------------------------------------------------------------
-local function OwnerStore()
-  local st = Settings()
-  st.mapSaved = st.mapSaved or {}
-  return st.mapSaved
-end
-
 function Geo.MapOwner()
-  return OwnerStore()[CharKey()]
+  return Settings().mapSaved
 end
 
 -- The Roadbook takes the map. The map's state is saved only the first time: a preview that
 -- becomes the tracking keeps the state from before the preview.
 function Geo.MapClaim(mode)
-  local store, ck = OwnerStore(), CharKey()
-  local saved = store[ck]
+  local saved = Geo.MapOwner()
   if not saved then
     local wm = OM.worldmap
     local m, x, y = wm.WaypointPoint()
     saved = { hidden = wm.PinsHidden() and true or false, wp = (m and x) and { m, x, y } or nil }
-    store[ck] = saved
+    Settings().mapSaved = saved
     pcall(wm.SetPinsHidden, true)
   end
   if mode == "track" then saved.tookWp = true end -- the tracking moves the waypoint
-  saved.mode, saved.kind = mode, nil -- (kind: versions with two Roadbooks)
+  saved.mode = mode
   Geo.MapSync()
 end
 
 -- The Roadbook lets the map go: its pins and route cleared, the player's pins shown or hidden as
 -- before, and the waypoint followed before the tracking put back.
 function Geo.MapRelease()
-  local store, ck = OwnerStore(), CharKey()
-  local saved = store[ck]
+  local saved = Geo.MapOwner()
   if not saved then return end
-  store[ck] = nil
+  Settings().mapSaved = nil
   local wm = OM.worldmap
   Geo.MapClear()
   pcall(wm.SetPinsHidden, saved.hidden)
@@ -274,7 +265,7 @@ end
 function Geo.MapMoveColor(st)
   local task = st and st.task
   if st and st.kind == "hearth" then return task and task.spell and K.MAP_MOVE.teleport or K.MAP_MOVE.hearth end
-  if st and st.kind == "travel" and task then return task.mode == "vol" and K.MAP_MOVE.vol or K.MAP_MOVE.ship end
+  if st and st.kind == "travel" and task then return task.mode == "flight" and K.MAP_MOVE.flight or K.MAP_MOVE.ship end
   return K.MAP_MOVE.walk
 end
 

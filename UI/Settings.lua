@@ -25,11 +25,6 @@ end
 -- Applies the saved values (or the defaults).
 function Geo.ApplyParams()
   local st = Settings()
-  st.paramsScale = nil -- former priority scale
-  if st.params then -- former priority settings (the Roadbook now only optimizes XP)
-    for _, k in ipairs({ "PRIO_CLASS", "PRIO_UNLOCK_CLASS", "PRIO_ITEM_SPEC", "PRIO_ITEM_BLUE", "PRIO_UPGRADE_SPEC",
-      "PRIO_UPGRADE", "PRIO_SPELL", "PRIO_BAG", "READY_BONUS", "LOOKAHEAD_WEIGHT" }) do st.params[k] = nil end
-  end
   local saved = st.params or {}
   for _, d in ipairs(K.PARAMS) do
     if d.key then

@@ -11,7 +11,8 @@ for f in $(grep -v '^#' ForeverQuestPlanner.toc | grep '\.lua' | tr '\\' '/' | t
   echo "$out" | grep -oE '[GS]ETGLOBAL.*; [A-Za-z_0-9]+' | awk '{print $NF}' | sort -u |
     grep -vxF -f tools/globals.txt -e GetLocale | sed "s|^|$f: unknown global |" | grep . && status=1
 done
-# - every ns.X imported at the top of a file is exported by a file loaded before it.
+# - every ns.X imported at the top of a file is exported by a file loaded before it,
+#   and no file is listed twice in the .toc.
 lua5.1 tools/check_imports.lua || status=1
 [ $status = 0 ] && echo "OK"
 exit $status
