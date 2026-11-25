@@ -50,7 +50,7 @@ function Geo.DungeonMemberLines(task)
     elseif m.kind == "turnin" then what = L["turn in"]
     else what = ((m.r and m.r.tg.name) or L["objective"]) .. L[" x"] .. ((m.r and m.r.count) or "?") end
     local line = "- " .. ((m.task and m.task.title) or "?") .. L[": "] .. what
-    lines[#lines + 1] = CP.StepDone(m) and Color("40ff40", line .. L[" (done)"]) or Color(K.DESC.action, line)
+    lines[#lines + 1] = CP.StepDone(m) and Color(K.DESC.good, line .. L[" (done)"]) or Color(K.DESC.action, line)
   end
   return lines
 end
@@ -77,9 +77,9 @@ end
 function Geo.StepDetailLines(st)
   local D = K.DESC
   local lines = {}
-  local ok, _, parts = pcall(CP.StepSummary, st)
+  local _, parts = CP.StepSummary(st)
   local xp = Geo.StepXP(st)
-  for _, piece in ipairs(ok and parts or {}) do
+  for _, piece in ipairs(parts or {}) do
     if piece ~= xp then lines[#lines + 1] = Color(D.action, CP.Capitalize(piece)) end -- the XP: its own line
   end
   local dur = Geo.StepDuration(st)
@@ -179,7 +179,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   -- To watch: one line each.
   local unplanned = #(info.unplanned or {})
   if unplanned > 0 then
-    lines[#lines + 1] = Color("ff6060", Plural(unplanned, L["quest"]) .. L[" cannot be planned"])
+    lines[#lines + 1] = Color(K.DESC.bad, Plural(unplanned, L["quest"]) .. L[" cannot be planned"])
   end
   if info.taxi == 0 then
     lines[#lines + 1] = Color("ff8040", CP.Capitalize(L["no flight master recorded (open a flight map)"]))
@@ -581,8 +581,7 @@ function Geo.MapPanelSync()
       r:SetPoint("TOPLEFT", 0, -(total - 1) * K.MAP_PANEL_ROW)
       r:SetWidth(width)
       local isDone = CP.StepDone(st)
-      local ok, title = pcall(CP.StepSummary, st)
-      if not (ok and title) then title = CP.StepText(st) end
+      local title = CP.StepSummary(st)
       local c = K.MAP_COLOR[st.kind] or K.MAP_COLOR.other
       local grey = isDone or not following -- not tracked: the steps are greyed (not updated)
       r.bar:SetColorTexture(c[1], c[2], c[3], grey and 0.3 or 0.9)

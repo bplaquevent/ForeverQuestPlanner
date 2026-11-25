@@ -290,6 +290,13 @@ function Geo.TeleportStore()
   return LearnedData().teleportArrivals
 end
 
+local teleportDests = {} -- spell -> arrival point, read once (Geo.TeleportDest)
+
+-- Forgets them: an arrival was learned, or the spells changed.
+function Geo.ForgetTeleportDests()
+  teleportDests = {}
+end
+
 function Geo.RecordTeleport(spell, p)
   local e = K.RECALL_BY_SPELL[spell]
   if not (p and e and e.area) then return end
@@ -297,19 +304,18 @@ function Geo.RecordTeleport(spell, p)
   local d = Dist(p, WorldPos(e.area, e.x, e.y) or {})
   if not d or d > K.TELEPORT_MAX_GAP then return end
   Geo.TeleportStore()[spell] = StoredPoint(p)
-  Geo.recallDest = nil
+  Geo.ForgetTeleportDests()
 end
 
 function Geo.TeleportDest(e)
-  Geo.recallDest = Geo.recallDest or {}
-  local p = Geo.recallDest[e.spell]
+  local p = teleportDests[e.spell]
   if p then return p end
   p = Geo.TeleportStore()[e.spell]
   if not p then
     p = WorldPos(e.area, e.x, e.y)
     if p then p.approx = true end
   end
-  Geo.recallDest[e.spell] = p
+  teleportDests[e.spell] = p
   return p
 end
 

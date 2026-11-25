@@ -137,7 +137,7 @@ end
 ---------------------------------------------------------------------------
 -- "Possible rewards: [Item] · [Item] · Reputation: Orgrimmar +250"
 function Geo.RewardLine(id)
-  if not Geo.rewards then -- index still being built in the background: the list is refreshed when ready
+  if not Geo.RewardsReady() then -- index still being built in the background: the list is refreshed when ready
     Geo.BuildRewardIndexAsync()
     return nil
   end
@@ -157,7 +157,7 @@ end
 local function RenderAvailable()
   local panel = panels.avail
   if scan.error then
-    ShowMessage(panel, "avail", Color("ff6060", scan.error))
+    ShowMessage(panel, "avail", Color(K.DESC.bad, scan.error))
     return
   end
   if scan.dirty or not scan.entries then
@@ -218,7 +218,7 @@ local function RenderNear()
 
   local found, err = NearItems(State.nearRadius)
   if not found then
-    ShowMessage(panel, "near", Color("ff6060", err))
+    ShowMessage(panel, "near", Color(K.DESC.bad, err))
     return
   end
   local where

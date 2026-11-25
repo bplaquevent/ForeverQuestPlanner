@@ -32,26 +32,33 @@ function Geo.IndexItemRewards(idx, id)
   end
 end
 
+local rewardIndex, rewardIndexBuilding -- items rewarding each quest, built once per session
+
+-- Whether the reward index is ready (otherwise Geo.BuildRewardIndexAsync builds it).
+function Geo.RewardsReady()
+  return rewardIndex ~= nil
+end
+
 -- Built in one go (spread over frames inside the Roadbook computation).
 function Geo.RewardIndex()
-  if Geo.rewards then return Geo.rewards end
+  if rewardIndex then return rewardIndex end
   local idx = {}
   for n, id in ipairs(AllIds(QDB.Item) or {}) do
     Geo.IndexItemRewards(idx, id)
     if n % 500 == 0 then Geo.Yield() end
   end
-  Geo.rewards = idx
+  rewardIndex = idx
   return idx
 end
 
 -- Built in the background (500 items per frame) for the "Available" tab, then the list is refreshed.
 function Geo.BuildRewardIndexAsync()
-  if Geo.rewards or Geo.rewardsBuilding then return end
+  if rewardIndex or rewardIndexBuilding then return end
   local ids, idx, i = AllIds(QDB.Item) or {}, {}, 1
-  Geo.rewardsBuilding = true
+  rewardIndexBuilding = true
   local function step()
-    if Geo.rewards then -- built meanwhile by the Roadbook computation
-      Geo.rewardsBuilding = nil
+    if rewardIndex then -- built meanwhile by the Roadbook computation
+      rewardIndexBuilding = nil
       return
     end
     local stop = math.min(i + 499, #ids)
@@ -60,7 +67,7 @@ function Geo.BuildRewardIndexAsync()
     if i <= #ids then
       C_Timer.After(0, step)
     else
-      Geo.rewards, Geo.rewardsBuilding = idx, nil
+      rewardIndex, rewardIndexBuilding = idx, nil
       if Refresh then Refresh() end
     end
   end
@@ -192,10 +199,16 @@ function Geo.LaterItem(itemId, plevel)
   return nil
 end
 
+local laterReasons = {} -- quest id -> reason (false: none)
+
+-- Forgets the reasons found: they depend on the character as it is (level, quests done).
+function Geo.ForgetLaterReasons()
+  laterReasons = {}
+end
+
 -- Reason to keep a quest (and its chain) for max level, or nil.
 function Geo.LaterReason(id, plevel)
-  Geo.laterCache = Geo.laterCache or {}
-  local c = Geo.laterCache[id]
+  local c = laterReasons[id]
   if c ~= nil then return c or nil end
   local maxL = Geo.MaxLevel()
   local root = QuestMeta(id)
@@ -228,6 +241,6 @@ function Geo.LaterReason(id, plevel)
       end
     end
   end
-  Geo.laterCache[id] = reason or false
+  laterReasons[id] = reason or false
   return reason
 end

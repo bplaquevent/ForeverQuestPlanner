@@ -2,6 +2,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
+local CoinText = ns.CoinText
 local ChainInfo, ChainText, L, LogRecord, Snapshot = ns.ChainInfo, ns.ChainText, ns.L, ns.LogRecord, ns.Snapshot
 local TrivialRange, TurnInText, UpdateScrollBar, panels = ns.TrivialRange, ns.TurnInText, ns.UpdateScrollBar, ns.panels
 
@@ -32,10 +33,7 @@ local function BuildText()
     local tags = {}
     if q.level then tags[#tags + 1] = L["level "] .. q.level end
     if q.xp and q.xp > 0 then tags[#tags + 1] = q.xp .. " XP" end
-    if q.money and q.money > 0 then
-      local g, sv, c = math.floor(q.money / 10000), math.floor(q.money / 100) % 100, q.money % 100
-      tags[#tags + 1] = (g > 0 and (g .. L["g "]) or "") .. (sv > 0 and (sv .. L["s "]) or "") .. (c > 0 and (c .. L["c"]) or "")
-    end
+    if q.money and q.money > 0 then tags[#tags + 1] = CoinText(q.money) end
     if q.instanceName then tags[#tags + 1] = L["dungeon: "] .. q.instanceName
     elseif q.mapZone and q.mapZone ~= q.zone then tags[#tags + 1] = L["location: "] .. q.mapZone end
     if q.tag then tags[#tags + 1] = q.tag end

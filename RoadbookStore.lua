@@ -81,7 +81,7 @@ end
 
 -- One Roadbook per character, with its progress: the fastest route doing every quest of the list
 -- (info.custom). "Adapt" completes or trims the list, the changes of the list adapt it.
-Geo.frozen = nil -- { route, info } (loaded plan)
+local frozen -- { route, info } (loaded plan), read through Geo.Frozen()
 
 function Geo.FrozenRec()
   return Settings().roadbook
@@ -95,11 +95,11 @@ end
 
 -- Saves the steps of the loaded plan again, after they changed (marked, removed, added).
 function Geo.SaveRoute()
-  local fz, rec = Geo.frozen, Geo.FrozenRec()
+  local fz, rec = frozen, Geo.FrozenRec()
   if fz and rec then rec.steps = SerializeRoute(fz.route) end
 end
 
--- A new or adapted plan: saved, and redrawn on the map if it is there.
+-- A new or adapted plan, saved (Geo.AdoptPlan, Roadbook.lua: saved, then redrawn).
 function Geo.Freeze(route, info)
   local steps = SerializeRoute(route)
   local slim = { count = info.count, xp = info.xp, total = info.total, mobXP = info.mobXP, levels = info.levels,
@@ -107,16 +107,15 @@ function Geo.Freeze(route, info)
     custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered }
   Settings().roadbook = { saved = date and date("%H:%M") or "",
     start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, recall = Geo.RecallState() }
-  Geo.frozen = { route = route, info = info }
+  frozen = { route = route, info = info }
   Geo.Trace("freeze", string.format("plan saved: %d step(s), %d done%s", #steps,
     (function() local n = 0 for _, s in ipairs(steps) do if s.done then n = n + 1 end end return n end)(),
     info.custom and ", custom list" or ""))
-  Geo.MapSync()
 end
 
 -- Saved plan (reloaded after a /reload), or nil.
 function Geo.Frozen()
-  if Geo.frozen then return Geo.frozen end
+  if frozen then return frozen end
   local rec = Geo.FrozenRec()
   if not (rec and rec.steps and #rec.steps > 0) then return nil end
   -- After a /reload, the QuestieDB map mappings are not loaded yet.
@@ -126,31 +125,16 @@ function Geo.Frozen()
   local info = {}
   for k, v in pairs(rec.info or {}) do info[k] = v end
   info.taxi = TaxiCount()
-  Geo.frozen = { route = route, info = info }
-  return Geo.frozen
+  frozen = { route = route, info = info }
+  return frozen
 end
 
 -- Empties the Roadbook (its steps and its progress).
 function Geo.ClearFrozen()
-  if Geo.frozen or Geo.FrozenRec() then Geo.Trace("clear", "plan emptied") end
-  Geo.frozen = nil
+  if frozen or Geo.FrozenRec() then Geo.Trace("clear", "plan emptied") end
+  frozen = nil
   Settings().roadbook = nil
   State.lastPlanError = nil
-end
-
--- Steps to come removed, the steps done kept (history): the custom Roadbook whose list was emptied.
--- Returns false when no step is done (nothing to keep).
-function Geo.KeepOnlyDone()
-  local fz = Geo.Frozen()
-  if not fz then return false end
-  local start = { { kind = "start", p = fz.route[1].p, work = 0 } }
-  local info = {}
-  for k, v in pairs(fz.info) do info[k] = v end
-  local route = Geo.KeepDone(fz, CP.StepDone, start, { total = 0, levels = { UnitLevel("player") } }, info)
-  if #route < 2 then return false end
-  info.dungeons, info.discovered, info.skipped, info.unplanned = nil, nil, nil, nil
-  Geo.Freeze(route, info)
-  return true
 end
 
 -- The Roadbook is tracked (a step is focused); not tracked otherwise.

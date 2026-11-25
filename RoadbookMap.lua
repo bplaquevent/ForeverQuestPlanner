@@ -131,8 +131,7 @@ end
 function Geo.StepTooltip(owner, st, n, hint, anchor)
   GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
   GameTooltip:AddLine(n and string.format(L["Roadbook step %d"], n) or L["Roadbook step done"], 0.6, 0.8, 1)
-  local ok, title = pcall(CP.StepSummary, st)
-  GameTooltip:AddLine(ok and title or CP.StepText(st), 1, 1, 1)
+  GameTooltip:AddLine((CP.StepSummary(st)), 1, 1, 1)
   local okD, lines = pcall(Geo.StepDetailLines, st)
   for _, line in ipairs(okD and lines or {}) do GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true) end
   for line in (hint .. "\n"):gmatch("(.-)\n") do GameTooltip:AddLine(line, 0.6, 0.6, 0.6) end

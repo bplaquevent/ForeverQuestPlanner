@@ -77,7 +77,7 @@ end
 -- follow-up they unlock (dep = number of the quest it follows).
 function Pb.Tasks(P, pos, plevel, live)
   local t0 = debugprofilestop()
-  Geo.laterCache = {}
+  Geo.ForgetLaterReasons()
   local later = {} -- quests kept for max level
   local tasks, skipped = BuildTasks(pos, plevel, later)
   local ctx = BuildScanContext()
