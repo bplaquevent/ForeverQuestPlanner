@@ -910,18 +910,23 @@ local function MoneyThreshold(plevel)
   return (plevel or 1) * (plevel or 1) * 2
 end
 
-local function MoneyText(copper)
-  if not copper or copper <= 0 then return nil end
-  if GetCoinTextureString then
-    local ok, txt = pcall(GetCoinTextureString, copper)
-    if ok and txt then return txt end
-  end
+-- An amount in coins, as plain text ("1g 2s 3c"): the coins that are not zero.
+local function CoinText(copper)
   local g, sv, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
   local parts = {}
   if g > 0 then parts[#parts + 1] = g .. L["g"] end
   if sv > 0 then parts[#parts + 1] = sv .. L["s"] end
   if c > 0 then parts[#parts + 1] = c .. L["c"] end
   return table.concat(parts, " ")
+end
+
+local function MoneyText(copper)
+  if not copper or copper <= 0 then return nil end
+  if GetCoinTextureString then
+    local ok, txt = pcall(GetCoinTextureString, copper)
+    if ok and txt then return txt end
+  end
+  return CoinText(copper)
 end
 
 K.LATER_GAP = 3 -- a quest more than this many levels above yours is for later (professions apart)
@@ -1039,6 +1044,7 @@ ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = Sched
 ns.OM, ns.LearnedData, ns.TurnInText = OM, LearnedData, TurnInText
 ns.LearnedChar = LearnedChar
 ns.CheckDataVersion, ns.EraseData = CheckDataVersion, EraseData
+ns.CoinText = CoinText
 ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
 ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQuests, LogRecord
 ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.QuestAllowed = AllIds, NpcFriendly, PlayerFaction, QuestAllowed
