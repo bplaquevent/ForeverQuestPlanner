@@ -67,8 +67,12 @@ On({ "PLAYER_LOGIN" }, function()
     Print(Color("ff4040", f.disabled))
     return
   end
-  if CheckDataVersion() then
-    Print(Color("ff8000", L["This version cannot use the saved data: it has been erased, for every character."]))
+  local lostCharacters, lostLearned = CheckDataVersion()
+  if lostCharacters then
+    Print(Color("ff8000", L["This version cannot use the characters' saved data (settings, quest lists, Roadbooks): it has been erased, for every character."]))
+  end
+  if lostLearned then
+    Print(Color("ff8000", L["This version cannot use what the addon learned in game (zone passes, teleport arrivals, class trainers): it has been erased."]))
   end
   -- Options saved from the settings window or the tabs.
   local st = Settings()
@@ -209,20 +213,25 @@ end)
 ---------------------------------------------------------------------------
 -- Commands
 ---------------------------------------------------------------------------
-StaticPopupDialogs["FQP_RESET"] = {
-  text = L["Erase all the data saved by Forever Quest Planner?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, hearthstone places recorded, and what the addon learned in game (zone passes, class trainers). This cannot be undone. The interface is then reloaded."],
-  button1 = L["Erase"],
-  button2 = CANCEL or L["Cancel"],
-  OnAccept = function()
-    if CP.RefuseWhileComputing() then return end
-    EraseData()
-    ReloadUI()
-  end,
-  timeout = 0,
-  whileDead = true,
-  hideOnEscape = true,
-  preferredIndex = 3,
-}
+-- Confirmation of /fqp reset (the characters' data) and /fqp reset all (what was learned too).
+local function ResetPopup(text, learned)
+  return {
+    text = text,
+    button1 = L["Erase"],
+    button2 = CANCEL or L["Cancel"],
+    OnAccept = function()
+      if CP.RefuseWhileComputing() then return end
+      EraseData(true, learned)
+      ReloadUI()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+  }
+end
+StaticPopupDialogs["FQP_RESET"] = ResetPopup(L["Erase the characters' saved data?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, hearthstone places recorded, mount speeds, and the captures. What the addon learned in game (zone passes, teleport arrivals, class trainers) is kept. This cannot be undone. The interface is then reloaded."], false)
+StaticPopupDialogs["FQP_RESET_ALL"] = ResetPopup(L["Erase ALL the data saved by Forever Quest Planner?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, hearthstone places recorded, mount speeds, and the captures. What the addon learned in game (zone passes, teleport arrivals, class trainers) is erased TOO. This cannot be undone. The interface is then reloaded."], true)
 
 SLASH_FOREVERQUESTPLANNER1 = "/fqp"
 SlashCmdList.FOREVERQUESTPLANNER = function(msg)
@@ -290,8 +299,8 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     for _, line in ipairs(Geo.NpcInfo()) do Print(line) end
   elseif msg:sub(1, 6) == "quest " then
     ns.QuestDiag(msg:sub(7))
-  elseif msg == "reset" then
-    if not CP.RefuseWhileComputing() then StaticPopup_Show("FQP_RESET") end
+  elseif msg == "reset" or msg == "reset all" then
+    if not CP.RefuseWhileComputing() then StaticPopup_Show(msg == "reset" and "FQP_RESET" or "FQP_RESET_ALL") end
   elseif msg == "dump" then
     Geo.BenchDump()
   else

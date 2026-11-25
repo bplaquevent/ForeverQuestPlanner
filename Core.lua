@@ -15,9 +15,12 @@ local function Print(msg)
   DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg))
 end
 
--- Format of the data the addon saves. Raised by every change that makes saved data unusable: a field
--- renamed, moved, or of another type or meaning (not a new field that may be absent).
+-- Formats of the data the addon saves, apart: a number is raised by every change that makes the data
+-- it covers unusable (a field renamed, moved, or of another type or meaning; not a new field that may
+-- be absent). DATA_VERSION: the characters' data (Settings()) and the captures (quest logs, test
+-- bench). SHARED_VERSION: what the addon learned about the world (SharedData()).
 local DATA_VERSION = 1
+local SHARED_VERSION = 1
 
 local function CharKey()
   local name, realm = UnitFullName("player")
@@ -80,20 +83,29 @@ local function Settings()
   return st
 end
 
--- Everything the addon saves, for every character, back to a first installation.
-local function EraseData()
-  ForeverQuestPlannerSettings = { dataVersion = DATA_VERSION }
-  ForeverQuestPlannerDB, ForeverQuestPlannerBench = nil, nil
+-- Erases, for every character, their data and the captures (characters), what the addon learned
+-- about the world (learned), or both; what is not erased is kept as it is.
+local function EraseData(characters, learned)
+  local old = SettingsRoot()
+  local root = { dataVersion = DATA_VERSION, sharedVersion = SHARED_VERSION }
+  if not characters then root.chars = old.chars end
+  if not learned then root.shared = old.shared end
+  ForeverQuestPlannerSettings = root -- a new table: what was cached from the former one is read again
+  if characters then ForeverQuestPlannerDB, ForeverQuestPlannerBench = nil, nil end
 end
 
 -- At login, before anything reads the saved data: data saved in another format is erased (the code
--- only knows the current one). True when there was data to erase.
+-- only knows the current one). Returns whether characters' data and whether learned data was erased
+-- (false when there was none to lose).
 local function CheckDataVersion()
-  local root = ForeverQuestPlannerSettings
-  if type(root) == "table" and root.dataVersion == DATA_VERSION then return false end
-  local saved = root ~= nil or ForeverQuestPlannerDB ~= nil or ForeverQuestPlannerBench ~= nil
-  EraseData()
-  return saved
+  local root = SettingsRoot()
+  local oldCharacters, oldLearned = root.dataVersion ~= DATA_VERSION, root.sharedVersion ~= SHARED_VERSION
+  if not (oldCharacters or oldLearned) then return false, false end
+  local lostCharacters = oldCharacters
+    and (root.chars ~= nil or ForeverQuestPlannerDB ~= nil or ForeverQuestPlannerBench ~= nil)
+  local lostLearned = oldLearned and root.shared ~= nil
+  EraseData(oldCharacters, oldLearned)
+  return lostCharacters, lostLearned
 end
 
 local function Color(hex, s) return "|cff" .. hex .. tostring(s) .. "|r" end

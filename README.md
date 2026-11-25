@@ -114,7 +114,8 @@ walked, places reached by the teleport spells) is shared by all your characters.
 | `/fqp passes` | Number of zone passes known (learned on foot, in all) |
 | `/fqp passes reset` | Forget the zone passes learned on foot |
 | `/fqp npc` | Diagnose the targeted NPC for the service shortcuts (class trainer data) |
-| `/fqp reset` | Erase everything the addon saved, for **every character** (after confirmation), and reload the interface: settings, quest lists, Roadbooks, hearthstone places and what was learned in game |
+| `/fqp reset` | Erase the saved data of **every character** (after confirmation) and reload the interface: settings, quest lists, Roadbooks, hearthstone places, mount speeds and captures. What was learned in game is kept |
+| `/fqp reset all` | The same, and erase what the addon learned in game too (zone passes, teleport arrivals, class trainers) |
 | `/fqp dump` | Capture the Roadbook problem for the test bench (then `/reload`) |
 | `/fqp quest <id or name>` | What QuestieDB says about the matching quests (races, classes, prerequisites, exclusive quests, completed, quest givers: NPCs, objects, items) |
 
@@ -122,7 +123,12 @@ The French command names (`journal`, `dispo`, `autour`, `reglages`, `foyer`) sti
 
 ## Saved data
 
-Addon updates do not convert saved data. When a version cannot use what the former one saved, it **erases everything** at login, for **every character**, and says so in the chat: settings and window positions, quest lists, Roadbooks, hearthstone places recorded, and what was learned in game (zone passes, class trainers). Going back to a former version does the same. `/fqp reset` erases it on demand.
+Addon updates do not convert saved data. It is saved in two sets, each erased at login **only when a version cannot use it** (going back to a former version does the same), which the chat then says:
+
+- the **characters' data**, for **every character**: settings and window positions, quest lists, Roadbooks, hearthstone places recorded, mount speeds, and the captures (quest logs, test bench);
+- what the addon **learned in game**, common to every character: zone passes walked, teleport arrivals, class trainers.
+
+`/fqp reset` erases the first set on demand, `/fqp reset all` both.
 
 ## Test bench
 
