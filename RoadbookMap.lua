@@ -168,26 +168,34 @@ end
 -- view (about 1 s: its glide, then its wait), and that change would close the details.
 K.QUEST_SHOW_DELAY = 1.5
 
--- The world map centered on the step, opened if needed, then the quest log on its quest. A later
--- click, or the map closed, drops the quest still waited for (Geo.mapClick).
-local function CenterOn(st)
+-- The world map centered on a point, opened if needed; centered(click) is then called. A later
+-- centering, or the map closed, changes Geo.mapClick: what waited for this one is dropped.
+function Geo.CenterMap(p, centered)
   Geo.mapClick = (Geo.mapClick or 0) + 1
   local click = Geo.mapClick
   local zoom = StepZoom()
-  if not (WorldMapFrame and WorldMapFrame:IsShown()) then Geo.OpenWorldMap(nil, true) end
+  if not (WorldMapFrame and WorldMapFrame:IsShown()) then Geo.OpenWorldMap() end
   C_Timer.After(0.05, function() -- once the map is up and laid out
     if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
       local o = Geo.MapOwner()
       if o and o.mode == "preview" then Geo.MapRelease() end
+      Geo.CombatNotice()
       return
     end
     Geo.MapSync()
-    local u, v = Geo.MapUV(st.p)
+    local u, v = Geo.MapUV(p)
     if u and OM.api.IsStitched() then
       pcall(OM.api.ShowWorld, u, v, zoom)
-    else -- OpenMap's map off: the game's, on the step's zone
-      Geo.OpenWorldMap(Geo.PointUi(st.p), true)
+    else -- OpenMap's map off: the game's, on the point's zone
+      Geo.OpenWorldMap(Geo.PointUi(p))
     end
+    if centered then centered(click) end
+  end)
+end
+
+-- The map centered on the step, then the quest log on its quest.
+local function CenterOn(st)
+  Geo.CenterMap(st.p, function(click)
     local qid = st.task and st.task.id
     if qid and IsInLog(qid) then
       C_Timer.After(K.QUEST_SHOW_DELAY, function()
@@ -372,14 +380,6 @@ function Geo.MapSync()
   if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
   local ok, err = pcall(Geo.MapDraw)
   if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
-end
-
--- Glides OpenMap's view to a point (the map opens first: next frame).
-function Geo.MapGlide(p)
-  C_Timer.After(0.05, function()
-    local u, v = Geo.MapUV(p)
-    if u then pcall(OM.api.ShowWorld, u, v, StepZoom()) end
-  end)
 end
 
 ---------------------------------------------------------------------------

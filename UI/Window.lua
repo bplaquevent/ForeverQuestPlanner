@@ -2,6 +2,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
+local PlayerPos = ns.PlayerPos
 local Analyze, CP, Color, CreateScrollPanel, CreateSearchBox = ns.Analyze, ns.CP, ns.Color, ns.CreateScrollPanel, ns.CreateSearchBox
 local Geo, GeoReady, ICON, K, L, MatchWords, Normalize = ns.Geo, ns.GeoReady, ns.ICON, ns.K, ns.L, ns.MatchWords, ns.Normalize
 local PinIcon, Plural, Print, RemainingObjectives = ns.PinIcon, ns.Plural, ns.Print, ns.RemainingObjectives
@@ -57,6 +58,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
       local id, title = it.id, it.title
       shown[#shown + 1] = it
       lines[it] = { text = text, questID = it.log and id or nil, linkQuest = id,
+        place = not (it.log or it.done) and function() return Geo.GiverPoint(id, PlayerPos()) end or nil, placeTitle = title,
         b3 = not it.done and { text = L["Remove"], fn = function() CP.ConfirmSkipQuest({ task = { id = id, title = title } }) end,
           tip = { L["Remove"], L["Removes the quest from the list (with the prerequisites added only for it); the steps to come of the Roadbook are computed again."] } } or nil }
     end

@@ -67,22 +67,8 @@ end
 -- Opens the game's quest log on a quest's details (depending on the client's UI).
 OpenQuestDetails = function(questID)
   if not (questID and IsInLog(questID)) then return end
-  if QuestMapFrame_OpenToQuestDetails then
-    if pcall(QuestMapFrame_OpenToQuestDetails, questID) then return end
-  end
-  if C_QuestLog.SetSelectedQuest then pcall(C_QuestLog.SetSelectedQuest, questID) end
-  local logFrame = rawget(_G, "QuestLogFrame")
-  if logFrame then
-    if InCombatLockdown() then return end -- opening a game panel from an addon is refused in combat
-    if not logFrame:IsShown() then
-      if ShowUIPanel then pcall(ShowUIPanel, logFrame) else logFrame:Show() end
-    end
-    local idx = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
-    if idx and QuestLog_SetSelection then pcall(QuestLog_SetSelection, idx) end
-    if QuestLog_Update then pcall(QuestLog_Update) end
-    return
-  end
-  if ToggleQuestLog then pcall(ToggleQuestLog) end
+  pcall(QuestMapFrame_OpenToQuestDetails, questID) -- the world map with its quest log
+  Geo.CombatNotice()
 end
 
 -- Tracks a single quest: removes every other one from tracking. Only when the tracking really changes:
@@ -190,10 +176,8 @@ function Geo.QuestZoneUi(id)
   return Geo.PointUi({ area = sort })
 end
 
--- Opens the world map on a map (the addon window is closed so that it does not hide it).
--- keepWindow: the Forever Quest Planner window stays open (Roadbook tabs).
-function Geo.OpenWorldMap(ui, keepWindow)
-  if not keepWindow and State.mainFrame and State.mainFrame:IsShown() then State.mainFrame:Hide() end
+-- Opens the world map, on a map if given (the addon window stays open).
+function Geo.OpenWorldMap(ui)
   if not WorldMapFrame then return end
   if not WorldMapFrame:IsShown() then
     if ToggleWorldMap then pcall(ToggleWorldMap) elseif ShowUIPanel then pcall(ShowUIPanel, WorldMapFrame) end
@@ -201,29 +185,33 @@ function Geo.OpenWorldMap(ui, keepWindow)
   if ui and WorldMapFrame.SetMapID then pcall(WorldMapFrame.SetMapID, WorldMapFrame, ui) end
 end
 
--- "Map" button: pin on the quest's place (getPoint() -> point, label), then the world map on it.
-function Geo.ShowOnMap(getPoint, title, questId)
-  local p, label
-  if GeoReady() then p, label = getPoint() end
-  -- A followed Roadbook keeps the map: the map only opens on the place; a preview ends.
-  local owner = Geo.MapOwner and Geo.MapOwner()
-  if owner and owner.mode == "preview" then Geo.MapRelease() owner = nil end
-  if p and owner then
-    Print(L["A Roadbook is followed: the map shows only its steps (turn its tracking off to place a pin)."])
-    Geo.OpenWorldMap(Geo.PointUi(p))
-    Geo.MapGlide(p)
-  elseif p then
-    PinPoint(p, title, label or L["objective"], questId)
-    Geo.OpenWorldMap(Geo.PointUi(p))
-  else
-    Print(string.format(L["Unknown position for \"%s\"."], title or "?"))
-    Geo.OpenWorldMap(questId and Geo.QuestZoneUi(questId))
+-- After an attempt to open the world map: says why it did not, in combat (the game then refuses it).
+function Geo.CombatNotice()
+  if InCombatLockdown() and not (WorldMapFrame and WorldMapFrame:IsShown()) then
+    Print(L["Not possible in combat, try again once out of combat."])
   end
 end
 
-function Geo.MapButton(getPoint, title, questId)
-  return { text = L["Map"], fn = function() Geo.ShowOnMap(getPoint, title, questId) end,
-    tip = { L["Map"], L["Places the map pin on this quest (giver, objective or turn-in) and opens the world map on it."] } }
+-- A quest that is not in the log, shown at its place (getPoint() -> point, label): the map pin on it,
+-- the world map centered on it as on a Roadbook step. A followed Roadbook keeps the map (no pin), a
+-- preview ends.
+function Geo.ShowQuestPlace(getPoint, title, questId)
+  local p, label
+  if GeoReady() then p, label = getPoint() end
+  local owner = Geo.MapOwner and Geo.MapOwner()
+  if owner and owner.mode == "preview" then Geo.MapRelease() owner = nil end
+  if not p then
+    Print(string.format(L["Unknown position for \"%s\"."], title or "?"))
+    Geo.OpenWorldMap(questId and Geo.QuestZoneUi(questId))
+    Geo.CombatNotice()
+    return
+  end
+  if owner then
+    Print(L["A Roadbook is followed: the map shows only its steps (turn its tracking off to place a pin)."])
+  else
+    PinPoint(p, title, label or L["objective"], questId)
+  end
+  Geo.CenterMap(p)
 end
 
 -- Custom Roadbook buttons: add / remove a quest, add / remove every quest of a category.

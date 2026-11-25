@@ -72,7 +72,6 @@ local function RenderTodo(a)
         tint = q._abandon and { 0.9, 0.5, 0.25 } or nil,
         stripe = q._abandon and { 1, 0.5, 0.15 } or nil,
         b1 = Geo.CustomButton(q.id, q.title, q.level),
-        b2 = Geo.MapButton(function() return Geo.ObjectivePoint(q) end, q.title, q.id),
         trash = AbandonButton(q), -- trash icon at the left of the quest
       }
     end
@@ -201,7 +200,7 @@ local function RenderAvailable()
       local id = e.id
       items[#items + 1] = { text = text, links = rewards ~= nil or chainLinks, linkQuest = id,
         b1 = Geo.CustomButton(id, e.name, e.level),
-        b2 = Geo.MapButton(function() return Geo.GiverPoint(id, PlayerPos()) end, e.name, id) }
+        place = function() return Geo.GiverPoint(id, PlayerPos()) end, placeTitle = e.name }
     end
   end
   if total == 0 then items[#items + 1] = { text = searching and L["No quest matches the search."] or L["No quest available for this filter."] } end
@@ -252,10 +251,10 @@ local function RenderNear()
     local label = take and L["pick up the quest"] or L["turn in the quest"]
     return { text = text, questID = not take and it.id or nil, linkQuest = it.id,
       b1 = Geo.CustomButton(it.id, it.label, it.level),
-      b2 = Geo.MapButton(function() return it.p, label end, it.label, it.id) }
+      place = take and function() return it.p, label end or nil, placeTitle = it.label }
   end
 
-  -- Quest in progress: one row per quest, one line per step within reach; the map pin goes to the nearest step.
+  -- Quest in progress: one row per quest, one line per step within reach, the nearest first.
   local function questRow(g)
     local D = K.DESC
     local text = "  " .. StateIcons(g.id) .. Geo.QuestTitle(g.label, g.id and { id = g.id, level = g.level } or nil)
@@ -264,10 +263,8 @@ local function RenderNear()
         Color(D.meta, string.format(L["%.0f m"], it.d)))
     end
     text = text .. Geo.ChainTextLine(g.id)
-    local first = g.steps[1]
     return { text = text, questID = g.id, linkQuest = g.id,
-      b1 = Geo.CustomButton(g.id, g.label, g.level),
-      b2 = Geo.MapButton(function() return first.p, first.extra end, g.label, g.id) }
+      b1 = Geo.CustomButton(g.id, g.label, g.level) }
   end
 
   local sections = {
