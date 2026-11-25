@@ -32,6 +32,8 @@ UI\Export.lua
 UI\Tabs.lua
 UI\QuestLogHook.lua
 Roadbook.lua
+RoadbookStore.lua
+ObjectiveButton.lua
 RoadbookMap.lua
 RoadbookPanel.lua
 UI\Window.lua
