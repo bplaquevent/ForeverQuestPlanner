@@ -1,6 +1,6 @@
--- Forever Quest Planner: walking passes between zones, before any is learned in game.
--- A walk from a zone to another goes through a pass (Geo.WalkWay, Geo.lua); a pair of zones with
--- a pass learned in game (the player walked from one to the other) no longer uses these.
+-- Forever Quest Planner: walking passes between zones known without having walked them.
+-- A walk from a zone to another goes through a pass (Geo.WalkWay, Geo.lua); those learned in game
+-- (the player walked from one zone to the other) are added to these (Geo.Passes).
 
 local ADDON_NAME, ns = ...
 

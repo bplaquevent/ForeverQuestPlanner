@@ -11,7 +11,7 @@ Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cas
 | File | Content |
 |---|---|
 | `Locales/Locales.lua`, `Locales/frFR.lua` | `ns.L` table; French translations |
-| `Data/Passes.lua` | walking passes between zones known before any is learned: Warcraft Wiki rows `ns.PASSES`, QuestieDB patrol NPCs `ns.PASS_PATROLS` (listed by `tools/patrol_npcs.py`) |
+| `Data/Passes.lua` | walking passes between zones known without having walked them, completed by those learned (`Geo.Passes`): Warcraft Wiki rows `ns.PASSES`, QuestieDB patrol NPCs `ns.PASS_PATROLS` (listed by `tools/patrol_npcs.py`) |
 | `Data/Supplements.lua` | what the data we read lacks or gets wrong, completed: faction of the transport lines OpenMap does not give one (`ns.TRANSPORT_SUPPLEMENT`, `ns.TRANSPORT_KIND_FACTION`, read through `Geo.Transports`), QuestieDB's quest categories (`ns.SORT_*`), profession headers, capitals (`ns.CITY_MAPS`), class teleport spells (`ns.RECALL_SPELLS`), start bind points (`ns.START_BINDS`), continent maps, recognised sub titles, mailbox names and quest tag words |
 | `Data/GameData.lua` | fixed facts of the game (Classic rules): professions (`ns.PROFESSIONS`: name, text name, trainer words, recipe subclass), `ns.XP_TABLE`, usable armor and weapons (`ns.ARMOR`, `ns.WEAPONS`), stats per talent tree (`ns.SPEC_STATS`) |
 | `Solver.lua` | Roadbook solver in pure Lua (no game API, also run by `tools/bench.lua`): XP formulas (`MobXP`, `QuestXP`), the only travel model, also used by the game: world (`S.World`, walks `S.WalkWay` / `S.WalkCost`, passes, danger, network `S.Network` / `S.Route` / `S.Travel`), level-ups `S.LevelUp`, route evaluation `S.Evaluate` (its walked legs: `res.legs`), goal value `S.Objective`, teleports `S.AddRecalls` / `S.Simulate`, objective order ranks `S.Ranks` / `S.RankPreds`, hunting spot variants `S.Variants`, optimizer `S.Optimize` (a search context passed to `S.Construct`, `S.LocalSearch` with its moves `S.Move*`, `S.DestroyAndRebuild`, `S.AddNearbyFlightMasters`; the list: `S.ValidCustom`, `S.BuildCustom`; list with a duration or level: kept and completed or trimmed, `S.MixPrepare`, units `S.InsertUnit` / `S.WithoutUnit`; tuning `S.OPT`) |
@@ -50,12 +50,14 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
 - A file can only import from files loaded before it. For a call to a later file, call `ns.Name()` at runtime
   (example: `Refresh` in `Available.lua` forwards to the real one in `UI/Window.lua`).
 - Saved data: `Settings()` returns the character's own table (`ForeverQuestPlannerSettings.chars[CharKey()]`,
-  one record per thing: `custom`, `roadbook`, `bind`, `pin`, `mapSaved`);
-  only what is learned about the world and true for every character (zone passes, teleport arrivals) is shared:
-  `SharedData()`.
+  one record per thing: `custom`, `roadbook`, `pin`, `mapSaved`);
+  what is learned in game is apart, to be kept longer, in `LearnedData()` (zone passes, teleport arrivals, class
+  trainers, for every character) and `LearnedChar()` (mount speed, bind point: the current character's, dropped
+  when the game's identifier of the character differs).
 - No migration code: the code only knows the current form of the saved data. A change that makes saved data
-  unusable (a field renamed, moved, of another type or meaning; not a new field that may be absent) raises
-  `DATA_VERSION` (`Core.lua`): the addon then erases everything saved at login, for every character. The
+  unusable (a field renamed, moved, of another type or meaning; not a new field that may be absent) raises the
+  number of its set (`Core.lua`): `DATA_VERSION` for the characters' data and the captures, `LEARNED_VERSION` for
+  what was learned (`LearnedData()`, `LearnedChar()` included). The addon then erases that set at login, for every character. The
   developer's own data is converted outside the game by a throwaway script, never committed.
 - Mutable variables read by several files live in the `State` table (`State.mainFrame`, `State.currentTab`,
   `State.availFilter`, `State.xpHorizon`, `State.nearRadius`, search queries, the running computation

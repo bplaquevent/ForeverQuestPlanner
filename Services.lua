@@ -111,10 +111,10 @@ K.SERVICE_EVENTS = { vendor = "MERCHANT_SHOW", repair = "MERCHANT_SHOW", trainer
 -- "Niveau 10"). Shared by the characters of the same class: { [npcId] = true }.
 function Geo.LearnedTrainers()
   local _, token = UnitClass("player")
-  local sd = ns.SharedData()
-  sd.classTrainers = sd.classTrainers or {}
-  sd.classTrainers[token or "?"] = sd.classTrainers[token or "?"] or {}
-  return sd.classTrainers[token or "?"]
+  local learned = ns.LearnedData()
+  learned.classTrainers = learned.classTrainers or {}
+  learned.classTrainers[token or "?"] = learned.classTrainers[token or "?"] or {}
+  return learned.classTrainers[token or "?"]
 end
 
 -- Remember an NPC as a trainer of the player's class (the service lists are read again).
