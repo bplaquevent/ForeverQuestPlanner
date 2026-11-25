@@ -462,7 +462,7 @@ end
 
 local function ChainText(chain)
   if not chain or chain.count == 0 then return nil end
-  local s = L["follow-up: "] .. chain.count .. L[" quest(s) up to level "] .. chain.maxLevel
+  local s = string.format(L["follow-up: %d quest(s) up to level %d"], chain.count, chain.maxLevel)
   if chain.xp > 0 then s = s .. ", ~" .. chain.xp .. " XP" end
   if chain.hasClass then s = s .. L[", class"] end
   if chain.hasProf then s = s .. L[", profession"] end
@@ -982,11 +982,11 @@ local function Analyze()
         q._abandon = L["Failed quest"]
       elseif not (isClass or isProf or xpUseful or itemReason or itemUnknown or chainUseful or moneyUseful) then
       local why = {}
-      why[#why + 1] = trivial and (L["gray (level "] .. level .. ")") or L["no XP"]
+      why[#why + 1] = trivial and string.format(L["gray (level %d)"], level) or L["no XP"]
       why[#why + 1] = L["no useful item"]
-      why[#why + 1] = (q.money and q.money > 0) and (L["little money ("] .. MoneyText(q.money) .. ")") or L["no money"]
+      why[#why + 1] = (q.money and q.money > 0) and string.format(L["little money (%s)"], MoneyText(q.money)) or L["no money"]
       if chain and chain.count > 0 then
-        why[#why + 1] = L["gray follow-up ("] .. chain.count .. L[" quest(s))"]
+        why[#why + 1] = string.format(L["gray follow-up (%d quest(s))"], chain.count)
       else
         why[#why + 1] = L["no follow-up"]
       end

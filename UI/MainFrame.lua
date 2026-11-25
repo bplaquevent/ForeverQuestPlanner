@@ -377,7 +377,7 @@ local function ExportAndSave()
     return
   end
   local count = Snapshot()
-  Print(count .. L[" quests exported, reloading the UI to write the file…"])
+  Print(string.format(L["%d quests exported, reloading the UI to write the file…"], count))
   ReloadUI()
 end
 

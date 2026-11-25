@@ -69,7 +69,7 @@ local function MissingReputation(rep)
   if type(rep) ~= "table" or not rep[1] or not rep[2] then return nil end
   local current, name = PlayerReputation(rep[1])
   if current and current >= rep[2] then return nil end
-  return (name or (L["faction "] .. rep[1])) .. L[": "] .. StandingLabel(rep[2]) .. L[" required"]
+  return string.format(L["%s: %s required"], name or (L["faction "] .. rep[1]), StandingLabel(rep[2]))
 end
 
 local function AnyNonEmpty(t)

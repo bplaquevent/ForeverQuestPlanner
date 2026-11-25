@@ -36,8 +36,8 @@ function CP.EscortFailed(s)
   if CP.escortFailNotified == s then return end
   CP.escortFailNotified = s
   local take = s.task.stops and s.task.stops[1]
-  Print(Color(K.DESC.bad, L["Escort failed: "]) .. (s.task.title or "?") ..
-    L[". Abandon the quest, then pick it up again from "] .. CP.EscortNpc(s.task) .. ".")
+  Print(Color(K.DESC.bad, L["Escort failed: "]) ..
+    string.format(L["%s. Abandon the quest, then pick it up again from %s."], s.task.title or "?", CP.EscortNpc(s.task)))
   if take and take.kind == "take" then
     Geo.MarkDone(take, false)
     CP.FocusStep(take)
@@ -826,7 +826,7 @@ function CP.AutoUpdate(reason, step, check)
       return
     end
     Geo.Trace("auto", reason .. ": " .. (CP.CurrentFocus() and Geo.StepTrace(CP.CurrentFocus()) or "no focus"))
-    Print(reason .. L[": next Roadbook step."])
+    Print(string.format(L["%s: next Roadbook step."], reason))
     local cur = CP.CurrentFocus()
     if cur then Geo.MarkDone(cur) end
     local ok, err = pcall(CP.FocusNext, true, cur)

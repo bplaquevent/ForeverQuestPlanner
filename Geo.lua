@@ -722,7 +722,7 @@ local function RouteText(a, b, net, plevel)
     local s = toName and string.format(L["walk to %s (%.0f m)"], toName, d) or string.format(L["walk %.0f m"], d)
     if way then s = s .. string.format(L[" through %d zone pass(es)"], #way) end
     if worst and worst > plevel + K.DANGER_MARGIN then
-      s = s .. Color(K.DESC.bad, L[" [crosses "] .. (W.zones[zone].name or "?") .. L[", level "] .. worst .. "+]")
+      s = s .. Color(K.DESC.bad, string.format(L[" [crosses %s, level %d+]"], W.zones[zone].name or "?", worst))
     end
     parts[#parts + 1] = s
   end

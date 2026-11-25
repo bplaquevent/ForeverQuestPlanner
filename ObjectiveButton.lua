@@ -120,10 +120,11 @@ function CP.StepSummary(s)
     return K.ESCORT_ICON .. " " .. (task.title or "?"),
       parts(Color(K.DESC.bad, L["Escort failed: abandon the quest and pick it up again"]))
   elseif s.escort then
-    local dest = s.kind == "turnin" and (L[", then turn in to "] .. (nameOnly(TurnInText(task.id)) or "?")) or ""
+    local stay = s.kind == "turnin"
+      and string.format(L["Stay close to %s, then turn in to %s"], CP.EscortNpc(task), nameOnly(TurnInText(task.id)) or "?")
+      or L["Stay close to "] .. CP.EscortNpc(task)
     local xp = s.kind == "turnin" and Geo.XPText(task.xp) or nil
-    return K.ESCORT_ICON .. " " .. L["Escort: "] .. (task.title or "?"),
-      parts(L["Stay close to "] .. CP.EscortNpc(task) .. dest, place, xp)
+    return K.ESCORT_ICON .. " " .. L["Escort: "] .. (task.title or "?"), parts(stay, place, xp)
   elseif s.kind == "take" then
     local out = parts((s.search and L["Look for "] or L["Pick up from "]) .. (nameOnly(task.starter) or "?"), place)
     if s.search then
@@ -138,7 +139,7 @@ function CP.StepSummary(s)
     local prog = "x" .. (s.r and s.r.count or "?")
     local o = task.id and IsInLog(task.id) and Geo.TargetObjective(task.id, s.r and s.r.tg, GetObjectives(task.id))
     if o and o.need then prog = (o.have or 0) .. "/" .. o.need end
-    local multi = (s.spots and s.spots > 1) and (L["multiple spots ("] .. s.spots .. ")") or nil
+    local multi = (s.spots and s.spots > 1) and string.format(L["multiple spots (%d)"], s.spots) or nil
     return ICON.inprogress .. " " .. (task.title or "?"), parts(name .. " " .. prog, place, multi)
   end
   local xp = Geo.XPText(task.xp)

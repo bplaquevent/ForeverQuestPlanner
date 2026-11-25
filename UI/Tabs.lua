@@ -54,8 +54,8 @@ local function RenderTodo(a)
       if q._abandon then toDrop = toDrop + 1 end
     end
     local text = label .. " - " .. Plural(#quests, L["quest"])
-    if watched > 0 then text = text .. " - " .. watched .. L[" tracked"] end
-    if toDrop > 0 then text = text .. " - " .. toDrop .. L[" to abandon"] end
+    if watched > 0 then text = text .. " - " .. string.format(L["%d tracked"], watched) end
+    if toDrop > 0 then text = text .. " - " .. string.format(L["%d to abandon"], toDrop) end
     if searching then text = text .. L["  (filtered)"] end
     local list = {}
     for _, q in ipairs(quests) do list[#list + 1] = { id = q.id, title = q.title, level = q.level } end
@@ -90,7 +90,7 @@ local function RenderTodo(a)
   end
 
   if #a.abandon > 0 and not searching then
-    items[#items + 1] = { text = Color("ff8040", Plural(#a.abandon, L["quest"]) .. L[" recommended for abandoning: orange lines marked [To abandon], in their category."]),
+    items[#items + 1] = { text = Color("ff8040", string.format(L["%s recommended for abandoning: orange lines marked [To abandon], in their category."], Plural(#a.abandon, L["quest"]))),
       tint = { 0.9, 0.5, 0.25 }, stripe = { 1, 0.5, 0.15 } }
   end
 
@@ -171,7 +171,8 @@ local function RenderAvailable()
   local groups, total = Geo.AvailableGroups(State.availFilter, searching and function(e)
     return MatchWords(EntryHaystack(e), State.availQuery)
   end or nil, Settings().showLowLevel)
-  local head = Plural(total, L["quest"]) .. L[" available"] .. (Settings().showLowLevel and L[", low level included"] or L[" (low level excluded)"]) .. L[", according to QuestieDB. Quests specific to Forever may be missing."]
+  local head = string.format(Settings().showLowLevel and L["%s available, low level included, according to QuestieDB. Quests specific to Forever may be missing."]
+    or L["%s available (low level excluded), according to QuestieDB. Quests specific to Forever may be missing."], Plural(total, L["quest"]))
   local items = { { text = Color("aaaaaa", head) } }
   for _, g in ipairs(groups) do
     table.sort(g.list, function(a, b) return (a.level or 0) < (b.level or 0) end)
