@@ -89,7 +89,6 @@ StaticPopupDialogs
 StaticPopup_Show
 TakeTaxiNode
 TaxiNodeName
-ToggleQuestLog
 ToggleWorldMap
 UIParent
 UISpecialFrames

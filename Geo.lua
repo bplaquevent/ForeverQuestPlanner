@@ -1040,22 +1040,6 @@ local function UnitTime(tg)
   return 10
 end
 
--- Most useful point of a quest: nearest remaining objective, otherwise the turn-in NPC.
-function Geo.ObjectivePoint(q)
-  local pos = PlayerPos()
-  local t = QuestTargets(q.id)
-  if not q.complete then
-    local best, bd, label
-    for _, r in ipairs(RemainingTargets(q, t)) do
-      local p, d = Nearest(r.tg.points, pos)
-      if p and (not best or (d and (not bd or d < bd))) then best, bd, label = p, d, r.tg.name end
-    end
-    if best then return best, label end
-  end
-  local f = Nearest(t.finish, pos)
-  return f, L["turn in the quest"]
-end
-
 -- Where to pick up a quest: its giver, otherwise the monsters / objects dropping the item that
 -- starts it, otherwise its first located objective, otherwise its turn-in NPC.
 function Geo.GiverPoint(id, pos)

@@ -162,6 +162,22 @@ end
 K.TRASH_ATLAS = "common-icon-delete"
 K.TRASH_TEXTURE = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 
+-- Click on a quest's line: a quest of the log opens in the game's quest log; another one is shown at
+-- its place (it.place() -> point, label; it.placeTitle), with the map pin. Shift: its link in the chat.
+-- A click on a link of the line (a reward, a follow-up) does nothing more.
+function Geo.QuestRowClick(row, it)
+  local qid = it.questID or it.linkQuest
+  if IsShiftKeyDown and IsShiftKeyDown() then
+    Geo.LinkQuestInChat(qid)
+  elseif row.overLink then
+    return
+  elseif IsInLog(qid) then
+    OpenQuestDetails(qid)
+  elseif it.place then
+    Geo.ShowQuestPlace(it.place, it.placeTitle, qid)
+  end
+end
+
 local function ListRow(panel, i)
   panel.rows = panel.rows or {}
   local r = panel.rows[i]
@@ -187,11 +203,15 @@ local function ListRow(panel, i)
   if r.SetHyperlinksEnabled then
     r:SetHyperlinksEnabled(true)
     r:SetScript("OnHyperlinkEnter", function(self, link)
+      self.overLink = true -- a click on the link is not a click on the line
       GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
       pcall(GameTooltip.SetHyperlink, GameTooltip, link)
       GameTooltip:Show()
     end)
-    r:SetScript("OnHyperlinkLeave", function() GameTooltip:Hide() end)
+    r:SetScript("OnHyperlinkLeave", function(self)
+      self.overLink = nil
+      GameTooltip:Hide()
+    end)
   end
   -- Three button columns (b1, b2, b3), placed by RenderList according to the tab's grid.
   r.b1 = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
@@ -382,18 +402,12 @@ local function RenderList(panel, tabKey, items, forceOpen)
           r:SetScript("OnEnter", function(self) self.hl:Show() end)
           r:SetScript("OnLeave", function(self) self.hl:Hide() end)
         elseif qid then
-          -- Click: quest details (quest of the log); Shift-click: quest link in the chat.
-          local inLog = it.questID and IsInLog(it.questID)
+          local clickable = IsInLog(qid) or it.place ~= nil
           r:EnableMouse(true)
-          r:SetScript("OnMouseUp", function()
-            if IsShiftKeyDown and IsShiftKeyDown() then
-              Geo.LinkQuestInChat(qid)
-            elseif inLog then
-              OpenQuestDetails(qid)
-            end
-          end)
-          r:SetScript("OnEnter", inLog and function(self) self.hl:Show() end or nil)
-          r:SetScript("OnLeave", inLog and function(self) self.hl:Hide() end or nil)
+          r.overLink = nil
+          r:SetScript("OnMouseUp", function(self) Geo.QuestRowClick(self, it) end)
+          r:SetScript("OnEnter", clickable and function(self) self.hl:Show() end or nil)
+          r:SetScript("OnLeave", clickable and function(self) self.hl:Hide() end or nil)
         else
           r:EnableMouse(it.links and true or false) -- item names: tooltips need the mouse
           r:SetScript("OnMouseUp", nil)
