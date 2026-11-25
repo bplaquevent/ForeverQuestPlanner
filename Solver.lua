@@ -1260,16 +1260,15 @@ function S.WithoutUnit(P, core, u)
   return r
 end
 
--- Best Roadbook for a goal: construction (quests or chains of quests with the most XP per second
--- added, until the goal is reached), then local search on the goal value: blocks of steps moved,
--- quests removed or added, binds at an inn, flight paths activated on the way.
--- "custom": every step of the list. A duration or level goal with a list (P.custom): the whole list
--- when it does not reach the goal, completed with candidate quests (mode "keep"); otherwise the units
--- of the list (quests) serving the goal best (mode "pick"), without candidates.
--- Returns { route, res, core, evals, seconds, goal, mode }.
-function S.Optimize(P, goal, opts)
-  opts = opts or {}
-  local O = S.OPT
+---------------------------------------------------------------------------
+-- The search: construction, then moves tried on the route and kept when the goal value improves.
+-- Every function below takes the search context X made by NewSearch:
+--   problem and goal: P, goal, opts, W; custom (every step of the list), mixed (goal with a list)
+--   and mode ("keep" / "pick"); valid(P, core): the order rules; svcUnit: the unit never removed;
+--   budget and draws: t0, evals, maxEvals, maxTime, rand(n);
+--   best route so far: core (its steps), score, res, route (S.Evaluate's result and route).
+---------------------------------------------------------------------------
+local function NewSearch(P, goal, opts)
   local W = S.World(P)
   S.Prepare(P)
   S.PrepareTasks(P)
@@ -1283,360 +1282,420 @@ function S.Optimize(P, goal, opts)
   if mixed then S.MixPrepare(P) end
   local valid = custom and S.ValidCustom or S.Valid
   if mixed then valid = function(p, c) return S.ValidCustom(p, c) and S.Valid(p, c) end end
-  local mode -- mixed: "keep" or "pick"
-  local t0 = S.clock and S.clock() or 0
-  local evals = 0
-  local maxEvals = opts.maxEvals or O.MAX_EVALS
-  local maxTime = opts.maxTime or O.MAX_TIME
-  -- Budget used up (share: part of it, e.g. for the construction).
-  local function out(share)
-    if evals >= maxEvals * (share or 1) then return true end
-    return S.clock and (S.clock() - t0) > maxTime * (share or 1) or false
-  end
-  local function sim(c)
-    evals = evals + 1
-    S.yield()
-    return S.Simulate(P, c, goal)
-  end
-
-  local function reached(res)
-    if goal.kind == "level" then return res.reach ~= nil or res.time >= (opts.maxRouteTime or math.huge) end
-    return res.time >= goal.value
-  end
   local seed = 12345
   local function rand(n)
     seed = (seed * 16807) % 2147483647
     return seed % n + 1
   end
-  -- Construction: adds the quest (or chain) bringing the most XP per second added, until the goal
-  -- (custom Roadbook: every step of the list, by cheapest insertion).
-  -- noise: each rate is multiplied by a random factor up to 1 + noise (rebuilds explore other choices).
-  -- Greedy construction: from c, adds the best candidate each time. each(c, consider) calls
-  -- consider(candidate) for every one; penalize: a candidate adding a rule broken counts less.
-  local function greedy(c, noise, share, penalize, each)
-    local cur = sim(c)
-    while not reached(cur) and not out(share) do
-      local best
-      each(c, function(cand)
-        if not (cand and valid(P, cand)) then return end
-        local res = sim(cand)
-        if S.HardViolations(res) ~= 0 or (goal.kind == "time" and res.time > goal.value * O.OVERSHOOT) then return end
-        local rate = (res.xp - cur.xp) / math.max(res.time - cur.time, 30)
-        if penalize and #res.violations > #cur.violations then rate = rate / 10 end
-        rate = Noisy(rate, rand, noise)
-        if rate > 0 and (not best or rate > best.rate) then best = { core = cand, res = res, rate = rate } end
-      end)
-      if not best then break end
-      c, cur = best.core, best.res
+  return { P = P, goal = goal, opts = opts, W = W, custom = custom, mixed = mixed, valid = valid, rand = rand,
+    t0 = S.clock and S.clock() or 0, evals = 0,
+    maxEvals = opts.maxEvals or S.OPT.MAX_EVALS, maxTime = opts.maxTime or S.OPT.MAX_TIME }
+end
+
+-- Budget used up (share: part of it, e.g. for the construction).
+function S.SearchOut(X, share)
+  if X.evals >= X.maxEvals * (share or 1) then return true end
+  return S.clock and (S.clock() - X.t0) > X.maxTime * (share or 1) or false
+end
+
+function S.SearchSim(X, c)
+  X.evals = X.evals + 1
+  S.yield()
+  return S.Simulate(X.P, c, X.goal)
+end
+
+local function Reached(X, res)
+  if X.goal.kind == "level" then return res.reach ~= nil or res.time >= (X.opts.maxRouteTime or math.huge) end
+  return res.time >= X.goal.value
+end
+
+-- c becomes the best route when valid and of a better goal value.
+function S.SearchTry(X, c)
+  if not X.valid(X.P, c) then return false end
+  local res, route = S.SearchSim(X, c)
+  local sc = S.Objective(X.P, res, X.goal)
+  if sc < X.score - 1e-6 then
+    X.core, X.score, X.res, X.route = c, sc, res, route
+    return true
+  end
+  return false
+end
+
+-- Greedy construction: from c, adds the candidate bringing the most XP per second added, until the
+-- goal. each(c, consider) calls consider(candidate) for every one. noise: each rate is multiplied by
+-- a random factor up to 1 + noise (rebuilds explore other choices). penalize: a candidate adding a
+-- rule broken counts less.
+local function Greedy(X, c, noise, share, penalize, each)
+  local P, goal = X.P, X.goal
+  local cur = S.SearchSim(X, c)
+  while not Reached(X, cur) and not S.SearchOut(X, share) do
+    local best
+    each(c, function(cand)
+      if not (cand and X.valid(P, cand)) then return end
+      local res = S.SearchSim(X, cand)
+      if S.HardViolations(res) ~= 0 or (goal.kind == "time" and res.time > goal.value * S.OPT.OVERSHOOT) then return end
+      local rate = (res.xp - cur.xp) / math.max(res.time - cur.time, 30)
+      if penalize and #res.violations > #cur.violations then rate = rate / 10 end
+      rate = Noisy(rate, X.rand, noise)
+      if rate > 0 and (not best or rate > best.rate) then best = { core = cand, res = res, rate = rate } end
+    end)
+    if not best then break end
+    c, cur = best.core, best.res
+  end
+  return c
+end
+
+-- c completed by what the search works with: quests or chains of quests until the goal; "pick":
+-- units of the list; custom Roadbook: every step of the list, by cheapest insertion.
+function S.Construct(X, c, noise, share)
+  local P = X.P
+  if X.custom then return S.BuildCustom(P, c, X.rand, noise) end
+  if X.mode == "pick" then
+    return Greedy(X, c, noise, share, true, function(core, consider)
+      local inCore = S.UnitsIn(P, core)
+      for _, u in ipairs(P.custom.unitList) do
+        if not inCore[u] then consider(S.InsertUnit(P, core, u, X.rand, noise)) end
+      end
+    end)
+  end
+  return Greedy(X, c, noise, share, false, function(core, consider)
+    local adds = S.Additions(P, core)
+    for j = 1, math.min(S.OPT.TOP_K, #adds) do consider(adds[j].core) end
+  end)
+end
+
+-- Moves: each tries changes of the best route (S.SearchTry) and tells whether one was kept.
+
+-- Blocks of steps moved elsewhere in the route.
+function S.MoveRelocate(X)
+  local any = false
+  for len = 1, S.OPT.MAX_SEGMENT do
+    local i = 2
+    while i + len - 1 <= #X.core and not S.SearchOut(X) do
+      local seg, rest = {}, {}
+      for k, st in ipairs(X.core) do
+        if k >= i and k < i + len then seg[#seg + 1] = st else rest[#rest + 1] = st end
+      end
+      local moved = false
+      for j = 1, #rest do
+        if j ~= i - 1 then
+          local c = {}
+          for k = 1, j do c[k] = rest[k] end
+          for _, st in ipairs(seg) do c[#c + 1] = st end
+          for k = j + 1, #rest do c[#c + 1] = rest[k] end
+          if S.SearchTry(X, c) then moved, any = true, true break end
+        end
+      end
+      if not moved then i = i + 1 end
+    end
+  end
+  return any
+end
+
+-- A quest, a bind or a flight path removed.
+function S.MoveRemove(X)
+  local any = false
+  local i = 2
+  while i <= #X.core and not S.SearchOut(X) do
+    local st = X.core[i]
+    local c
+    if st.tn then c = Without(X.P, X.core, st.tn)
+    elseif st.kind == "bind" or st.kind == "fm" then
+      c = {}
+      for k, x in ipairs(X.core) do if k ~= i then c[#c + 1] = x end end
+    end
+    if c and S.SearchTry(X, c) then any = true else i = i + 1 end
+  end
+  return any
+end
+
+-- A quest (or chain) added.
+function S.MoveAdd(X)
+  local any = false
+  local adds = S.Additions(X.P, X.core)
+  for j = 1, math.min(S.OPT.TOP_K, #adds) do
+    if S.SearchOut(X) then break end
+    if S.SearchTry(X, adds[j].core) then
+      any = true
+      adds = S.Additions(X.P, X.core)
+    end
+  end
+  return any
+end
+
+-- A quest of the route replaced by a quest (or chain) that is not in it.
+function S.MoveSwap(X)
+  local any = false
+  local tasks = {}
+  for tn in pairs((Contents(X.core))) do tasks[#tasks + 1] = tn end
+  table.sort(tasks)
+  for _, tn in ipairs(tasks) do
+    if S.SearchOut(X) then break end
+    local inCore = Contents(X.core)
+    if inCore[tn] then
+      local base = Without(X.P, X.core, tn)
+      local adds = S.Additions(X.P, base)
+      for j = 1, math.min(5, #adds) do
+        if adds[j].root.n ~= tn and S.SearchTry(X, adds[j].core) then any = true break end
+      end
+    end
+  end
+  return any
+end
+
+-- Units of the list removed ("pick"); the service shortcut's unit stays.
+function S.MoveRemoveUnits(X)
+  local P = X.P
+  local any = false
+  for _, u in ipairs(P.custom.unitList) do
+    if S.SearchOut(X) then break end
+    if u ~= X.svcUnit and S.UnitsIn(P, X.core)[u] and S.SearchTry(X, S.WithoutUnit(P, X.core, u)) then any = true end
+  end
+  return any
+end
+
+-- Units of the list added ("pick").
+function S.MoveAddUnits(X)
+  local P = X.P
+  local any = false
+  for _, u in ipairs(P.custom.unitList) do
+    if S.SearchOut(X) then break end
+    if not S.UnitsIn(P, X.core)[u] then
+      local c = S.InsertUnit(P, X.core, u, X.rand)
+      if c and S.SearchTry(X, c) then any = true end
+    end
+  end
+  return any
+end
+
+-- Hunting spots: each objective step tried at its other dense spots; kept when the route gets better
+-- (the detour from the route against the hunting time there).
+function S.MoveSpots(X)
+  local any = false
+  for i = 2, #X.core do
+    if S.SearchOut(X) then break end
+    local st = X.core[i]
+    for _, v in ipairs(st and st.variants or {}) do
+      if v ~= X.core[i] then
+        local c = {}
+        for k, x in ipairs(X.core) do c[k] = x end
+        c[i] = v
+        if S.SearchTry(X, c) then any = true end
+      end
+    end
+  end
+  return any
+end
+
+-- Flight masters still to activate: unknown, and not already visited by the route (inCore, to be
+-- completed by the caller as it adds them).
+local function UnknownFlightMasters(X)
+  local known = S.KnownStart(X.P)
+  local inCore = {}
+  for _, st in ipairs(X.core) do if st.kind == "fm" then inCore[st.fmNode] = true end end
+  local list, n = X.P.world.fms or {}, 0
+  return function()
+    while n < #list do
+      n = n + 1
+      local fm = list[n]
+      if fm.node and not known[fm.node] and not inCore[fm.node] then return fm end
+    end
+  end, inCore
+end
+
+local function FlightPathStep(P, fm, near)
+  return { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, near = near, work = P.k.OVERHEAD / 2,
+    title = "Flight path: " .. tostring(fm.name) }
+end
+
+local function FlightDetours(P)
+  return not (P.player.settings and P.player.settings.noFMDetour)
+end
+
+-- Flight paths activated on the way: an unknown flight master near a step, visited after it.
+function S.MoveFlightMasters(X)
+  if not FlightDetours(X.P) then return false end
+  local any = false
+  local unknown, inCore = UnknownFlightMasters(X)
+  for fm in unknown do
+    if S.SearchOut(X) then break end
+    local i, d = NearestStep(X.core, fm.p)
+    if i and d <= S.OPT.FM_SEARCH and S.SearchTry(X, InsertAt(X.core, i, FlightPathStep(X.P, fm))) then
+      any, inCore[fm.node] = true, true
+    end
+  end
+  return any
+end
+
+-- Bind at an inn near a step (hearthstone, Astral Recall back to it later).
+function S.MoveBinds(X)
+  local P = X.P
+  local bindSource = false
+  for _, src in ipairs(P.world.recall or {}) do if src.bind then bindSource = true end end
+  if not bindSource then return false end
+  local any = false
+  for _, inn in ipairs(P.world.inns or {}) do
+    if S.SearchOut(X) then break end
+    local same = S.Dist(inn.p, P.world.bind)
+    if not (same and same < 60) then
+      -- Every place near the inn is tried (after each step within the detour, the start included):
+      -- the nearest step is often too late (a turn-in in town, after the hearth back).
+      local st = { kind = "bind", p = inn.p, inn = inn, work = P.k.BIND_WORK, title = "Bind: " .. tostring(inn.name) }
+      local places = {}
+      for i, s in ipairs(X.core) do
+        local d = S.Dist(s.p, inn.p)
+        if d and d <= P.k.INN_DETOUR then places[#places + 1] = i end
+      end
+      for _, i in ipairs(places) do
+        if S.SearchOut(X) then break end
+        if S.SearchTry(X, InsertAt(X.core, i, st)) then any = true break end
+      end
+    end
+  end
+  return any
+end
+
+-- The moves of each search, tried in turn until none improves the route.
+local function Moves(X)
+  if X.custom then return { S.MoveRelocate, S.MoveSpots, S.MoveFlightMasters, S.MoveBinds } end
+  if X.mode == "pick" then
+    return { S.MoveRelocate, S.MoveSpots, S.MoveRemoveUnits, S.MoveAddUnits, S.MoveFlightMasters, S.MoveBinds }
+  end
+  return { S.MoveRelocate, S.MoveSpots, S.MoveRemove, S.MoveAdd, S.MoveSwap, S.MoveFlightMasters, S.MoveBinds }
+end
+
+-- Returns the number of rounds.
+function S.LocalSearch(X)
+  local rounds = 0
+  repeat
+    rounds = rounds + 1
+    local improved = false
+    for _, move in ipairs(Moves(X)) do
+      if S.SearchOut(X) then break end
+      if move(X) then improved = true end
+    end
+  until not improved or S.SearchOut(X)
+  return rounds
+end
+
+-- The quests of the route and their steps (candidates: task numbers; custom: quests of the list;
+-- "pick": units of the list): keys in order, steps by key.
+local function RouteQuests(X)
+  local steps, keys = {}, {}
+  for _, st in ipairs(X.core) do
+    local key
+    if X.custom then key = st.ti
+    elseif X.mode == "pick" then key = st.ci and X.P.custom.unitOf[st.ci]
+    else key = st.tn end
+    if key and key ~= X.svcUnit then
+      if not steps[key] then
+        steps[key] = {}
+        keys[#keys + 1] = key
+      end
+      table.insert(steps[key], st)
+    end
+  end
+  table.sort(keys)
+  return keys, steps
+end
+
+-- The route without the quests of drop (a set of RouteQuests keys).
+local function Destroyed(X, keys, drop)
+  local c = X.core
+  if X.custom then
+    c = {}
+    for _, st in ipairs(X.core) do
+      if not (st.ti and drop[st.ti]) then c[#c + 1] = st end
     end
     return c
   end
-  local function construct(c, noise, share)
-    if custom then return S.BuildCustom(P, c, rand, noise) end
-    if mode == "pick" then -- units of the list
-      return greedy(c, noise, share, true, function(core, consider)
-        local inCore = S.UnitsIn(P, core)
-        for _, u in ipairs(P.custom.unitList) do
-          if not inCore[u] then consider(S.InsertUnit(P, core, u, rand, noise)) end
-        end
-      end)
-    end
-    return greedy(c, noise, share, false, function(core, consider)
-      local adds = S.Additions(P, core)
-      for j = 1, math.min(O.TOP_K, #adds) do consider(adds[j].core) end
-    end)
+  local without = X.mode == "pick" and S.WithoutUnit or Without
+  for _, key in ipairs(keys) do
+    if drop[key] then c = without(X.P, c, key) end
   end
-  local start = { { kind = "start", p = P.player.pos, work = 0 } }
-  if mixed then
-    -- The whole list reaching the goal: only its best part; otherwise all of it, completed.
-    local whole = S.BuildCustom(P, start, rand)
-    mode = reached(sim(whole)) and "pick" or "keep"
-    if mode == "keep" then start = whole
-    elseif P.custom.first then start = { start[1], P.custom.steps[P.custom.first] } end -- service shortcut kept
-  end
-  local core = construct(start, nil, O.BUILD_SHARE)
+  return c
+end
 
-  -- Local search: every change kept when the goal value improves.
-  local bestScore, bestRes, bestRoute
-  bestRes, bestRoute = sim(core)
-  bestScore = S.Objective(P, bestRes, goal)
-  local function try(c)
-    if not valid(P, c) then return false end
-    local res, route = sim(c)
-    local sc = S.Objective(P, res, goal)
-    if sc < bestScore - 1e-6 then
-      core, bestScore, bestRes, bestRoute = c, sc, res, route
-      return true
-    end
-    return false
-  end
-
-  local function relocate()
-    local any = false
-    for len = 1, O.MAX_SEGMENT do
-      local i = 2
-      while i + len - 1 <= #core and not out() do
-        local seg, rest = {}, {}
-        for k, st in ipairs(core) do
-          if k >= i and k < i + len then seg[#seg + 1] = st else rest[#rest + 1] = st end
-        end
-        local moved = false
-        for j = 1, #rest do
-          if j ~= i - 1 then
-            local c = {}
-            for k = 1, j do c[k] = rest[k] end
-            for _, st in ipairs(seg) do c[#c + 1] = st end
-            for k = j + 1, #rest do c[#c + 1] = rest[k] end
-            if try(c) then moved, any = true, true break end
-          end
-        end
-        if not moved then i = i + 1 end
-      end
-    end
-    return any
-  end
-
-  local function remove()
-    local any = false
-    local i = 2
-    while i <= #core and not out() do
-      local st = core[i]
-      local c
-      if st.tn then c = Without(P, core, st.tn)
-      elseif st.kind == "bind" or st.kind == "fm" then
-        c = {}
-        for k, x in ipairs(core) do if k ~= i then c[#c + 1] = x end end
-      end
-      if c and try(c) then any = true else i = i + 1 end
-    end
-    return any
-  end
-
-  local function add()
-    local any = false
-    local adds = S.Additions(P, core)
-    for j = 1, math.min(O.TOP_K, #adds) do
-      if out() then break end
-      if try(adds[j].core) then
-        any = true
-        adds = S.Additions(P, core)
-      end
-    end
-    return any
-  end
-
-  -- Swap: a quest of the route replaced by a quest (or chain) that is not in it.
-  local function swap()
-    local any = false
-    local tasks = {}
-    for tn in pairs((Contents(core))) do tasks[#tasks + 1] = tn end
-    table.sort(tasks)
-    for _, tn in ipairs(tasks) do
-      if out() then break end
-      local inCore = Contents(core)
-      if inCore[tn] then
-        local base = Without(P, core, tn)
-        local adds = S.Additions(P, base)
-        for j = 1, math.min(5, #adds) do
-          if adds[j].root.n ~= tn and try(adds[j].core) then any = true break end
-        end
-      end
-    end
-    return any
-  end
-
-  -- Units of the list removed or added ("pick"); the service shortcut's unit stays.
-  local svcUnit = mixed and P.custom.first and P.custom.unitOf[P.custom.first] or nil
-  local function removeUnits()
-    local any = false
-    for _, u in ipairs(P.custom.unitList) do
-      if out() then break end
-      if u ~= svcUnit and S.UnitsIn(P, core)[u] and try(S.WithoutUnit(P, core, u)) then any = true end
-    end
-    return any
-  end
-  local function addUnits()
-    local any = false
-    for _, u in ipairs(P.custom.unitList) do
-      if out() then break end
-      if not S.UnitsIn(P, core)[u] then
-        local c = S.InsertUnit(P, core, u, rand)
-        if c and try(c) then any = true end
-      end
-    end
-    return any
-  end
-
-  -- Hunting spots: each objective step tried at its other dense spots; kept when the route gets better
-  -- (the detour from the route against the hunting time there).
-  local function spots()
-    local any = false
-    for i = 2, #core do
-      if out() then break end
-      local st = core[i]
-      for _, v in ipairs(st and st.variants or {}) do
-        if v ~= core[i] then
-          local c = {}
-          for k, x in ipairs(core) do c[k] = x end
-          c[i] = v
-          if try(c) then any = true end
-        end
-      end
-    end
-    return any
-  end
-
-  -- Flight paths activated on the way: an unknown flight master near a step, visited after it.
-  local function flightMasters()
-    if P.player.settings and P.player.settings.noFMDetour then return false end
-    local any = false
-    local known = S.KnownStart(P)
-    local inCore = {}
-    for _, st in ipairs(core) do if st.kind == "fm" then inCore[st.fmNode] = true end end
-    for _, fm in ipairs(P.world.fms or {}) do
-      if out() then break end
-      if fm.node and not known[fm.node] and not inCore[fm.node] then
-        local i, d = NearestStep(core, fm.p)
-        if i and d <= O.FM_SEARCH then
-          local st = { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, work = P.k.OVERHEAD / 2,
-            title = "Flight path: " .. tostring(fm.name) }
-          if try(InsertAt(core, i, st)) then any, inCore[fm.node] = true, true end
-        end
-      end
-    end
-    return any
-  end
-
-  -- Bind at an inn near a step (hearthstone, Astral Recall back to it later).
-  local function binds()
-    local bindSource = false
-    for _, src in ipairs(P.world.recall or {}) do if src.bind then bindSource = true end end
-    if not bindSource then return false end
-    local any = false
-    for _, inn in ipairs(P.world.inns or {}) do
-      if out() then break end
-      local same = S.Dist(inn.p, P.world.bind)
-      if not (same and same < 60) then
-        -- Every place near the inn is tried (after each step within the detour, the start included):
-        -- the nearest step is often too late (a turn-in in town, after the hearth back).
-        local st = { kind = "bind", p = inn.p, inn = inn, work = P.k.BIND_WORK, title = "Bind: " .. tostring(inn.name) }
-        local places = {}
-        for i, s in ipairs(core) do
-          local d = S.Dist(s.p, inn.p)
-          if d and d <= P.k.INN_DETOUR then places[#places + 1] = i end
-        end
-        for _, i in ipairs(places) do
-          if out() then break end
-          if try(InsertAt(core, i, st)) then any = true break end
-        end
-      end
-    end
-    return any
-  end
-
-  local function localSearch()
-    local rounds = 0
-    repeat
-      rounds = rounds + 1
-      local improved = false
-      local moves = (custom and { relocate, spots, flightMasters, binds })
-        or (mode == "pick" and { relocate, spots, removeUnits, addUnits, flightMasters, binds })
-        or { relocate, spots, remove, add, swap, flightMasters, binds }
-      for _, move in ipairs(moves) do
-        if out() then break end
-        if move() then improved = true end
-      end
-    until not improved or out()
-    return rounds
-  end
-  local rounds = localSearch()
-
-  -- Destroy and rebuild (large neighbourhood search): the quests of a zone, or a share of the quests
-  -- at random, are removed and the route is rebuilt by the construction; kept when better. Escapes
-  -- the dead ends of the moves above (e.g. a long block chosen first, that no single move can replace).
-  local rebuilt = 0
-  for it = 1, O.LNS_ROUNDS do
-    if out() then break end
-    -- Quests of the route and their steps (candidates: task numbers; custom: quests of the list;
-    -- "pick": units of the list).
-    local steps, tasks = {}, {}
-    for _, st in ipairs(core) do
-      local key
-      if custom then key = st.ti
-      elseif mode == "pick" then key = st.ci and P.custom.unitOf[st.ci]
-      else key = st.tn end
-      if key and key ~= svcUnit then
-        if not steps[key] then
-          steps[key] = {}
-          tasks[#tasks + 1] = key
-        end
-        table.insert(steps[key], st)
-      end
-    end
-    if #tasks == 0 then break end
-    table.sort(tasks)
-    local zone = it % 2 == 1 and S.ZoneId(W, steps[tasks[rand(#tasks)]][1].p) or nil
+-- Destroy and rebuild (large neighbourhood search): the quests of a zone, or a share of the quests
+-- at random, are removed and the route is rebuilt by the construction; kept when better. Escapes
+-- the dead ends of the moves above (e.g. a long block chosen first, that no single move can replace).
+-- Returns the number of rebuilds kept and of local search rounds.
+function S.DestroyAndRebuild(X)
+  local rebuilt, rounds = 0, 0
+  for it = 1, S.OPT.LNS_ROUNDS do
+    if S.SearchOut(X) then break end
+    local keys, steps = RouteQuests(X)
+    if #keys == 0 then break end
+    local zone = it % 2 == 1 and S.ZoneId(X.W, steps[keys[X.rand(#keys)]][1].p) or nil
     local drop = {}
-    for _, key in ipairs(tasks) do
+    for _, key in ipairs(keys) do
       if zone then
         for _, st in ipairs(steps[key]) do
-          if S.ZoneId(W, st.p) == zone then drop[key] = true break end
+          if S.ZoneId(X.W, st.p) == zone then drop[key] = true break end
         end
       else
-        drop[key] = rand(100) <= O.LNS_SHARE
+        drop[key] = X.rand(100) <= S.OPT.LNS_SHARE
       end
     end
-    local c = core
-    if custom then
-      c = {}
-      for _, st in ipairs(core) do
-        if not (st.ti and drop[st.ti]) then c[#c + 1] = st end
-      end
-    elseif mode == "pick" then
-      for _, key in ipairs(tasks) do
-        if drop[key] then c = S.WithoutUnit(P, c, key) end
-      end
-    else
-      for _, key in ipairs(tasks) do
-        if drop[key] then c = Without(P, c, key) end
-      end
-    end
-    if try(construct(c, O.LNS_NOISE)) then
+    if S.SearchTry(X, S.Construct(X, Destroyed(X, keys, drop), S.OPT.LNS_NOISE)) then
       rebuilt = rebuilt + 1
-      rounds = rounds + localSearch()
+      rounds = rounds + S.LocalSearch(X)
     end
   end
+  return rebuilt, rounds
+end
 
-  -- Flight masters right next to a step of the final route: activated whatever the gain ("activate
-  -- nearby flight masters"). A flight path is worth it later, once the other end is known too, which the
-  -- goal of this route does not see. Each one goes where the goal value suffers least.
-  if not (P.player.settings and P.player.settings.noFMDetour) then
-    local known = S.KnownStart(P)
-    local inCore = {}
-    for _, st in ipairs(core) do if st.kind == "fm" then inCore[st.fmNode] = true end end
-    for _, fm in ipairs(P.world.fms or {}) do
-      if fm.node and not known[fm.node] and not inCore[fm.node] then
-        local st = { kind = "fm", p = fm.p, fmNode = fm.node, fm = fm, near = true, work = P.k.OVERHEAD / 2,
-          title = "Flight path: " .. tostring(fm.name) }
-        local bc, bs, br, bscore
-        for i, s in ipairs(core) do
-          local d = S.Dist(s.p, fm.p)
-          if d and d <= O.FM_NEAR then
-            local c = InsertAt(core, i, st)
-            if valid(P, c) then
-              local res, route = sim(c)
-              local sc = S.Objective(P, res, goal)
-              if not bscore or sc < bscore then bc, bs, br, bscore = c, res, route, sc end
-            end
-          end
+-- Flight masters right next to a step of the final route: activated whatever the gain ("activate
+-- nearby flight masters"). A flight path is worth it later, once the other end is known too, which the
+-- goal of this route does not see. Each one goes where the goal value suffers least.
+function S.AddNearbyFlightMasters(X)
+  local P = X.P
+  if not FlightDetours(P) then return end
+  local unknown, inCore = UnknownFlightMasters(X)
+  for fm in unknown do
+    local st = FlightPathStep(P, fm, true)
+    local bc, bs, br, bscore
+    for i, s in ipairs(X.core) do
+      local d = S.Dist(s.p, fm.p)
+      if d and d <= S.OPT.FM_NEAR then
+        local c = InsertAt(X.core, i, st)
+        if X.valid(P, c) then
+          local res, route = S.SearchSim(X, c)
+          local sc = S.Objective(P, res, X.goal)
+          if not bscore or sc < bscore then bc, bs, br, bscore = c, res, route, sc end
         end
-        if bc then core, bestRes, bestRoute, bestScore, inCore[fm.node] = bc, bs, br, bscore, true end
       end
     end
+    if bc then X.core, X.res, X.route, X.score, inCore[fm.node] = bc, bs, br, bscore, true end
   end
+end
 
-  return { route = bestRoute, res = bestRes, core = core, evals = evals, rounds = rounds, rebuilt = rebuilt, goal = goal,
-    mode = mode, seconds = S.clock and (S.clock() - t0) or nil, score = bestScore }
+-- Best Roadbook for a goal: construction (quests or chains of quests with the most XP per second
+-- added, until the goal is reached), then local search on the goal value: blocks of steps moved,
+-- quests removed or added, binds at an inn, flight paths activated on the way.
+-- "custom": every step of the list. A duration or level goal with a list (P.custom): the whole list
+-- when it does not reach the goal, completed with candidate quests (mode "keep"); otherwise the units
+-- of the list (quests) serving the goal best (mode "pick"), without candidates.
+-- Returns { route, res, core, evals, seconds, goal, mode }.
+function S.Optimize(P, goal, opts)
+  local X = NewSearch(P, goal, opts or {})
+  local start = { { kind = "start", p = P.player.pos, work = 0 } }
+  if X.mixed then
+    -- The whole list reaching the goal: only its best part; otherwise all of it, completed.
+    local whole = S.BuildCustom(P, start, X.rand)
+    X.mode = Reached(X, (S.SearchSim(X, whole))) and "pick" or "keep"
+    if X.mode == "keep" then start = whole
+    elseif P.custom.first then start = { start[1], P.custom.steps[P.custom.first] } end -- service shortcut kept
+    X.svcUnit = P.custom.first and P.custom.unitOf[P.custom.first] or nil
+  end
+  X.core = S.Construct(X, start, nil, S.OPT.BUILD_SHARE)
+  X.res, X.route = S.SearchSim(X, X.core)
+  X.score = S.Objective(P, X.res, X.goal)
+  local rounds = S.LocalSearch(X)
+  local rebuilt, more = S.DestroyAndRebuild(X)
+  S.AddNearbyFlightMasters(X)
+  return { route = X.route, res = X.res, core = X.core, evals = X.evals, rounds = rounds + more, rebuilt = rebuilt,
+    goal = X.goal, mode = X.mode, seconds = S.clock and (S.clock() - X.t0) or nil, score = X.score }
 end
 
 -- Shared with the next files.
