@@ -74,12 +74,9 @@ function Geo.SkillNeedText(n)
   return string.format(L["%s %d required to turn in (you: %d)"], n.name, n.need, n.have)
 end
 
--- QuestieDB npcFlags (vanilla 1.12 values).
-K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_BANKER, K.NPC_FLAG_REPAIR = 4, 16, 256, 16384
-K.NPC_FLAG_FLIGHT, K.NPC_FLAG_INNKEEPER = 8, 128
-
 -- Time to raise a profession by one point, averaged over every profession (setting "Time per skill point").
 K.SKILL_TIME = 20
+
 ---------------------------------------------------------------------------
 -- Around me
 ---------------------------------------------------------------------------

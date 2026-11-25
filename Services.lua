@@ -7,6 +7,10 @@ local Geo, AllIds, Dist, EntityPoints, HasBit, K, L = ns.Geo, ns.AllIds, ns.Dist
 local NpcFriendly, OM, PlayerFaction, PlayerPos, QDB, QGet = ns.NpcFriendly, ns.OM, ns.PlayerFaction, ns.PlayerPos, ns.QDB, ns.QGet
 local TravelSpeed = ns.TravelSpeed
 
+-- QuestieDB npcFlags (vanilla 1.12 values).
+K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_BANKER, K.NPC_FLAG_REPAIR = 4, 16, 256, 16384
+K.NPC_FLAG_FLIGHT, K.NPC_FLAG_INNKEEPER = 8, 128
+
 -- Trainers of a profession (player's faction), read once per skill: { id, name, p } per place.
 function Geo.SkillTrainers(skill)
   Geo.skillTrainers = Geo.skillTrainers or {}
