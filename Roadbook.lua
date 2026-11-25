@@ -58,18 +58,6 @@ function CP.StepPinLabel(s)
   return L["turn in the quest"]
 end
 
-function CP.StepText(s)
-  if s.kind == "fm" or s.kind == "bind" or s.kind == "service" then return (s.task.title or "?") .. " (" .. (s.task.npc or "?") .. ")" end
-  if s.kind == "hearth" or s.kind == "travel" or s.kind == "dungeon" then return s.task.title or "?" end
-  if s.kind == "skill" then
-    return string.format(L["Raise the %s skill to level %d"], s.skill.name, s.skill.need) .. " - " .. (s.task.title or "?")
-  end
-  local tag = (s.escort and L["Escort"]) or (s.kind == "take" and L["Pick up"]) or (s.kind == "obj" and L["Objective"]) or L["Turn in"]
-  local extra = s.kind == "obj" and s.r and (L[": "] .. (s.r.tg.name or L["objective"]) .. L[" x"] .. s.r.count)
-    or (s.search and string.format(L[" (possible place %d/%d)"], s.search.i, s.search.n)) or ""
-  return tag .. " - " .. (s.task.title or "?") .. extra
-end
-
 -- Roadbook focus, kept in memory separately from the map pin: the game clears its pin when
 -- you reach it (e.g. at the monster area), yet the focus must stay active.
 -- It is not kept across /reload.
@@ -275,7 +263,7 @@ function CP.FocusNext(silent, after)
     end
     if pick then
       CP.FocusStep(pick)
-      if not silent then Print(L["Focus: "] .. CP.StepText(pick)) end
+      if not silent then Print(L["Focus: "] .. CP.StepLine(pick)) end
       if Refresh then C_Timer.After(0.2, Refresh) end
       return
     end
@@ -445,7 +433,7 @@ function CP.AheadCheck()
       ahead[#ahead + 1] = st
     end
   end
-  if #ahead == 0 or not CP.Replan(L["Step done ahead: "] .. CP.StepText(ahead[1]) .. ". ") then return false end
+  if #ahead == 0 or not CP.Replan(L["Step done ahead: "] .. CP.StepLine(ahead[1]) .. ". ") then return false end
   for _, st in ipairs(ahead) do CP.aheadSeen[Geo.StepKey(st)] = st.task.id end -- only once started
   return true
 end
@@ -537,7 +525,7 @@ function CP.NearbyCheck()
     if not now[k] then CP.nearSeen[k] = nil end -- no longer on the spot
   end
   if not first then return end
-  local msg = (city and L["Steps in this city first: "] or L["Step nearby first: "]) .. CP.StepText(first) .. ". "
+  local msg = (city and L["Steps in this city first: "] or L["Step nearby first: "]) .. CP.StepLine(first) .. ". "
   if CP.Replan(msg, { near = { keys = keys, city = city } }) then
     for k in pairs(keys) do CP.nearSeen[k] = true end
   end
@@ -750,7 +738,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
     CP.ClearFocus()
     CP.FocusNext(true)
     local now = CP.focused
-    if now and not CP.SameStep(now, was) then Print(L["Focus: "] .. CP.StepText(now)) end
+    if now and not CP.SameStep(now, was) then Print(L["Focus: "] .. CP.StepLine(now)) end
   end, keep, re)
 end
 
@@ -758,7 +746,7 @@ end
 -- one, the focus moves to the next step.
 function CP.SkipStep(s)
   local followed = CP.CurrentFocus() == s
-  Print(L["Step skipped: "] .. CP.StepText(s))
+  Print(L["Step skipped: "] .. CP.StepLine(s))
   Geo.MarkDone(s)
   -- Transport skipped: the steps to come are planned again without it for the way to the next step
   -- (only this time: it can be proposed again later).
@@ -951,10 +939,10 @@ function CP.Reroute(st, pos, msg)
   local first = legs[1]
   msg = msg or L["Wrong destination: new route. "]
   if first then
-    Print(msg .. L["Focus: "] .. CP.StepText(first))
+    Print(msg .. L["Focus: "] .. CP.StepLine(first))
     CP.FocusStep(first)
   elseif target then
-    Print(msg .. L["Focus: "] .. CP.StepText(target))
+    Print(msg .. L["Focus: "] .. CP.StepLine(target))
     CP.FocusStep(target)
   else
     CP.FocusNext(false)

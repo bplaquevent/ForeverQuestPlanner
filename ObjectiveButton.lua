@@ -62,6 +62,20 @@ function Geo.RecallText(s)
   return "|T" .. tex .. ":14:14|t", { L["Cast "] .. name, saves }
 end
 
+-- The possible place of a quest giver searched (steps with s.search).
+local function SearchPlace(s)
+  return Color(K.DESC.warn, string.format(L["possible place %d/%d"], s.search.i, s.search.n))
+end
+
+-- A step on one line, for the chat: its title and what to do first (CP.StepSummary), and the
+-- possible place searched.
+function CP.StepLine(s)
+  local title, parts = CP.StepSummary(s)
+  local line = { title, parts and parts[1] }
+  if s.search then line[#line + 1] = SearchPlace(s) end
+  return table.concat(line, K.DESC_SEP)
+end
+
 -- Summary of a step: its title, then the parts of its description (each display joins them its way).
 function CP.StepSummary(s)
   local task = s.task
@@ -83,7 +97,7 @@ function CP.StepSummary(s)
     local icon, action = Geo.RecallText(s)
     return icon .. " " .. (task.title or "?"), action
   elseif s.kind == "travel" then
-    return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. (task.mode == "flight" and L["Flight"] or K.MODE_NAME[task.mode] or task.mode or L["Transport"]) ..
+    return "|TInterface\\Minimap\\Tracking\\FlightMaster:14:14|t " .. CP.Capitalize(task.mode == "flight" and L["Flight"] or K.MODE_NAME[task.mode] or task.mode or L["Transport"]) ..
       L[" to "] .. (task.dest or "?"), parts(L["Departure: "] .. (task.from or "?"), place)
   elseif s.kind == "dungeon" then
     local left = 0
@@ -113,7 +127,7 @@ function CP.StepSummary(s)
   elseif s.kind == "take" then
     local out = parts((s.search and L["Look for "] or L["Pick up from "]) .. (nameOnly(task.starter) or "?"), place)
     if s.search then
-      out[#out + 1] = Color(K.DESC.warn, string.format(L["possible place %d/%d"], s.search.i, s.search.n))
+      out[#out + 1] = SearchPlace(s)
     end
     if CP.IsFailed(task.id) then out[#out + 1] = Color(K.DESC.bad, L["failed: abandon it first"])
     elseif Geo.IsEscort(task.id) then out[#out + 1] = Color(K.DESC.warn, L["escort"]) end
