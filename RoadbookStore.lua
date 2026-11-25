@@ -103,7 +103,7 @@ end
 function Geo.Freeze(route, info)
   local steps = SerializeRoute(route)
   local slim = { count = info.count, xp = info.xp, total = info.total, mobXP = info.mobXP, levels = info.levels,
-    speed = info.speed, plevel = info.plevel, skipped = info.skipped, later = info.later, taxi = info.taxi,
+    speed = info.speed, plevel = info.plevel, skipped = info.skipped, taxi = info.taxi,
     custom = info.custom, unplanned = info.unplanned, dungeons = info.dungeons, discovered = info.discovered }
   Settings().roadbook = { saved = date and date("%H:%M") or "",
     start = Geo.CopyPoint(route[1].p), steps = steps, info = slim, recall = Geo.RecallState() }

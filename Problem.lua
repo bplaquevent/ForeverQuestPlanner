@@ -77,11 +77,8 @@ end
 -- follow-up they unlock (dep = number of the quest it follows).
 function Pb.Tasks(P, pos, plevel, live)
   local t0 = debugprofilestop()
-  Geo.ForgetLaterReasons()
-  local later = {} -- quests kept for max level
-  local tasks, skipped = BuildTasks(pos, plevel, later)
+  local tasks, skipped = BuildTasks(pos, plevel)
   local ctx = BuildScanContext()
-  ctx.later = later
   local list = {}
   local function add(task, dep)
     if #list >= K.BENCH_MAX_TASKS then return end
@@ -92,7 +89,7 @@ function Pb.Tasks(P, pos, plevel, live)
     Geo.Yield()
   end
   for _, task in ipairs(tasks) do add(task, nil) end
-  P.tasks, P.skipped, P.later = list, skipped, later
+  P.tasks, P.skipped = list, skipped
   P.buildSeconds = (debugprofilestop() - t0) / 1000 -- wall time, frames included
 end
 
@@ -393,7 +390,6 @@ end
 
 function Pb.Run(P)
   Geo.RunSliced(coroutine.create(function() Pb.Capture(P) end), function()
-    P.later = nil -- game objects
     ForeverQuestPlannerBench = ForeverQuestPlannerBench or {}
     ForeverQuestPlannerBench[P.char] = P
     Print(string.format(L["Test bench capture done: %d quests, %d map cells. Type /reload to write it to the file."],

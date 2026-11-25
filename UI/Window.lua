@@ -115,24 +115,6 @@ local function RenderXP()
     qItems[#qItems + 1] = { text = searching and L["No quest matches the search."]
       or L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] }
   end
-  -- Quests kept for max level: reward or access only useful at endgame.
-  local later = fz and fz.info.later
-  if later and #later > 0 then
-    local laterItems = {}
-    table.sort(later, function(a, b) return (a.level or 0) < (b.level or 0) end)
-    for _, e in ipairs(later) do
-      local text = "  " .. StateIcons(e.id) .. Geo.QuestTitle(e.title, { id = e.id, level = e.level }) ..
-        Geo.DescLine(Color(K.DESC.warn, L["To do at level "] .. Geo.MaxLevel() .. L[": "] .. (e.reason or "?")))
-      if not searching or MatchWords(Normalize(text), query) then
-        laterItems[#laterItems + 1] = { text = text, questID = e.id }
-      end
-    end
-    if #laterItems > 0 then
-      qItems[#qItems + 1] = { header = true, kind = "take", key = "later",
-        label = L["For max level - "] .. Plural(#laterItems, L["quest"]) .. L[" (easier and faster at that level)"] }
-      for _, it in ipairs(laterItems) do qItems[#qItems + 1] = it end
-    end
-  end
   if fz and #fz.route <= 1 and not searching then qItems[#qItems + 1] = { text = L["No usable quest found around you."] } end
   -- Search active: "shown / total" so that a filtered list is not taken for a short one.
   local count = Plural(shown or 0, L["quest"])

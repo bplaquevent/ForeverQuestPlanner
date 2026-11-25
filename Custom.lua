@@ -619,7 +619,7 @@ function Geo.ListRoute(P, opt)
     if st.kind == "fm" then discovered = discovered + 1 end
     if st.kind == "dungeon" then dungeons = dungeons + 1 end
   end
-  info.custom, info.dungeons, info.discovered, info.later = true, dungeons, discovered, {}
+  info.custom, info.dungeons, info.discovered = true, dungeons, discovered
   Geo.TraceService(route)
   return route, info
 end
@@ -644,7 +644,6 @@ end
 -- quests serving the goal best, or, when it alone goes beyond the goal, only its part serving it best
 -- (Solver.Optimize). The quests of the list that cannot be located stay in it, unplanned.
 function Geo.PlanGenerate(goal, opts)
-  Geo.PreloadRewardItems()
   local pos = PlayerPos()
   if not pos then return nil, L["Unknown position (in an instance or map unavailable)."] end
   local plevel = UnitLevel("player")
@@ -661,7 +660,7 @@ function Geo.PlanGenerate(goal, opts)
   P.ban = opts and opts.ban
   local opt = Geo.Solve(P, goal)
   local route, info = Geo.ListRoute(P, opt)
-  info.later, info.unplanned = P.later, unplanned
+  info.unplanned = unplanned
   return route, nil, info
 end
 
