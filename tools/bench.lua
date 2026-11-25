@@ -176,8 +176,7 @@ print(string.format("Candidate quests: %d (%d follow-ups), %d skipped; custom li
   #P.tasks, follow, P.skipped or 0, P.custom and #(P.custom.tasks or P.custom.list or {}) or 0))
 if P.buildSeconds then print(string.format("  quests prepared in game in %.1f s", P.buildSeconds)) end
 
--- A Roadbook of the current planner, evaluated by the solver: legacy accounting (must match the
--- game's times), then the full model.
+-- A Roadbook computed in game, evaluated again by the solver.
 local function Report(name, b)
   print("")
   print("== Roadbook " .. name .. " (current planner)")
@@ -189,15 +188,6 @@ local function Report(name, b)
   local info = b.info or {}
   local target = type(b.goal) == "table" and S.Goal(P, b.goal).target or nil
   print(string.format("  %d steps, in game: %s, %d XP", #route - 1, Time(info.total), info.xp or 0))
-  local leg = S.Evaluate(P, route, { legacy = true })
-  local worst, wi = 0, nil
-  for k = 2, #route do
-    local d = math.abs((leg.at[k] or 0) - (route[k].at or 0))
-    if d > worst then worst, wi = d, k end
-  end
-  print(string.format("  legacy evaluation: %s (gap %+d s), %d XP; largest step gap %d s%s", Time(leg.time),
-    math.floor(leg.time - (info.total or 0) + 0.5), leg.xp, math.floor(worst + 0.5),
-    wi and string.format(" (step %d %s %s)", wi - 1, route[wi].kind, tostring(route[wi].title)) or ""))
   local full = S.Evaluate(P, route, { targetLevel = target })
   print(string.format("  full evaluation: %s, %d XP (%d quests, %d monsters), level %d -> %d, %.0f XP/h%s",
     Time(full.time), full.xp, full.questXP, full.mobXP, pl.level, full.level, full.xp / math.max(full.time, 1) * 3600,
@@ -207,13 +197,13 @@ local function Report(name, b)
     print(string.format("  ! step %d (%s): %s", v.i - 1, tostring(route[v.i].title), v.what))
   end
   if opts.steps then
-    print(string.format("  %4s %-7s %-44s %9s %9s %9s %5s", "#", "kind", "step", "game", "legacy", "full", "lvl"))
+    print(string.format("  %4s %-7s %-44s %9s %9s %5s", "#", "kind", "step", "game", "full", "lvl"))
     for k = 2, #route do
       local st = route[k]
       local title = tostring(st.title or st.mode or "")
       if st.obj and st.obj.name then title = title .. " / " .. st.obj.name end
-      print(string.format("  %4d %-7s %-44s %9s %9s %9s %5d", k - 1, st.kind, title:sub(1, 44), Time(st.at),
-        Time(leg.at[k]), Time(full.at[k]), full.levels[k]))
+      print(string.format("  %4d %-7s %-44s %9s %9s %5d", k - 1, st.kind, title:sub(1, 44), Time(st.at),
+        Time(full.at[k]), full.levels[k]))
     end
   end
 end

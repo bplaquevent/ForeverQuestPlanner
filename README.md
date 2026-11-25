@@ -114,10 +114,15 @@ walked, places reached by the teleport spells) is shared by all your characters.
 | `/fqp passes` | Number of zone passes known (learned on foot, in all) |
 | `/fqp passes reset` | Forget the zone passes learned on foot |
 | `/fqp npc` | Diagnose the targeted NPC for the service shortcuts (class trainer data) |
+| `/fqp reset` | Erase everything the addon saved, for **every character** (after confirmation), and reload the interface: settings, quest lists, Roadbooks, hearthstone places and what was learned in game |
 | `/fqp dump` | Capture the Roadbook problem for the test bench (then `/reload`) |
 | `/fqp quest <id or name>` | What QuestieDB says about the matching quests (races, classes, prerequisites, exclusive quests, completed, quest givers: NPCs, objects, items) |
 
 The French command names (`journal`, `dispo`, `autour`, `reglages`, `foyer`) still work.
+
+## Saved data
+
+Addon updates do not convert saved data. When a version cannot use what the former one saved, it **erases everything** at login, for **every character**, and says so in the chat: settings and window positions, quest lists, Roadbooks, hearthstone places recorded, and what was learned in game (zone passes, class trainers). Going back to a former version does the same. `/fqp reset` erases it on demand.
 
 ## Test bench
 

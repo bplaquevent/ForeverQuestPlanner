@@ -447,9 +447,7 @@ function S.TurnInXP(P, id, level, fallback)
 end
 
 -- XP of a step at a player level: quest turn-in, monsters of an objective.
--- `legacy`: the XP computed in game when the plan was made (fixed).
-function S.StepXP(P, st, level, legacy)
-  if legacy then return st.xp or 0 end
+function S.StepXP(P, st, level)
   if st.kind == "turnin" then
     return S.TurnInXP(P, st.id, level, st.xp)
   elseif st.kind == "obj" then
@@ -458,7 +456,7 @@ function S.StepXP(P, st, level, legacy)
     return st.xp or 0
   elseif st.kind == "dungeon" then
     local xp = 0
-    for _, m in ipairs(st.members or {}) do xp = xp + S.StepXP(P, m, level, legacy) end
+    for _, m in ipairs(st.members or {}) do xp = xp + S.StepXP(P, m, level) end
     return xp
   end
   return 0
@@ -466,10 +464,7 @@ end
 
 -- Simulates a route (list of steps, route[1] = start) from the problem's starting state.
 -- Step: { kind, p, work, xp, id (quest), obj = { kills, mobLevel, elite }, via (way back key),
---         bindDest, fmNode, legacyFM, members (dungeon) }.
--- opts.legacy: the in-game accounting of the current planner (one network: the flight paths known
--- at the start, except the ones activated by the custom planner (legacyFM); danger and XP at the
--- starting level; teleports without cooldown).
+--         bindDest, fmNode, members (dungeon) }.
 -- Returns { time, xp, questXP, mobXP, level, xpLeft, at = {}, levels = {}, travel = {}, stepXP = {} (rested
 --           bonus included), rawXP = {},
 --           nets = {} (network of each leg), legs = { [i] = { from, to, net, level } } (travelled legs, not
@@ -477,7 +472,6 @@ end
 --           violations = { { i, kind ("recall", "level"), what } }, reach = time the goal level is reached }.
 function S.Evaluate(P, route, opts)
   opts = opts or {}
-  local legacy = opts.legacy
   local W = S.World(P)
   S.Prepare(P)
   local pl = P.player
@@ -498,47 +492,44 @@ function S.Evaluate(P, route, opts)
   local target = opts.targetLevel
   for i = 2, #route do
     local st = route[i]
-    local lvNow = legacy and pl.level or level
     res.nets[i], res.binds[i] = net, bind
-    if st.reqLevel and level < st.reqLevel and not legacy then
+    if st.reqLevel and level < st.reqLevel then
       res.violations[#res.violations + 1] = { i = i, kind = "level", ci = st.ci, what = "picked up below its required level " .. st.reqLevel }
     end
     local move, dest = 0, st.p
     if st.kind == "hearth" then
       move = st.cast or (st.p and st.p.cast) or P.k.HEARTH_TIME
-      if not legacy then
-        local s = sources[tostring(st.via or "hearth")]
-        if not s then
-          res.violations[#res.violations + 1] = { i = i, kind = "recall", what = "unknown way back " .. tostring(st.via) }
-        else
-          if t < s.ready then
-            res.wait = res.wait + (s.ready - t)
-            res.violations[#res.violations + 1] = { i = i, kind = "recall",
-              what = string.format("%s on cooldown: %d s to wait", tostring(st.via or "hearth"), s.ready - t) }
-            t = s.ready
-          end
-          if s.charges then
-            if s.charges <= 0 then res.violations[#res.violations + 1] = { i = i, kind = "recall", what = "no charge left" } end
-            s.charges = s.charges - 1
-          end
-          s.ready = t + move + s.cd
-          if s.src.bind or st.bindDest then dest = bind or st.p else dest = s.src.p or st.p end
+      local s = sources[tostring(st.via or "hearth")]
+      if not s then
+        res.violations[#res.violations + 1] = { i = i, kind = "recall", what = "unknown way back " .. tostring(st.via) }
+      else
+        if t < s.ready then
+          res.wait = res.wait + (s.ready - t)
+          res.violations[#res.violations + 1] = { i = i, kind = "recall",
+            what = string.format("%s on cooldown: %d s to wait", tostring(st.via or "hearth"), s.ready - t) }
+          t = s.ready
         end
+        if s.charges then
+          if s.charges <= 0 then res.violations[#res.violations + 1] = { i = i, kind = "recall", what = "no charge left" } end
+          s.charges = s.charges - 1
+        end
+        s.ready = t + move + s.cd
+        if s.src.bind or st.bindDest then dest = bind or st.p else dest = s.src.p or st.p end
       end
     else
       local legNet = (i == 2 and banNet) or net
-      res.legs[i] = { from = pos, to = st.p, net = legNet, level = lvNow }
-      move = S.Travel(W, legNet, lvNow, pos, st.p)
+      res.legs[i] = { from = pos, to = st.p, net = legNet, level = level }
+      move = S.Travel(W, legNet, level, pos, st.p)
     end
     t = t + move + (st.work or 0)
     pos = dest
     if st.kind == "bind" then bind = st.p end
-    -- Flight path activated: usable from the next leg (legacy: only the custom planner did it).
-    if st.kind == "fm" and st.fmNode and (not legacy or st.legacyFM) and not known[st.fmNode] then
+    -- Flight path activated: usable from the next leg.
+    if st.kind == "fm" and st.fmNode and not known[st.fmNode] then
       known[st.fmNode] = true
       net = S.Network(W, known, pl.speed)
     end
-    local gain = S.StepXP(P, st, level, legacy)
+    local gain = S.StepXP(P, st, level)
     res.rawXP[i] = gain
     if st.kind == "obj" then res.mobXP = res.mobXP + gain else res.questXP = res.questXP + gain end
     if st.kind == "obj" and gain > 0 and rested > 0 then

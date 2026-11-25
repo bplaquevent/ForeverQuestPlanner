@@ -15,6 +15,10 @@ local function Print(msg)
   DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg))
 end
 
+-- Format of the data the addon saves. Raised by every change that makes saved data unusable: a field
+-- renamed, moved, or of another type or meaning (not a new field that may be absent).
+local DATA_VERSION = 1
+
 local function CharKey()
   local name, realm = UnitFullName("player")
   realm = realm or (GetNormalizedRealmName and GetNormalizedRealmName()) or GetRealmName()
@@ -23,48 +27,6 @@ end
 
 -- What FQP saves is per character: ForeverQuestPlannerSettings.chars[CharKey()]; only what it learns
 -- about the world, true for every character, is shared (SharedData).
--- Former versions saved most settings for the whole account: each character takes them over once,
--- at its first use (its own entries of the tables keyed by character move to it, the other values
--- are copied as its defaults), except the values tied to another character.
-local CHAR_TABLES = { roadbook = true, bind = true, pins = true, mapSaved = true, custom = true }
-local NOT_INHERITED = { chars = true, shared = true, passes = true, teleportArrivals = true, goal = true, goalLevel = true, mountSpeed = true, lastTab = true,
-  horizon = true, keep = true, excluded = true, taxi = true, rewardFilter = true, collapsed = true, focus = true, activeRoadbook = true,
-  roadbookMigrated = true }
-
-local function DeepCopy(v)
-  if type(v) ~= "table" then return v end
-  local t = {}
-  for k, x in pairs(v) do t[k] = DeepCopy(x) end
-  return t
-end
-
-local function MigrateSettings(root, key)
-  local st = {}
-  for k, v in pairs(root) do
-    if CHAR_TABLES[k] then
-      if type(v) == "table" then
-        st[k] = {}
-        for sub, val in pairs(v) do
-          if sub == key then
-            st[k][sub] = val
-            v[sub] = nil
-          end
-        end
-      end
-    elseif not NOT_INHERITED[k] then
-      st[k] = DeepCopy(v)
-    end
-  end
-  -- The session duration is a preference; a level goal is only taken over by a character below it
-  -- (the one that set it: the others, above it, could not use it).
-  local level = UnitLevel and UnitLevel("player") or 0
-  if root.goalLevel and root.goalLevel > level then st.goalLevel = root.goalLevel end
-  local g = root.goal
-  if type(g) == "table" and (g.kind == "time" or (g.kind == "level" and (g.value or 0) > level)) then
-    st.goal = DeepCopy(g)
-  end
-  return st
-end
 
 -- A zone pass as saved: its place and its two zones (a damaged entry would break every walk).
 local function ValidPass(ps)
@@ -80,67 +42,58 @@ local function KeepValidPasses(list)
   return out
 end
 
+-- The root of the saved settings, created when nothing was saved.
+local function SettingsRoot()
+  if type(ForeverQuestPlannerSettings) ~= "table" then ForeverQuestPlannerSettings = {} end
+  return ForeverQuestPlannerSettings
+end
+
 local checkedShared -- the shared data checked this session
 
 -- Learned about the world, shared by every character: zone passes walked ({ c, x, y, a, b, n }) and
--- the places really reached by the teleport spells (spell -> point). Created once from what was saved
--- before (account-wide, then per character in 2.56.16): the same pass seen twice is kept once.
+-- the places really reached by the teleport spells (spell -> point).
 local function SharedData()
-  local root = ForeverQuestPlannerSettings
-  if type(root) ~= "table" then
-    root = {}
-    ForeverQuestPlannerSettings = root
+  local root = SettingsRoot()
+  root.shared = type(root.shared) == "table" and root.shared or {}
+  local shared = root.shared
+  if checkedShared ~= shared then
+    shared.passes = KeepValidPasses(shared.passes)
+    shared.teleportArrivals = type(shared.teleportArrivals) == "table" and shared.teleportArrivals or {}
+    checkedShared = shared
   end
-  if root.shared then
-    if checkedShared ~= root.shared then
-      root.shared.passes = KeepValidPasses(root.shared.passes)
-      root.shared.teleportArrivals = type(root.shared.teleportArrivals) == "table" and root.shared.teleportArrivals or {}
-      checkedShared = root.shared
-    end
-    return root.shared
-  end
-  local shared = { passes = {}, teleportArrivals = {} }
-  local function take(t)
-    if type(t) ~= "table" then return end
-    for _, ps in ipairs(KeepValidPasses(t.passes)) do
-      local same
-      for _, q in ipairs(shared.passes) do
-        if q.a == ps.a and q.b == ps.b and q.c == ps.c and math.abs(q.x - ps.x) < 150 and math.abs(q.y - ps.y) < 150 then
-          same = q
-          break
-        end
-      end
-      if same then same.n = math.max(same.n or 1, ps.n or 1) else table.insert(shared.passes, ps) end
-    end
-    for spell, p in pairs(type(t.teleportArrivals) == "table" and t.teleportArrivals or {}) do
-      shared.teleportArrivals[spell] = shared.teleportArrivals[spell] or p
-    end
-    t.passes, t.teleportArrivals = nil, nil
-  end
-  take(root)
-  for _, st in pairs(root.chars or {}) do take(st) end
-  root.shared, checkedShared = shared, shared
   return shared
 end
 
 local settingsCache = {}
 local function Settings()
-  local root = ForeverQuestPlannerSettings
-  if type(root) ~= "table" then
-    root = {}
-    ForeverQuestPlannerSettings = root
-  end
+  local root = SettingsRoot()
   if settingsCache.root == root then return settingsCache.st end
   root.chars = root.chars or {}
   local key = CharKey()
   local st = root.chars[key]
   if not st then
-    st = MigrateSettings(root, key)
+    st = {}
     root.chars[key] = st
   end
   -- Cached once the character is fully known (name and realm).
   if not (key:find("^%?%-") or key:find("%-%?$")) then settingsCache.root, settingsCache.st = root, st end
   return st
+end
+
+-- Everything the addon saves, for every character, back to a first installation.
+local function EraseData()
+  ForeverQuestPlannerSettings = { dataVersion = DATA_VERSION }
+  ForeverQuestPlannerDB, ForeverQuestPlannerBench = nil, nil
+end
+
+-- At login, before anything reads the saved data: data saved in another format is erased (the code
+-- only knows the current one). True when there was data to erase.
+local function CheckDataVersion()
+  local root = ForeverQuestPlannerSettings
+  if type(root) == "table" and root.dataVersion == DATA_VERSION then return false end
+  local saved = root ~= nil or ForeverQuestPlannerDB ~= nil or ForeverQuestPlannerBench ~= nil
+  EraseData()
+  return saved
 end
 
 local function Color(hex, s) return "|cff" .. hex .. tostring(s) .. "|r" end
@@ -1055,6 +1008,7 @@ ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PlayerBits = K, L, MoneyText, NextQu
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
 ns.OM, ns.SharedData, ns.TurnInText = OM, SharedData, TurnInText
+ns.CheckDataVersion, ns.EraseData = CheckDataVersion, EraseData
 ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
 ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQuests, LogRecord
 ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.QuestAllowed = AllIds, NpcFriendly, PlayerFaction, QuestAllowed
