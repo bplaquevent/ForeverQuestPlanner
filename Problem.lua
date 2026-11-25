@@ -51,7 +51,7 @@ function Pb.Step(st, live)
   end
   return { kind = st.kind, p = Geo.CopyPoint(st.p), work = st.work, xp = st.xp, id = t.id, title = t.title, obj = o,
     glue = st.glue or nil, escort = st.escort or nil, via = st.via, bindDest = st.bindDest,
-    fmNode = st.fmNode or (st.fmHub and st.fmHub.node) or nil, legacyFM = st.fmHub and true or nil,
+    fmNode = st.fmNode or (st.fmHub and st.fmHub.node) or nil,
     spotN = st.spot and st.spot.n, at = st.at, search = st.search, mode = t.mode, members = members, inside = st.inside and true or nil,
     reqLevel = st.kind == "take" and not t.levelWarn and t.reqLevel or nil, src = live and st or nil,
     spots = Pb.Spots(st, live) }

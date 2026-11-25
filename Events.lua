@@ -6,6 +6,7 @@ local CP, CreateMinimapButton, ExportAndSave, Geo, InitDeps, K = ns.CP, ns.Creat
 local L, OnWaypointChanged, PlayerPos, Print, Color, Refresh = ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print, ns.Color, ns.Refresh
 local ScheduleSnapshot, Settings, Snapshot, State = ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State
 local ToggleMainFrame, scan = ns.ToggleMainFrame, ns.scan
+local CheckDataVersion, EraseData = ns.CheckDataVersion, ns.EraseData
 
 ---------------------------------------------------------------------------
 -- Events
@@ -66,8 +67,9 @@ On({ "PLAYER_LOGIN" }, function()
     Print(Color("ff4040", f.disabled))
     return
   end
-  local okData, errData = pcall(ns.Migrate) -- saved data of former versions (Migrations.lua)
-  if not okData then Print(Color("ff4040", L["Saved data not updated: "] .. tostring(errData))) end
+  if CheckDataVersion() then
+    Print(Color("ff8000", L["This version cannot use the saved data: it has been erased, for every character."]))
+  end
   -- Options saved from the settings window or the tabs.
   local st = Settings()
   if type(st.goal) == "table" and (st.goal.kind == "time" or st.goal.kind == "level") and st.goal.value then
@@ -207,6 +209,21 @@ end)
 ---------------------------------------------------------------------------
 -- Commands
 ---------------------------------------------------------------------------
+StaticPopupDialogs["FQP_RESET"] = {
+  text = L["Erase all the data saved by Forever Quest Planner?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, hearthstone places recorded, and what the addon learned in game (zone passes, class trainers). This cannot be undone. The interface is then reloaded."],
+  button1 = L["Erase"],
+  button2 = CANCEL or L["Cancel"],
+  OnAccept = function()
+    if CP.RefuseWhileComputing() then return end
+    EraseData()
+    ReloadUI()
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
 SLASH_FOREVERQUESTPLANNER1 = "/fqp"
 SlashCmdList.FOREVERQUESTPLANNER = function(msg)
   if f.disabled then
@@ -273,6 +290,8 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     for _, line in ipairs(Geo.NpcInfo()) do Print(line) end
   elseif msg:sub(1, 6) == "quest " then
     ns.QuestDiag(msg:sub(7))
+  elseif msg == "reset" then
+    if not CP.RefuseWhileComputing() then StaticPopup_Show("FQP_RESET") end
   elseif msg == "dump" then
     Geo.BenchDump()
   else
