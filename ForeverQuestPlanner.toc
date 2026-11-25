@@ -20,6 +20,8 @@ Migrations.lua
 Available.lua
 Geo.lua
 Planner.lua
+Rewards.lua
+Services.lua
 Route.lua
 Custom.lua
 Problem.lua
@@ -32,4 +34,5 @@ RoadbookPanel.lua
 UI\Window.lua
 UI\Settings.lua
 UI\MainFrame.lua
+Debug.lua
 Events.lua
