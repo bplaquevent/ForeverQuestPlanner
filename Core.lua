@@ -643,9 +643,9 @@ local function GetXP(questID)
   return DBXP(questID, UnitLevel("player"))
 end
 
--- Zone where the objectives take place, and dungeon/raid hint.
+-- Zone where the objectives take place, and what the game tag says: dungeon or raid, elite.
 local function GetQuestPlace(questID)
-  local mapZone, isInstance, instanceName
+  local mapZone, isInstance, instanceName, gameElite
   if GetQuestUiMapID and C_Map and C_Map.GetMapInfo then
     local ok, mapID = pcall(GetQuestUiMapID, questID)
     if ok and mapID and mapID > 0 then
@@ -661,8 +661,9 @@ local function GetQuestPlace(questID)
     local ok, tag = pcall(C_QuestLog.GetQuestTagInfo, questID)
     if ok and tag then
       tagName = tag.tagName
-      if Enum and Enum.QuestTag and (tag.tagID == Enum.QuestTag.Dungeon or tag.tagID == Enum.QuestTag.Raid) then
-        isInstance = true
+      if Enum and Enum.QuestTag then
+        if tag.tagID == Enum.QuestTag.Dungeon or tag.tagID == Enum.QuestTag.Raid then isInstance = true end
+        if tag.tagID == Enum.QuestTag.Group then gameElite = true end -- shown as "Elite" by the game
       end
     end
   end
@@ -677,7 +678,7 @@ local function GetQuestPlace(questID)
       mapZone = AreaName(m.sort)
     end
   end
-  return mapZone, isInstance, tagName, instanceName
+  return mapZone, isInstance, tagName, instanceName, gameElite
 end
 
 -- The character's last quest log capture (Snapshot), or nil.
@@ -727,7 +728,7 @@ local function Snapshot()
       elseif not info.isHidden and info.questID and info.questID > 0 then
         local id = info.questID
         local desc, objText = GetQuestTexts(id)
-        local mapZone, isInstance, tagName, instanceName = GetQuestPlace(id)
+        local mapZone, isInstance, tagName, instanceName, gameElite = GetQuestPlace(id)
         quests[#quests + 1] = {
           id = id,
           title = info.title,
@@ -736,6 +737,7 @@ local function Snapshot()
           isInstance = isInstance,
           instanceName = instanceName,
           tag = tagName,
+          gameElite = gameElite,
           level = info.level,
           difficultyLevel = info.difficultyLevel,
           suggestedGroup = info.suggestedGroup,

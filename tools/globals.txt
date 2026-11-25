@@ -18,7 +18,6 @@ ChatFrame_OpenChat
 CreateFrame
 CreateVector2D
 DEFAULT_CHAT_FRAME
-ELITE
 Enum
 ForeverQuestPlannerBench
 ForeverQuestPlannerDB

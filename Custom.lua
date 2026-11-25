@@ -381,7 +381,7 @@ function Geo.CustomChanged()
       if token == State.customToken and ns.CP then ns.CP.Recompute("custom", true) end
     end)
   end
-  if ns.Refresh then ns.Refresh() end
+  ns.Refresh()
   Geo.SyncQuestLogButton()
 end
 

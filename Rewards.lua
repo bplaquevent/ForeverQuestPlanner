@@ -53,7 +53,7 @@ function Geo.BuildRewardIndexAsync()
       C_Timer.After(0, step)
     else
       rewardIndex, rewardIndexBuilding = idx, nil
-      if Refresh then Refresh() end
+      Refresh()
     end
   end
   step()

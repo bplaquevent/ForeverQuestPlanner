@@ -246,12 +246,12 @@ SlashCmdList.FOREVERQUESTPLANNER = function(msg)
     local st = Settings()
     st.noHearth = not st.noHearth or nil
     Print(st.noHearth and L["Hearthstone ignored by the Roadbook."] or L["Hearthstone used by the Roadbook."])
-    if Refresh then Refresh() end
+    Refresh()
   elseif msg == "teleport" or msg == "teleports" or msg == "tp" then
     local st = Settings()
     st.noRecallSpells = not st.noRecallSpells or nil
     Print(st.noRecallSpells and L["Class teleports ignored by the Roadbook."] or L["Class teleports used by the Roadbook."])
-    if Refresh then Refresh() end
+    Refresh()
   elseif msg == "icon" then
     local s = Settings()
     s.hideMinimap = not s.hideMinimap
