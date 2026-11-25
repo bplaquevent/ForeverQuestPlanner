@@ -1500,6 +1500,7 @@ return {
     HEARTH_CD = 3600,
     HEARTH_MIN_GAIN = 120,
     HEARTH_TIME = 30,
+    SERVICE_TIME = 60,
     INN_DETOUR = 500,
     KILLS_NO_RATE = 2,
     K_HUBS = 3,

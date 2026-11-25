@@ -253,7 +253,7 @@ local function CustomFrom(n)
     -- Service shortcut (Geo.ServiceStep): at the place of the last step (the player's place when the
     -- list is empty), before every other step.
     local at = ci > 0 and out.steps[ci].p or P.player.pos
-    local svc = { kind = "service", p = at, work = P.k.SERVICE_TIME or 60, -- (not in older captures)
+    local svc = { kind = "service", p = at, work = P.k.SERVICE_TIME,
       title = "Service", ci = ci + 1 }
     out.steps[ci + 1] = svc
     for k = 1, ci do

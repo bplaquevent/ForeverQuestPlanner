@@ -162,6 +162,7 @@ return {
     HEARTH_CD = 3600,
     HEARTH_MIN_GAIN = 120,
     HEARTH_TIME = 30,
+    SERVICE_TIME = 60,
     INN_DETOUR = 500,
     K_HUBS = 3,
     OVERHEAD = 20,
