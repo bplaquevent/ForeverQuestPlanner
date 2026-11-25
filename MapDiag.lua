@@ -1,15 +1,29 @@
 -- Forever Quest Planner: TEMPORARY diagnostics of the world map (erratic centering, quest details,
--- route not shown). Only records while the trace is on (/fqp trace on), in the Roadbook trace of the
--- saved data. To remove: this file and its line in the .toc.
+-- route not shown). Records by itself, without any command, in Settings().mapDiag of the saved data
+-- (with the Roadbook's own trace lines), the last DIAG_MAX lines. To remove: this file and its line in
+-- the .toc.
 -- It only observes: the addon's own Geo functions are wrapped, the game's are watched with
 -- hooksecurefunc / HookScript; nothing of OpenMap or of the game is replaced.
 
 local ADDON_NAME, ns = ...
 local Geo, K, OM, Settings, IsInLog, CP = ns.Geo, ns.K, ns.OM, ns.Settings, ns.IsInLog, ns.CP
 
-K.TRACE_MAX = 3000 -- room for the map lines while diagnosing
+local DIAG_MAX = 3000
 
-local function On() return Settings().traceOn end
+local function Record(text)
+  local st = Settings()
+  st.mapDiag = st.mapDiag or {}
+  local t = st.mapDiag
+  t[#t + 1] = date("%H:%M:%S") .. " " .. text
+  while #t > DIAG_MAX do table.remove(t, 1) end
+end
+
+-- The Roadbook's trace lines (computations, followed step…), with or without /fqp trace on.
+local trace = Geo.Trace
+Geo.Trace = function(kind, text)
+  Record(tostring(kind) .. " " .. tostring(text))
+  return trace(kind, text)
+end
 
 local function Num(n) return type(n) == "number" and string.format("%.3f", n) or "-" end
 
@@ -34,18 +48,16 @@ local function State()
 end
 
 local function Log(text)
-  if not On() then return end
-  Geo.Trace("map", string.format("t=%.2f %s %s", GetTime(), text, State()))
+  local ok, state = pcall(State)
+  Record(string.format("map t=%.2f %s %s", GetTime(), text, ok and state or ("? " .. tostring(state))))
 end
 
 -- Calls of one of the addon's functions: logged before, with what they are called with.
 local function Watch(name, describe)
   local original = Geo[name]
   Geo[name] = function(...)
-    if On() then
-      local ok, text = pcall(describe or function() return "" end, ...)
-      Log(name .. " " .. (ok and text or "?"))
-    end
+    local ok, text = pcall(describe or function() return "" end, ...)
+    Log(name .. " " .. (ok and text or "?"))
     return original(...)
   end
 end
@@ -60,7 +72,6 @@ end
 
 -- Where the map ends up after a click.
 local function Follow(label)
-  if not On() then return end
   for _, delay in ipairs({ 0.1, 0.5, 2, 5, 10 }) do
     C_Timer.After(delay, function() Log(label .. " +" .. delay .. "s") end)
   end
@@ -68,11 +79,9 @@ end
 
 local clickStep = Geo.ClickStep
 Geo.ClickStep = function(st)
-  if On() then
-    local ok, text = pcall(StepText, st)
-    Log("click " .. (ok and text or "?"))
-    Follow("after click")
-  end
+  local ok, text = pcall(StepText, st)
+  Log("click " .. (ok and text or "?"))
+  Follow("after click")
   return clickStep(st)
 end
 
@@ -86,7 +95,7 @@ local lastDraw
 local draw = Geo.MapDraw
 Geo.MapDraw = function(...)
   local result = draw(...)
-  if On() then
+  do
     local ok, text = pcall(function()
       local owner = Geo.MapOwner()
       if not owner then return "nothing: no holder" end
@@ -136,6 +145,8 @@ end
 local mapInit = Geo.MapInit
 Geo.MapInit = function(...)
   local result = mapInit(...)
+  Record("---- login, addon " .. tostring(Geo.Version and Geo.Version() or "?"))
+  ns.Print("map diagnostics are recording (temporary).")
   pcall(Hook)
   C_Timer.After(5, function() pcall(Hook) end) -- the world map and quest log may load after the login
   pcall(OM.api.RegisterCallback, ADDON_NAME .. "Diag", "OpenMap_StitchedChanged", function(_, on)
