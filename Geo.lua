@@ -519,14 +519,14 @@ end
 
 ---------------------------------------------------------------------------
 -- Zones and the walking passes between them: a walk from a zone to another goes through a pass
--- (mountain pass, tunnel, bridge), a straight line within a zone. Passes: those learned in game
--- (the player walked from a zone to another, account-wide), else QuestieDB's patrols crossing a
--- border and the Warcraft Wiki's (Data/Passes.lua). Zones without any pass: straight line.
+-- (mountain pass, tunnel, bridge), a straight line within a zone. Passes: QuestieDB's patrols
+-- crossing a border and the Warcraft Wiki's (Data/Passes.lua), completed by those learned in game
+-- (the player walked from a zone to another, account-wide). Zones without any pass: straight line.
 ---------------------------------------------------------------------------
 K.ZONE_CELL = 100        -- yards: zone lookups cached by squares of this size
 K.PASS_PATH_FACTOR = 1.2 -- a walk through passes: its main detours are already in its way
 K.PASS_MIN = 200         -- yards: shorter walks stay straight
-K.PASS_MERGE = 150       -- yards: a learned pass this close to another of the same zones is the same
+K.PASS_MERGE = 150       -- yards: two passes of the same zones this close are the same one
 K.PASS_TICK = 2          -- seconds between two position readings (learning)
 K.PASS_SLACK = 1.5       -- a move longer than speed x time x this is no walk (transport, teleport)
 K.PATROL_GAP = 80        -- yards: a patrol's path ends this close on both sides of a border make a pass
@@ -593,24 +593,29 @@ local function PatrolPasses(out)
   end
 end
 
--- Every pass: { c, x, y, a, b }. A pair of zones with a learned pass uses only the learned ones.
+-- The pass of `list` that is the same as `ps`: same two zones, within K.PASS_MERGE; nil if none.
+local function SamePass(list, ps)
+  for _, other in ipairs(list) do
+    local d = other.a == ps.a and other.b == ps.b and Dist(other, ps)
+    if d and d < K.PASS_MERGE then return other end
+  end
+end
+
+-- Every pass: { c, x, y, a, b }. Those of the other sources (patrols, wiki), then the learned ones
+-- that add a way: the learned passes already listed are kept in the saved data only.
 function Geo.Passes()
   if Geo.passList then return Geo.passList end
-  local list, learned, others = {}, {}, {}
-  for _, ps in ipairs(Geo.LearnedPasses()) do
-    list[#list + 1] = ps
-    learned[ps.a .. ":" .. ps.b] = true
-  end
-  if GeoReady() then pcall(PatrolPasses, others) end
+  local list = {}
+  if GeoReady() then pcall(PatrolPasses, list) end
   for _, s in ipairs(ns.PASSES) do
     local ok, c, w = pcall(C_Map.GetWorldPosFromMapPos, s[1], CreateVector2D(s[2] / 100, s[3] / 100))
     if ok and c and w then
       local x, y = w:GetXY()
-      others[#others + 1] = { c = c, x = x, y = y, a = math.min(s[1], s[4]), b = math.max(s[1], s[4]) }
+      list[#list + 1] = { c = c, x = x, y = y, a = math.min(s[1], s[4]), b = math.max(s[1], s[4]) }
     end
   end
-  for _, ps in ipairs(others) do
-    if not learned[ps.a .. ":" .. ps.b] then list[#list + 1] = ps end
+  for _, ps in ipairs(Geo.LearnedPasses()) do
+    if not SamePass(list, ps) then list[#list + 1] = ps end
   end
   Geo.passList = list
   return list
@@ -643,16 +648,15 @@ function Geo.PassTick()
   if not (last and zone and last.zone and last.zone ~= zone) then return end
   local dt, d = now - last.t, Dist(last.p, p)
   if not d or dt > K.PASS_TICK * 2 or d > math.max(speed, last.speed) * dt * K.PASS_SLACK + 5 then return end
-  local mid = { c = p.c, x = (last.p.x + p.x) / 2, y = (last.p.y + p.y) / 2 }
-  local a, b = math.min(last.zone, zone), math.max(last.zone, zone)
+  local mid = { c = p.c, x = (last.p.x + p.x) / 2, y = (last.p.y + p.y) / 2,
+    a = math.min(last.zone, zone), b = math.max(last.zone, zone) }
   local list = Geo.LearnedPasses()
-  for _, ps in ipairs(list) do
-    if ps.a == a and ps.b == b and Dist(ps, mid) and Dist(ps, mid) < K.PASS_MERGE then
-      ps.n = (ps.n or 1) + 1
-      return
-    end
+  local known = SamePass(list, mid)
+  if known then
+    known.n = (known.n or 1) + 1
+    return
   end
-  list[#list + 1] = { c = mid.c, x = math.floor(mid.x + 0.5), y = math.floor(mid.y + 0.5), a = a, b = b, n = 1 }
+  list[#list + 1] = { c = mid.c, x = math.floor(mid.x + 0.5), y = math.floor(mid.y + 0.5), a = mid.a, b = mid.b, n = 1 }
   Geo.PassesChanged()
   ns.Print(string.format(L["Zone pass learned: %s - %s."], last.name or "?", name or "?"))
 end
