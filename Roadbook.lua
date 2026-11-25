@@ -239,7 +239,6 @@ function Geo.Recompute(goal, cb, keepDone, re)
       local old = keepDone and Geo.Frozen()
       if old then
         route = Geo.KeepDone(old, CP.StepDone, route, info, info)
-        info.later = old.info.later
       end
       Geo.AdoptPlan(route, info)
     end

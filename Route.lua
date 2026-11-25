@@ -2,9 +2,9 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, Dist, Geo, GetItemInfoCompat, K, L, Print = ns.AreaName, ns.Dist, ns.Geo, ns.GetItemInfoCompat, ns.K, ns.L, ns.Print
-local Settings, LearnedData, LearnedChar, Solver, TaxiCount, WorldPos, scan = ns.Settings, ns.LearnedData, ns.LearnedChar, ns.Solver, ns.TaxiCount, ns.WorldPos, ns.scan
-local LogQuests, State = ns.LogQuests, ns.State
+local AreaName, Dist, Geo, K, L, Print = ns.AreaName, ns.Dist, ns.Geo, ns.K, ns.L, ns.Print
+local Settings, LearnedData, LearnedChar, Solver, TaxiCount, WorldPos = ns.Settings, ns.LearnedData, ns.LearnedChar, ns.Solver, ns.TaxiCount, ns.WorldPos
+local State = ns.State
 
 ---------------------------------------------------------------------------
 -- Roadbook trace: the changes of the Roadbook (plan saved or emptied, step marked, focus, list), kept per
@@ -395,33 +395,6 @@ function Geo.RecallStep(src, destP, gain)
     p = { c = destP.c, x = destP.x, y = destP.y, area = destP.area, ui = destP.ui, mx = destP.mx, my = destP.my,
       zoneName = destP.zoneName, teleport = true, cast = src.cast },
     task = { title = title, xp = 0, hearth = true, spell = src.spell } }
-end
-
--- Reward items of the quests (log and available) asked to the game before planning, up to
--- K.ITEM_WAIT seconds: otherwise an item not cached yet counts as "no interest" and the next
--- computation, with the data, gives another Roadbook.
-K.ITEM_WAIT = 3
-function Geo.PreloadRewardItems()
-  local idx, missing = Geo.RewardIndex(), {}
-  local function want(qid)
-    for _, itemId in ipairs(idx[qid] or {}) do
-      if not GetItemInfoCompat(itemId) then -- asks the server when not cached
-        missing[#missing + 1] = itemId
-        if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemId) end
-      end
-    end
-  end
-  for _, q in ipairs(LogQuests()) do want(q.id) end
-  for _, en in ipairs(scan.entries or {}) do want(en.id) end
-  local start = GetTime()
-  while #missing > 0 and State.co and coroutine.running() == State.co and (GetTime() - start) < K.ITEM_WAIT do
-    coroutine.yield() -- next frame
-    local still = {}
-    for _, itemId in ipairs(missing) do
-      if not GetItemInfoCompat(itemId) then still[#still + 1] = itemId end
-    end
-    missing = still
-  end
 end
 
 -- "Adapt" options: { kind = "time", value = seconds } (most XP in that time) or

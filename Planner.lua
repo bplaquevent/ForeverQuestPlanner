@@ -431,7 +431,7 @@ local function MakeStops(task, pos, plevel)
 end
 
 -- Quest to pick up (available, or a follow-up unlocked by the plan) -> plannable task.
-function Geo.TakeTask(en, plevel, pos, later)
+function Geo.TakeTask(en, plevel, pos)
   local t = QuestTargets(en.id)
   if #t.finish == 0 then return nil end
   if (t.missing or 0) > 0 then return nil end -- an objective without a position: cannot be planned
@@ -449,11 +449,6 @@ function Geo.TakeTask(en, plevel, pos, later)
   if unlock > plevel then task.reqLevel = unlock end
   task.stops = MakeStops(task, pos, plevel)
   if not task.stops then return nil end
-  Geo.CheckLater(task, plevel)
-  if task.later then
-    Geo.RecordLater(later, task)
-    return nil
-  end
   return task
 end
 
@@ -493,7 +488,7 @@ function Geo.Followers(task, ctx, plevel)
       if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
         and (Geo.UnlockLevel(en) or math.huge) <= Geo.PlanCeiling(plevel) then
-        local f = Geo.TakeTask(en, plevel, from, ctx.later)
+        local f = Geo.TakeTask(en, plevel, from)
         if f then
           f.dep, f.depth, f.done = task, (task.depth or 0) + 1, done
           task.followers[#task.followers + 1] = f
@@ -508,12 +503,6 @@ end
 
 function Geo.MaxLevel()
   return (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 60
-end
-
--- Quest set aside for max level (shown separately in the Roadbook).
-function Geo.RecordLater(list, task)
-  for _, e in ipairs(list) do if e.id == task.id then return end end
-  list[#list + 1] = { id = task.id, title = task.title, level = task.level, reason = task.later }
 end
 
 ---------------------------------------------------------------------------
@@ -687,12 +676,7 @@ function Geo.MaxQuestLevel(id, plevel, reqLevel, tag)
   return math.max(plevel, reqLevel or 0) + (elite and K.MAX_ELITE_GAP or K.MAX_LEVEL_GAP)
 end
 
--- Quest kept for max level (endgame reward or access): task.later = reason.
-function Geo.CheckLater(task, plevel)
-  if plevel < Geo.MaxLevel() then task.later = Geo.LaterReason(task.id, plevel) end
-end
-
-local function BuildTasks(pos, plevel, later)
+local function BuildTasks(pos, plevel)
   local tasks, skipped = {}, 0
   for _, q in ipairs(LogQuests()) do
     local xp = q.xp or DBXP(q.id, plevel) or 0
@@ -716,16 +700,8 @@ local function BuildTasks(pos, plevel, later)
         local task = { id = q.id, title = q.title, level = q.level, kind = q.complete and "turnin" or "do",
           xp = xp, targets = t, remaining = remaining }
         task.stops = MakeStops(task, pos, plevel)
-        Geo.CheckLater(task, plevel)
-        if ready then
-          task.later = nil -- the objective is done: turn the quest in now
-          task.quick = true
-        end
-        if task.later then
-          Geo.RecordLater(later, task)
-        else
-          tasks[#tasks + 1] = task
-        end
+        if ready then task.quick = true end
+        tasks[#tasks + 1] = task
       else
         skipped = skipped + 1
       end
@@ -750,7 +726,7 @@ local function BuildTasks(pos, plevel, later)
   local taken = 0
   for i, n in ipairs(near) do
     if taken >= K.MAX_TAKE_CANDIDATES then break end
-    local task = Geo.TakeTask(n.en, plevel, pos, later)
+    local task = Geo.TakeTask(n.en, plevel, pos)
     if task then
       tasks[#tasks + 1] = task
       taken = taken + 1

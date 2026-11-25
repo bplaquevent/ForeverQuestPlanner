@@ -33,12 +33,10 @@ GetInventoryItemLink
 GetItemCooldown
 GetItemCount
 GetItemInfo
-GetItemStats
 GetMaxPlayerLevel
 GetNormalizedRealmName
 GetNumQuestLogChoices
 GetNumQuestLogRewards
-GetNumTalentTabs
 GetPlayerFacing
 GetProfessionInfo
 GetProfessions
@@ -59,7 +57,6 @@ GetRealmName
 GetSpellCooldown
 GetSpellInfo
 GetSpellTexture
-GetTalentTabInfo
 GetTime
 GetUnitSpeed
 GetXPExhaustion

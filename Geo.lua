@@ -3,7 +3,7 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, Color, HasBit, K, L, OM, QDB, QGet = ns.AreaName, ns.Color, ns.HasBit, ns.K, ns.L, ns.OM, ns.QDB, ns.QGet
-local Settings, LearnedData, LearnedChar, PlayerFaction, NpcFriendly = ns.Settings, ns.LearnedData, ns.LearnedChar, ns.PlayerFaction, ns.NpcFriendly
+local LearnedData, LearnedChar, PlayerFaction, NpcFriendly = ns.LearnedData, ns.LearnedChar, ns.PlayerFaction, ns.NpcFriendly
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
