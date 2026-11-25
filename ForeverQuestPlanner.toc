@@ -25,7 +25,10 @@ Services.lua
 Route.lua
 Custom.lua
 Problem.lua
-UI\Lists.lua
+UI\Tracking.lua
+UI\QuestDesc.lua
+UI\ListEngine.lua
+UI\Export.lua
 UI\Tabs.lua
 UI\QuestLogHook.lua
 Roadbook.lua
