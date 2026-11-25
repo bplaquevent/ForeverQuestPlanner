@@ -2,10 +2,10 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local CP, CharKey, CreateMinimapButton, ExportAndSave, Geo = ns.CP, ns.CharKey, ns.CreateMinimapButton, ns.ExportAndSave, ns.Geo
-local InitDeps, K, L, OnWaypointChanged, PlayerPos, Print = ns.InitDeps, ns.K, ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print
-local Color, Refresh, ScheduleSnapshot, Settings, Snapshot = ns.Color, ns.Refresh, ns.ScheduleSnapshot, ns.Settings, ns.Snapshot
-local State, ToggleMainFrame, scan = ns.State, ns.ToggleMainFrame, ns.scan
+local CP, CreateMinimapButton, ExportAndSave, Geo, InitDeps, K = ns.CP, ns.CreateMinimapButton, ns.ExportAndSave, ns.Geo, ns.InitDeps, ns.K
+local L, OnWaypointChanged, PlayerPos, Print, Color, Refresh = ns.L, ns.OnWaypointChanged, ns.PlayerPos, ns.Print, ns.Color, ns.Refresh
+local ScheduleSnapshot, Settings, Snapshot, State = ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State
+local ToggleMainFrame, scan = ns.ToggleMainFrame, ns.scan
 
 ---------------------------------------------------------------------------
 -- Events
@@ -66,11 +66,10 @@ On({ "PLAYER_LOGIN" }, function()
     Print(Color("ff4040", f.disabled))
     return
   end
-  Settings().focus = nil -- old saved focus (versions 2.32.1-2.32.2)
+  local okData, errData = pcall(ns.Migrate) -- saved data of former versions (Migrations.lua)
+  if not okData then Print(Color("ff4040", L["Saved data not updated: "] .. tostring(errData))) end
   -- Options saved from the settings window or the tabs.
   local st = Settings()
-  Geo.MigrateRoadbooks()
-  Geo.MigrateAutoRoadbook()
   if type(st.goal) == "table" and (st.goal.kind == "time" or st.goal.kind == "level") and st.goal.value then
     State.xpGoal = { kind = st.goal.kind, value = st.goal.value }
   end
@@ -123,7 +122,7 @@ On({ "UNIT_SPELLCAST_SUCCEEDED" }, function(_, unit, _, spellID)
         pcall(Geo.RecordTeleport, spellID, PlayerPos()) -- the real arrival of this teleport
       else
         local name = GetBindLocation and GetBindLocation()
-        local st = Geo.BindStore()[CharKey()]
+        local st = Settings().bind
         if not (st and st.name == name) then pcall(Geo.RecordBind, PlayerPos()) end
       end
       pcall(CP.OnGameEvent, "FQP_HEARTH_ARRIVED", key)

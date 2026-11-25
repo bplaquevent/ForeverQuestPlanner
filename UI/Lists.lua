@@ -2,11 +2,11 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local ChainInfo, ChainText, CharKey, Color, FormatNumber, Geo = ns.ChainInfo, ns.ChainText, ns.CharKey, ns.Color, ns.FormatNumber, ns.Geo
-local GeoReady, IsClassMeta, IsCompleted, IsInLog, K, L = ns.GeoReady, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L
-local PointText, Print, QDB, QGet, QuestMeta, Refresh = ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.Refresh
-local Settings, Snapshot, State, TrivialRange, TurnInText = ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange, ns.TurnInText
-local LogRecord, LogQuests, IsQuestComplete, Normalize = ns.LogRecord, ns.LogQuests, ns.IsQuestComplete, ns.Normalize
+local ChainInfo, ChainText, Color, FormatNumber, Geo, GeoReady = ns.ChainInfo, ns.ChainText, ns.Color, ns.FormatNumber, ns.Geo, ns.GeoReady
+local IsClassMeta, IsCompleted, IsInLog, K, L, PointText = ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.PointText
+local Print, QDB, QGet, QuestMeta, Refresh, Settings, Snapshot = ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.Refresh, ns.Settings, ns.Snapshot
+local State, TrivialRange, TurnInText, LogRecord, LogQuests = ns.State, ns.TrivialRange, ns.TurnInText, ns.LogRecord, ns.LogQuests
+local IsQuestComplete, Normalize = ns.IsQuestComplete, ns.Normalize
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -647,12 +647,6 @@ local function WatchOnly(questID)
 end
 
 -- Pin placed by the addon (OpenMap's waypoint), remembered per character.
-local function PinStore()
-  local s = Settings()
-  s.pins = s.pins or {}
-  return s.pins
-end
-
 -- The waypoint OpenMap follows now sits on this map point.
 function Geo.WaypointAt(ui, x, y)
   local m, wx, wy = ns.OM.worldmap.WaypointPoint()
@@ -661,10 +655,10 @@ end
 
 -- Active addon pin, or nil if the waypoint was cleared or replaced by another one.
 local function ActivePin()
-  local pin = PinStore()[CharKey()]
+  local pin = Settings().pin
   if not pin then return nil end
   if not (pin.ui and Geo.WaypointAt(pin.ui, pin.x, pin.y)) then
-    PinStore()[CharKey()] = nil
+    Settings().pin = nil
     return nil
   end
   return pin
@@ -680,7 +674,7 @@ end
 -- Clears the addon pin (OpenMap's waypoint, when it is still ours).
 local function ClearPin()
   if ActivePin() then pcall(ns.OM.worldmap.ClearPin) end
-  PinStore()[CharKey()] = nil
+  Settings().pin = nil
 end
 
 -- Game map pin icon, or a text fallback if the atlas does not exist in this client.
@@ -881,21 +875,21 @@ local function PinPoint(p, title, label, questId)
   end
   local x, y = (p.mx or 50) / 100, (p.my or 50) / 100
   -- Recorded first: the waypoint event fired during TrackPoint reads this record (Geo.MapOnWaypoint).
-  PinStore()[CharKey()] = { questId = questId, title = title, label = label, ui = ui, x = x, y = y,
+  Settings().pin = { questId = questId, title = title, label = label, ui = ui, x = x, y = y,
     place = PointText(p), area = p.area, mx = p.mx, my = p.my }
   local done = pcall(ns.OM.worldmap.TrackPoint, ui, x, y, title and label and (title .. " - " .. label) or title)
   if done then
     Print(L["Pin: "] .. (title or "?") .. (label and (" - " .. label) or "") .. " - " .. PointText(p))
     if Refresh then C_Timer.After(0.1, Refresh) end
   else
-    PinStore()[CharKey()] = nil
+    Settings().pin = nil
     Print(string.format(L["This client cannot place a pin here (%s)."], PointText(p)))
   end
 end
 
 -- The addon pin as recorded (map point), whether or not OpenMap still follows it.
 function Geo.PinRecord()
-  return PinStore()[CharKey()]
+  return Settings().pin
 end
 
 -- Map (uiMap) of a point, or nil.

@@ -355,7 +355,7 @@ K.DANGER_FACTOR = 1.5   -- extra cost of walking in a dangerous zone (detours, f
 K.K_HUBS = 3            -- number of transport points considered at departure and arrival
 K.DOCK_MERGE = 60       -- yards: transport ends this close are one dock
 K.NODE_MATCH = 150      -- yards: a flight master this close to a flight node is that node
-K.TRANSPORT_MODE = { boat = "bateau", zeppelin = "zeppelin", airship = "airship" }
+K.SHIP_MODES = { boat = true, zeppelin = true, airship = true } -- OpenMap's kinds of transport lines
 
 local function PlayerFactionBit()
   local f = PlayerFaction()
@@ -468,7 +468,7 @@ function Geo.Transports()
 end
 
 function Geo.IsShip(mode)
-  return mode == "zeppelin" or mode == "bateau" or mode == "airship"
+  return K.SHIP_MODES[mode] == true
 end
 
 -- Docks of the character's faction and the lines between them (directed), built once.
@@ -505,7 +505,7 @@ function Geo.Docks()
     return #docks
   end
   for _, t in ipairs(Geo.Transports()) do
-    local mode = K.TRANSPORT_MODE[t[1]]
+    local mode = Geo.IsShip(t[1]) and t[1]
     if mode and (t.faction == "Neutral" or t.faction == faction) then
       local a = dockAt(t[3], t[4], t[5], mode, t[2])
       local b = dockAt(t[6], t[7], t[8], mode, t[2])

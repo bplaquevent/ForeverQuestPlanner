@@ -2,12 +2,12 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local AreaName, CharKey, DBXP, Geo, GiverText, IsCompleted = ns.AreaName, ns.CharKey, ns.DBXP, ns.Geo, ns.GiverText, ns.IsCompleted
-local IsInLog, K, L, MakeStops, PlayerPos, Print, QDB, QGet = ns.IsInLog, ns.K, ns.L, ns.MakeStops, ns.PlayerPos, ns.Print, ns.QDB, ns.QGet
-local QuestTargets, RemainingTargets, Settings, QuestPrereqs = ns.QuestTargets, ns.RemainingTargets, ns.Settings, ns.QuestPrereqs
-local Color, PlayerFaction, QuestDoubts, State, PlayerBits = ns.Color, ns.PlayerFaction, ns.QuestDoubts, ns.State, ns.PlayerBits
-local QuestAllowed, Analyze, IsClassMeta, IsProfMeta, LogById = ns.QuestAllowed, ns.Analyze, ns.IsClassMeta, ns.IsProfMeta, ns.LogById
-local LogQuests, QuestCategory, QuestMeta = ns.LogQuests, ns.QuestCategory, ns.QuestMeta
+local AreaName, DBXP, Geo, GiverText, IsCompleted, IsInLog, K = ns.AreaName, ns.DBXP, ns.Geo, ns.GiverText, ns.IsCompleted, ns.IsInLog, ns.K
+local L, MakeStops, PlayerPos, Print, QDB, QGet, QuestTargets = ns.L, ns.MakeStops, ns.PlayerPos, ns.Print, ns.QDB, ns.QGet, ns.QuestTargets
+local RemainingTargets, Settings, QuestPrereqs, Color = ns.RemainingTargets, ns.Settings, ns.QuestPrereqs, ns.Color
+local PlayerFaction, QuestDoubts, State, PlayerBits, QuestAllowed = ns.PlayerFaction, ns.QuestDoubts, ns.State, ns.PlayerBits, ns.QuestAllowed
+local Analyze, IsClassMeta, IsProfMeta, LogById, LogQuests = ns.Analyze, ns.IsClassMeta, ns.IsProfMeta, ns.LogById, ns.LogQuests
+local QuestCategory, QuestMeta = ns.QuestCategory, ns.QuestMeta
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.DUNGEON_WAVE_DEPTH = 20 -- safety: dungeon visits following one another
@@ -20,9 +20,8 @@ K.DUNGEON_ICON = "|TInterface\\Icons\\INV_Misc_Key_03:14:14|t"
 function Geo.CustomRec()
   local st = Settings()
   st.custom = st.custom or {}
-  local k = CharKey()
-  st.custom[k] = st.custom[k] or { list = {} }
-  return st.custom[k]
+  st.custom.list = st.custom.list or {}
+  return st.custom
 end
 
 -- Service shortcut (vendor, repair, class trainer) waiting to be done: the NPC chosen, first step of
@@ -47,54 +46,6 @@ function Geo.ServiceStep()
   for _, def in ipairs(K.SERVICES) do if def.key == sv.kind then title = def.title end end
   return { kind = "service", p = Geo.CopyPoint(sv.p), work = K.SERVICE_TIME,
     task = { title = title .. (sv.name or "?"), npc = sv.name, npcId = sv.id, service = sv.kind, xp = 0 } }
-end
-
--- Versions with two Roadbooks (automatic and custom, each saved apart): the one that was active
--- stays the Roadbook, its goal selected; the other one is dropped. The custom quest list stays.
-function Geo.MigrateRoadbooks()
-  local st = Settings()
-  local ck = CharKey()
-  local active = st.activeRoadbook and st.activeRoadbook[ck]
-  -- Older versions (one Roadbook per view mode): the custom mode selected.
-  if not active and not (st.roadbookMigrated and st.roadbookMigrated[ck]) and Geo.CustomRec().mode == "custom" then
-    active = "custom"
-  end
-  if st.roadbookMigrated then
-    st.roadbookMigrated[ck] = nil
-    if next(st.roadbookMigrated) == nil then st.roadbookMigrated = nil end
-  end
-  Geo.CustomRec().mode = nil
-  if st.activeRoadbook then
-    st.activeRoadbook[ck] = nil
-    if next(st.activeRoadbook) == nil then st.activeRoadbook = nil end
-  end
-  local store = st.roadbook
-  local old = store and store[ck .. "|custom"]
-  if not (active or old) then return end -- nothing to migrate
-  if old then store[ck .. "|custom"] = nil end
-  if active == "custom" and old then store[ck] = old end
-end
-
--- Versions with an automatic Roadbook (its quests chosen at each computation): it becomes the
--- Roadbook of a list, its quests not turned in yet, with the steps done kept.
-function Geo.MigrateAutoRoadbook()
-  local st = Settings()
-  local rec = st.roadbook and st.roadbook[CharKey()]
-  if not (rec and rec.info) or rec.info.custom then return end
-  local list, seen = {}, {}
-  local function add(id, title, level)
-    if not id or seen[id] or IsCompleted(id) then return end
-    seen[id] = true
-    list[#list + 1] = { id = id, title = title or ("#" .. id), level = level }
-  end
-  for _, s in ipairs(rec.steps or {}) do
-    local t = s.task or {}
-    if s.kind == "take" or s.kind == "obj" or s.kind == "turnin" then add(t.id, t.title, t.level) end
-    for _, m in ipairs(s.members or {}) do add(m.id, m.title, m.level) end
-  end
-  Geo.CustomSetList(list, true)
-  rec.info.custom = true
-  rec.info.goal, rec.info.goalStage, rec.info.generated, rec.excluded = nil, nil, nil, nil
 end
 
 function Geo.CustomIndex(id)

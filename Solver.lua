@@ -250,7 +250,7 @@ function S.KnownKey(known)
 end
 
 -- Transport skipped by the player (P.ban = { mode, from = departure point, to = arrival point }):
--- a flight ("vol") bans every flight leaving the flight master at `from`, a boat or zeppelin its
+-- a flight bans every flight leaving the flight master at `from`, a boat or zeppelin its
 -- line from the dock at `from` to the dock at `to`.
 S.BAN_RADIUS = 200 -- yards
 function S.Near(a, b, r)
@@ -290,7 +290,7 @@ function S.Network(W, known, speed, ban)
   for i = 1, n do
     D[i], nxt[i], via[i] = {}, {}, {}
     local a = hubs[i]
-    local banned = ban and ban.mode == "vol" and a.node and S.Near(a.p, ban.from, S.BAN_RADIUS)
+    local banned = ban and ban.mode == "flight" and a.node and S.Near(a.p, ban.from, S.BAN_RADIUS)
     local fd = a.node and not banned and S.FlightDists(W, a.node, known) or nil
     for j = 1, n do
       nxt[i][j] = j
@@ -312,7 +312,7 @@ function S.Network(W, known, speed, ban)
   end
   for _, l in ipairs(W.links) do
     local i, j = dockIndex[l[1]], dockIndex[l[2]]
-    local banned = ban and ban.mode ~= "vol" and i and j and S.Near(hubs[i].p, ban.from, S.BAN_RADIUS)
+    local banned = ban and ban.mode ~= "flight" and i and j and S.Near(hubs[i].p, ban.from, S.BAN_RADIUS)
       and S.Near(hubs[j].p, ban.to, S.BAN_RADIUS)
     if i and j and not banned and k.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = k.TRANSPORT_TIME, l[3] end
   end
