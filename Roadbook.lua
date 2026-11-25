@@ -36,7 +36,7 @@ function CP.EscortFailed(s)
   if CP.escortFailNotified == s then return end
   CP.escortFailNotified = s
   local take = s.task.stops and s.task.stops[1]
-  Print(Color("ff6060", L["Escort failed: "]) .. (s.task.title or "?") ..
+  Print(Color(K.DESC.bad, L["Escort failed: "]) .. (s.task.title or "?") ..
     L[". Abandon the quest, then pick it up again from "] .. CP.EscortNpc(s.task) .. ".")
   if take and take.kind == "take" then
     Geo.MarkDone(take, false)

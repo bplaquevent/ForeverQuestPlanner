@@ -50,7 +50,7 @@ function Geo.DungeonMemberLines(task)
     elseif m.kind == "turnin" then what = L["turn in"]
     else what = ((m.r and m.r.tg.name) or L["objective"]) .. L[" x"] .. ((m.r and m.r.count) or "?") end
     local line = "- " .. ((m.task and m.task.title) or "?") .. L[": "] .. what
-    lines[#lines + 1] = CP.StepDone(m) and Color("40ff40", line .. L[" (done)"]) or Color(K.DESC.action, line)
+    lines[#lines + 1] = CP.StepDone(m) and Color(K.DESC.good, line .. L[" (done)"]) or Color(K.DESC.action, line)
   end
   return lines
 end
@@ -179,7 +179,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   -- To watch: one line each.
   local unplanned = #(info.unplanned or {})
   if unplanned > 0 then
-    lines[#lines + 1] = Color("ff6060", Plural(unplanned, L["quest"]) .. L[" cannot be planned"])
+    lines[#lines + 1] = Color(K.DESC.bad, Plural(unplanned, L["quest"]) .. L[" cannot be planned"])
   end
   if info.taxi == 0 then
     lines[#lines + 1] = Color("ff8040", CP.Capitalize(L["no flight master recorded (open a flight map)"]))
