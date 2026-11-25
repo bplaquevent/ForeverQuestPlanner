@@ -215,7 +215,7 @@ function Geo.Recompute(goal, cb, keepDone, re)
     if route and #route >= 2 and goal ~= "custom" then
       Geo.AcceptGenerated(route, info, function(ok)
         if cb then cb(ok and route or nil, not ok and L["Adaptation cancelled: the Roadbook and its list are unchanged."] or err, info) end
-        if Refresh then C_Timer.After(0.1, Refresh) end
+        C_Timer.After(0.1, Refresh)
       end, keepDone and function(newRoute)
         local old = Geo.Frozen()
         if not old then return newRoute end
@@ -231,7 +231,7 @@ function Geo.Recompute(goal, cb, keepDone, re)
       Geo.AdoptPlan(route, info)
     end
     if cb then cb(route, err, info) end
-    if Refresh then C_Timer.After(0.1, Refresh) end
+    C_Timer.After(0.1, Refresh)
   end, re and re.opts)
 end
 
@@ -264,7 +264,7 @@ function CP.FocusNext(silent, after)
     if pick then
       CP.FocusStep(pick)
       if not silent then Print(L["Focus: "] .. CP.StepLine(pick)) end
-      if Refresh then C_Timer.After(0.2, Refresh) end
+      C_Timer.After(0.2, Refresh)
       return
     end
     Print(L["Roadbook finished: every quest of the list is done."])
@@ -328,7 +328,7 @@ function CP.DoTrackOn()
   if not ok then Print(L["Roadbook update error: "] .. tostring(res)) end
   if not (ok and res) then CP.FocusNext(false) end
   CP.RefreshButton()
-  if Refresh then Refresh() end
+  Refresh()
 end
 
 -- Hearthstone and class teleports ---------------------------------------------
@@ -594,7 +594,7 @@ end
 function CP.TrackOff(quiet)
   CP.StopFocus()
   if not quiet then Print(L["Tracking off: the Roadbook is only computed again by the Recompute icon or a change of its list. Turn the tracking on to follow it again."]) end
-  if Refresh then C_Timer.After(0.1, Refresh) end
+  C_Timer.After(0.1, Refresh)
 end
 
 -- Empties the Roadbook after confirmation: tracking stopped, steps and list emptied.
@@ -617,7 +617,7 @@ function CP.DoEmpty()
   Print(L["Roadbook emptied."])
   Geo.SyncQuestLogButton()
   CP.RefreshButton()
-  if Refresh then Refresh() end
+  Refresh()
 end
 
 StaticPopupDialogs["FQP_EMPTY"] = {
@@ -668,7 +668,7 @@ function CP.SetGoal(kind, value)
   State.xpGoal = { kind = kind, value = value }
   st.goal = { kind = kind, value = value }
   scan.dirty = true -- the levels scanned for the Roadbook follow the goal
-  if Refresh then Refresh() end
+  Refresh()
 end
 
 -- "Adapt" button: the list is completed or trimmed for the chosen session or level and the Roadbook
@@ -697,7 +697,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
     State.computing, State.computeStart = true, GetTime()
     Geo.SyncQuestLogButton() -- the list is locked
     if not keep then Geo.ClearFrozen() end
-    if Refresh then Refresh() end
+    Refresh()
     pcall(CP.RefreshButton) -- the Objective button waits
   end
   if token ~= CP.computeToken then return end -- deleted meanwhile
@@ -708,7 +708,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
       State.computing = nil
       pcall(CP.RefreshButton)
       Geo.SyncQuestLogButton()
-      if Refresh then Refresh() end
+      Refresh()
     end) then
     return
   end
@@ -762,7 +762,7 @@ function CP.SkipStep(s)
     CP.FocusNext(false, s)
   else
     CP.RefreshButton()
-    if Refresh then Refresh() end
+    Refresh()
   end
 end
 
@@ -947,7 +947,7 @@ function CP.Reroute(st, pos, msg)
   else
     CP.FocusNext(false)
   end
-  if Refresh then C_Timer.After(0.2, Refresh) end
+  C_Timer.After(0.2, Refresh)
   return true
 end
 
@@ -995,7 +995,7 @@ function CP.GiverFound(a1, a2)
   end
   if handled then
     Geo.MapSync()
-    if Refresh then C_Timer.After(0.2, Refresh) end
+    C_Timer.After(0.2, Refresh)
   end
   return handled
 end
@@ -1005,7 +1005,7 @@ function CP.SetAutoAdd(on)
   Settings().autoAdd = on and true or nil
   Print(on and L["Auto mode on: each quest you accept is proposed for the Roadbook list."]
     or L["Auto mode off."])
-  if Refresh then Refresh() end
+  Refresh()
   if Geo.MapPanelSync then pcall(Geo.MapPanelSync) end
 end
 

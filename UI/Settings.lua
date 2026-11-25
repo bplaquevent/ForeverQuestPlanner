@@ -67,7 +67,7 @@ function Geo.SettingsCheck(box, label, x, y, get, set, panel)
   cb.label:SetText(label)
   cb:SetScript("OnClick", function(self)
     set(self:GetChecked() and true or false)
-    if Refresh then Refresh() end
+    Refresh()
   end)
   panel.updaters[#panel.updaters + 1] = function() cb:SetChecked(get() and true or false) end
   return cb
@@ -292,7 +292,7 @@ function Geo.ToggleSettings()
     w:SetScript("OnShow", function() w.panel.Update() end)
     w:SetScript("OnHide", function()
       -- The values apply to the next Roadbook; the open window shows them.
-      if Refresh then Refresh() end
+      Refresh()
     end)
     Geo.settingsWindow = w
   end

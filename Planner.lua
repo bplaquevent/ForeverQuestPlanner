@@ -611,17 +611,18 @@ function Geo.DungeonCombat(id)
   return false
 end
 
--- The game tag saying a quest is elite.
-function Geo.IsEliteTag(tag)
-  return tag ~= nil and (tag == ELITE or tag:find(ns.ELITE_TAG_PATTERN) ~= nil)
+-- Whether the game tags a quest of the log as elite (read with the log, Core.lua).
+function Geo.IsGameElite(id)
+  local q = LogEntry(id)
+  return q and q.gameElite or false
 end
 
--- Elite quest: tagged "Elite" by the game (quest log), otherwise most of the monsters of its
--- objectives (to kill, or dropping the requested items) are elites in QuestieDB.
+-- Elite quest: tagged so by the game (quest log), otherwise most of the monsters of its objectives
+-- (to kill, or dropping the requested items) are elites in QuestieDB.
 Geo.elite = {}
-function Geo.IsEliteQuest(id, tag)
+function Geo.IsEliteQuest(id)
   -- A quest has a single game tag ("Dungeon" wins over "Elite"): it only settles the "Elite" case.
-  if Geo.IsEliteTag(tag) then return true end
+  if id and Geo.IsGameElite(id) then return true end
   if not id then return false end
   local v = Geo.elite[id]
   if v ~= nil then return v end
@@ -655,7 +656,7 @@ end
 -- Level from which the Roadbook takes a quest on: its required level, and its quest level minus the
 -- allowed gap ("Difficulty" settings). nil: elite quest while elite quests are excluded.
 function Geo.UnlockLevel(en)
-  local gap = Geo.MaxQuestLevel(en.id, 0, 0, en.tag)
+  local gap = Geo.MaxQuestLevel(en.id, 0, 0)
   if gap == -math.huge then return nil end
   return math.max(en.reqLevel or 0, (en.level or 0) - gap)
 end
@@ -670,8 +671,8 @@ end
 
 -- Highest quest level the Roadbook takes on, from your level (or the required level, if higher);
 -- elite quests are excluded when the "Include elite quests" option is unchecked.
-function Geo.MaxQuestLevel(id, plevel, reqLevel, tag)
-  local elite = Geo.IsEliteQuest(id, tag)
+function Geo.MaxQuestLevel(id, plevel, reqLevel)
+  local elite = Geo.IsEliteQuest(id)
   if elite and Settings().noElite then return -math.huge end -- "Include elite quests" unchecked
   return math.max(plevel, reqLevel or 0) + (elite and K.MAX_ELITE_GAP or K.MAX_LEVEL_GAP)
 end
@@ -689,7 +690,7 @@ local function BuildTasks(pos, plevel)
       skipped = skipped + 1 -- profession level too low to turn it in
     elseif not ready and (q.isInstance or q.instanceName) and Geo.DungeonCombat(q.id) then
       skipped = skipped + 1 -- dungeon / raid quest (game tag): only turned in when it is ready
-    elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel, nil, q.tag or "") + 1) then
+    elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel) + 1) then
       local t = QuestTargets(q.id)
       local remaining, unmatched = {}, 0
       if not q.complete then remaining, unmatched = RemainingTargets(q, t) end

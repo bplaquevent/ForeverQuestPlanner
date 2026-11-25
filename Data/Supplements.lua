@@ -83,7 +83,6 @@ ns.SUBNAMES_FLIGHT_MASTER = { "Flight Master", "Gryphon Master", "Wind Rider Mas
 ns.SUBNAMES_INNKEEPER = { "Innkeeper", "[Aa]ubergiste" }
 ns.MAILBOX_NAMES = { "mailbox", "boîte aux lettres", "boite aux lettres" }
 
--- Game quest tags (localized by the client): of a dungeon or raid quest, when the game gives no tag
--- id for it, and of an elite quest.
+-- Game quest tags (localized by the client) of a dungeon or raid quest, when the game gives no tag id
+-- for it.
 ns.DUNGEON_TAG_WORDS = { "Donjon", "Dungeon", "Raid" }
-ns.ELITE_TAG_PATTERN = "[EÉ]lite"

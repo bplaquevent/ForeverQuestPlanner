@@ -30,7 +30,7 @@ StaticPopupDialogs["FQE_ABANDON"] = {
       if IsInLog(questID) then
         Print(L["|cffff6060The game did not take the abandon into account.|r Abandon it from the quest log (L)."])
       end
-      if Refresh then Refresh() end
+      Refresh()
     end)
   end,
   timeout = 0,
@@ -152,7 +152,7 @@ local function PinPoint(p, title, label, questId)
   local done = pcall(ns.OM.worldmap.TrackPoint, ui, x, y, title and label and (title .. " - " .. label) or title)
   if done then
     Print(L["Pin: "] .. (title or "?") .. (label and (" - " .. label) or "") .. " - " .. PointText(p))
-    if Refresh then C_Timer.After(0.1, Refresh) end
+    C_Timer.After(0.1, Refresh)
   else
     Settings().pin = nil
     Print(string.format(L["This client cannot place a pin here (%s)."], PointText(p)))

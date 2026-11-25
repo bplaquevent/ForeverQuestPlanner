@@ -4,6 +4,7 @@
 local ADDON_NAME, ns = ...
 local AreaName, Color, HasBit, K, L, OM, QDB, QGet = ns.AreaName, ns.Color, ns.HasBit, ns.K, ns.L, ns.OM, ns.QDB, ns.QGet
 local LearnedData, LearnedChar, PlayerFaction, NpcFriendly = ns.LearnedData, ns.LearnedChar, ns.PlayerFaction, ns.NpcFriendly
+local Print = ns.Print
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
@@ -601,12 +602,20 @@ local function SamePass(list, ps)
   end
 end
 
+local patrolFailureTold -- said once a session
+
 -- Every pass: { c, x, y, a, b }. Those of the other sources (patrols, wiki), then the learned ones
 -- that add a way: the learned passes already listed are kept in the saved data only.
 function Geo.Passes()
   if Geo.passList then return Geo.passList end
   local list = {}
-  if GeoReady() then pcall(PatrolPasses, list) end
+  if GeoReady() then
+    local ok, err = pcall(PatrolPasses, list) -- QuestieDB's data: the other passes stay usable
+    if not ok and not patrolFailureTold then
+      patrolFailureTold = true
+      Print(L["Zone passes from QuestieDB's patrols unavailable: "] .. tostring(err))
+    end
+  end
   for _, s in ipairs(ns.PASSES) do
     local ok, c, w = pcall(C_Map.GetWorldPosFromMapPos, s[1], CreateVector2D(s[2] / 100, s[3] / 100))
     if ok and c and w then
