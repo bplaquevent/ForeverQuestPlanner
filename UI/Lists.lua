@@ -880,7 +880,7 @@ local function PinPoint(p, title, label, questId)
     return
   end
   local x, y = (p.mx or 50) / 100, (p.my or 50) / 100
-  -- Recorded first: OpenMap redraws its waypoint during TrackPoint (see the PinAt lock, RoadbookMap.lua).
+  -- Recorded first: the waypoint event fired during TrackPoint reads this record (Geo.MapOnWaypoint).
   PinStore()[CharKey()] = { questId = questId, title = title, label = label, ui = ui, x = x, y = y,
     place = PointText(p), area = p.area, mx = p.mx, my = p.my }
   local done = pcall(ns.OM.worldmap.TrackPoint, ui, x, y, title and label and (title .. " - " .. label) or title)

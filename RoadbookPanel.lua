@@ -10,8 +10,9 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K
-local L, IsInLog, OM, OpenQuestDetails, Plural, RouteText = ns.L, ns.IsInLog, ns.OM, ns.OpenQuestDetails, ns.Plural, ns.RouteText
-local Settings, UpdateScrollBar, State = ns.Settings, ns.UpdateScrollBar, ns.State
+local L, Plural, RouteText, Settings, UpdateScrollBar, State = ns.L, ns.Plural, ns.RouteText, ns.Settings, ns.UpdateScrollBar, ns.State
+local IsInLog = ns.IsInLog
+local OpenQuestDetails = ns.OpenQuestDetails
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line
@@ -217,17 +218,22 @@ end
 local function RowEnter(self)
   if self.step then
     Geo.StepTooltip(self, self.step, self.n,
-      L["Click: center the map and select the quest in the quest log"] .. "\n" .. L["Right-click: actions of the step"],
+      K.CLICK_STEP_TIP .. "\n" .. L["Right-click: actions of the step"],
       "ANCHOR_LEFT")
   end
 end
 
--- Actions of a step not done ({ label, fn, tooltip }): remove its quest, "Not here" (a possible
--- place of the quest giver), skip the followed hearthstone / transport step.
+-- Actions of a step ({ label, fn, tooltip, reads = changes nothing }): show its quest (in the quest
+-- log); for a step not done: remove its quest, "Not here" (a possible place of the quest giver), skip
+-- the followed hearthstone / transport step.
 local function StepActions(st)
   local acts = {}
-  if CP.StepDone(st) then return acts end
   local qid = st.task and st.task.id
+  if qid and IsInLog(qid) then
+    acts[#acts + 1] = { L["Show the quest"], function() OpenQuestDetails(qid) end,
+      L["Opens the quest in the quest log beside the map."], reads = true }
+  end
+  if CP.StepDone(st) then return acts end
   if st.search and qid then
     acts[#acts + 1] = { L["Not here"], function() CP.SkipStep(st) end,
       L["The quest giver is not at this place: the step is marked done and the Objective button moves to the next place to check."] }
@@ -255,10 +261,11 @@ local function RowClick(self, button)
     GameTooltip:Hide()
     MenuUtil.CreateContextMenu(self, function(_, root)
       root:CreateTitle(st.task and st.task.title or L["Roadbook step"])
-      local locked = State.computing -- every action of a step changes the Roadbook
-      if locked then root:CreateTitle(Color("ffd100", L["Recomputing…"])) end
+      local computing = State.computing -- what changes the Roadbook waits for it
+      if computing then root:CreateTitle(Color("ffd100", L["Recomputing…"])) end
       for _, a in ipairs(acts) do
         local d = root:CreateButton(a[1], a[2])
+        local locked = computing and not a.reads
         if locked then d:SetEnabled(false) end
         if d and d.SetTooltip then
           d:SetTooltip(function(tip)
@@ -271,19 +278,7 @@ local function RowClick(self, button)
     end)
     return
   end
-  if not (WorldMapFrame and WorldMapFrame:IsShown()) then
-    Geo.ShowStep(st) -- map closed: it opens on the step
-    return
-  end
-  local u, v = Geo.MapUV(st.p)
-  local qid = st.task and st.task.id
-  if qid and IsInLog(qid) then
-    -- The quest log opens on the quest (it moves the map to the quest's zone): the step is centered after it.
-    OpenQuestDetails(qid)
-    if u then C_Timer.After(0, function() pcall(OM.api.ShowWorld, u, v) end) end
-  elseif u then
-    pcall(OM.api.ShowWorld, u, v)
-  end
+  Geo.ClickStep(st)
 end
 
 local function NewRow(parent)

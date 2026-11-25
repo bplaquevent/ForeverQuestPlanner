@@ -4,9 +4,12 @@
 -- A Roadbook "holds" the map while it is followed (mode "track") or previewed (mode "preview", a click
 -- on a step of the Roadbook): its remaining steps are drawn as numbered pins joined by its route, in
 -- pin sets of its own on OpenMap's stitched map (only it creates, updates or clears them), the
--- current objective highlighted. Meanwhile the player's OpenMap pins are hidden and no pin can be
--- added; when the Roadbook lets the map go, the map gets back exactly what it showed before
--- (the player's pins shown or hidden as they were, and the waypoint followed before tracking).
+-- current objective highlighted. Meanwhile the player's OpenMap pins are hidden (OpenMap's own
+-- switch: the player can show them again and add pins); when the Roadbook lets the map go, the map
+-- gets back what it showed before (the player's pins shown or hidden as they were, and the waypoint
+-- followed before tracking). OpenMap's functions are called, never replaced.
+-- The drawing uses OpenMap's own pin sets (MapStitch, checked at load, Core.lua): its public API
+-- places frames on the game's map canvas, which OpenMap makes see-through in a fight.
 
 local ADDON_NAME, ns = ...
 local CP, CharKey, ClearPin, Geo, K, L, OM, IsInLog = ns.CP, ns.CharKey, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM, ns.IsInLog
@@ -45,12 +48,6 @@ function Geo.MapOwner()
   return OwnerStore()[CharKey()]
 end
 
--- OpenMap functions as they were before the locks (Geo.MapInstallLocks).
-Geo.mapOrig = {}
-local function Orig(name)
-  return Geo.mapOrig[name] or OM.worldmap[name]
-end
-
 -- The Roadbook takes the map. The map's state is saved only the first time: a preview that
 -- becomes the tracking keeps the state from before the preview.
 function Geo.MapClaim(mode)
@@ -61,7 +58,7 @@ function Geo.MapClaim(mode)
     local m, x, y = wm.WaypointPoint()
     saved = { hidden = wm.PinsHidden() and true or false, wp = (m and x) and { m, x, y } or nil }
     store[ck] = saved
-    pcall(Orig("SetPinsHidden"), true)
+    pcall(wm.SetPinsHidden, true)
   end
   if mode == "track" then saved.tookWp = true end -- the tracking moves the waypoint
   saved.mode, saved.kind = mode, nil -- (kind: versions with two Roadbooks)
@@ -77,55 +74,13 @@ function Geo.MapRelease()
   store[ck] = nil
   local wm = OM.worldmap
   Geo.MapClear()
-  pcall(Orig("SetPinsHidden"), saved.hidden)
+  pcall(wm.SetPinsHidden, saved.hidden)
   if saved.tookWp then
     ClearPin()
     if saved.wp then pcall(wm.TrackPoint, saved.wp[1], saved.wp[2], saved.wp[3]) end
   end
   pcall(wm.RefreshWaypoint)
   if Geo.MapPanelSync then pcall(Geo.MapPanelSync) end -- the panel goes back to the active Roadbook
-end
-
----------------------------------------------------------------------------
--- Locks: while a Roadbook holds the map, OpenMap adds no pin (Ctrl-click, its pin button, its menu)
--- and its pins stay hidden; its waypoint marker is not drawn over the Roadbook's current pin (it
--- would clear it on a click). Pins shared or imported meanwhile join the hidden list.
----------------------------------------------------------------------------
-function Geo.MapInstallLocks()
-  if next(Geo.mapOrig) then return end
-  local wm, orig = OM.worldmap, Geo.mapOrig
-  local function Refuse()
-    Print(L["A Roadbook holds the map: no map pin until its tracking is off (or its preview closed)."])
-  end
-  orig.AddPin, orig.DropWaypoint, orig.SetPinMode = wm.AddPin, wm.DropWaypoint, wm.SetPinMode
-  orig.SetPinsHidden, orig.PinAt = wm.SetPinsHidden, wm.PinAt
-  wm.AddPin = function(...)
-    if Geo.MapOwner() then return Refuse() end
-    return orig.AddPin(...)
-  end
-  wm.DropWaypoint = function(...)
-    if Geo.MapOwner() then return Refuse() end
-    return orig.DropWaypoint(...)
-  end
-  wm.SetPinMode = function(on, ...)
-    if on and Geo.MapOwner() then
-      Refuse()
-      on = false
-    end
-    return orig.SetPinMode(on, ...)
-  end
-  wm.SetPinsHidden = function(hidden, ...)
-    if not hidden and Geo.MapOwner() then return Refuse() end
-    return orig.SetPinsHidden(hidden, ...)
-  end
-  wm.PinAt = function(mapID, x, y, ...)
-    local o, r = Geo.MapOwner(), Geo.PinRecord()
-    if o and o.mode == "track" and r and r.ui == mapID and x and y
-      and math.abs(r.x - x) < 1e-3 and math.abs(r.y - y) < 1e-3 then
-      return r
-    end
-    return orig.PinAt(mapID, x, y, ...)
-  end
 end
 
 -- USER_WAYPOINT_UPDATED while a Roadbook is followed: another waypoint replaced ours, ours goes
@@ -193,12 +148,81 @@ function Geo.StepTooltip(owner, st, n, hint, anchor)
   GameTooltip:Show()
 end
 
+-- Zoom at which a place is shown: the player's, kept within the zoom of a zone (a whole zone is
+-- about 9; further out the view cannot center on a point, a city's own map shows it at 32).
+K.STEP_ZOOM_MIN, K.STEP_ZOOM_MAX = 8, 16
+local function StepZoom()
+  local ok, _, _, zoom = pcall(OM.api.GetView)
+  return math.max(K.STEP_ZOOM_MIN, math.min(K.STEP_ZOOM_MAX, ok and zoom or K.STEP_ZOOM_MIN))
+end
+
+-- The quest's details in the quest log beside the map, the view left where it is (as OpenMap's own
+-- quest icons do, Map/Quests.lua). Never when it would move the map: the game closes a quest's details
+-- as soon as the map changes (GetQuestUiMapID 0: the game ties this quest to no map). Not in combat,
+-- nor on the full screen map, which has no quest log beside it.
+local function ShowQuestDetails(qid)
+  if InCombatLockdown() or not IsInLog(qid) then return end
+  local questMap = GetQuestUiMapID and GetQuestUiMapID(qid)
+  if not questMap or (questMap ~= 0 and questMap ~= WorldMapFrame:GetMapID()) then return end
+  local log = WorldMapFrame.QuestLog
+  if not (log and QuestMapFrame_ShowQuestDetails) or (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then return end
+  if not log:IsShown() and WorldMapFrame.HandleUserActionOpenSidePanel then
+    pcall(WorldMapFrame.HandleUserActionOpenSidePanel, WorldMapFrame)
+    local toggle = WorldMapFrame.SidePanelToggle
+    if toggle and toggle.Refresh then pcall(toggle.Refresh, toggle) end
+  end
+  if log:IsShown() then pcall(QuestMapFrame_ShowQuestDetails, qid) end
+end
+
+-- Seconds between centering the map and showing the quest: OpenMap then puts the game's map under its
+-- view (about 1 s: its glide, then its wait), and that change would close the details.
+K.QUEST_SHOW_DELAY = 1.5
+
+-- The world map centered on the step, opened if needed, then the quest log on its quest. A later
+-- click, or the map closed, drops the quest still waited for (Geo.mapClick).
+local function CenterOn(st)
+  Geo.mapClick = (Geo.mapClick or 0) + 1
+  local click = Geo.mapClick
+  local zoom = StepZoom()
+  if not (WorldMapFrame and WorldMapFrame:IsShown()) then Geo.OpenWorldMap(nil, true) end
+  C_Timer.After(0.05, function() -- once the map is up and laid out
+    if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
+      local o = Geo.MapOwner()
+      if o and o.mode == "preview" then Geo.MapRelease() end
+      return
+    end
+    Geo.MapSync()
+    local u, v = Geo.MapUV(st.p)
+    if u and OM.api.IsStitched() then
+      pcall(OM.api.ShowWorld, u, v, zoom)
+    else -- OpenMap's map off: the game's, on the step's zone
+      Geo.OpenWorldMap(Geo.PointUi(st.p), true)
+    end
+    local qid = st.task and st.task.id
+    if qid and IsInLog(qid) then
+      C_Timer.After(K.QUEST_SHOW_DELAY, function()
+        if click == Geo.mapClick and WorldMapFrame:IsShown() then ShowQuestDetails(qid) end
+      end)
+    end
+  end)
+end
+
+-- A click on a step, its pin on the map or its line in the steps panel. Map closed: as Geo.ShowStep.
+function Geo.ClickStep(st)
+  if WorldMapFrame and WorldMapFrame:IsShown() then
+    CenterOn(st)
+  else
+    Geo.ShowStep(st)
+  end
+end
+K.CLICK_STEP_TIP = L["Click: center the map and select the quest in the quest log"]
+
 function Geo.MapPinEnter(self)
-  if self.data then Geo.StepTooltip(self, self.data, self.fqpN or 0, L["Click: open the Roadbook"]) end
+  if self.data then Geo.StepTooltip(self, self.data, self.fqpN or 0, K.CLICK_STEP_TIP) end
 end
 
 function Geo.MapPinClick(self)
-  if CP.OpenWindow then CP.OpenWindow("xp") end
+  if self.data then Geo.ClickStep(self.data) end
 end
 
 local looks = {} -- pin looks, made once: step kind (.. "!" for the current objective)
@@ -356,43 +380,29 @@ function Geo.MapSync()
     if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
   end
   if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
-  if OM.stitch then
-    local ok, err = pcall(Geo.MapDraw)
-    if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
-  end
+  local ok, err = pcall(Geo.MapDraw)
+  if not ok then Print(L["Map drawing error: "] .. tostring(err)) end
 end
 
 -- Glides OpenMap's view to a point (the map opens first: next frame).
 function Geo.MapGlide(p)
   C_Timer.After(0.05, function()
     local u, v = Geo.MapUV(p)
-    if u then pcall(OM.api.ShowWorld, u, v) end
+    if u then pcall(OM.api.ShowWorld, u, v, StepZoom()) end
   end)
 end
 
 ---------------------------------------------------------------------------
 -- Preview (click on a step of the Roadbook) and the "Whole Roadbook on the map" option
 ---------------------------------------------------------------------------
--- Click on a step of a Roadbook tab (done or not): the world map opens centered on it, with the
--- Roadbook drawn (previewed when no Roadbook holds the map), and the quest log on its quest.
+-- Shows a step (done or not): the world map opens centered on it, with the Roadbook drawn
+-- (previewed when no Roadbook holds the map), then the quest log on its quest.
 -- The Forever Quest Planner window stays open.
 function Geo.ShowStep(st)
   if not (st and st.p) or st.nopin then return end
   if not Geo.MapOwner() and Geo.Frozen() then Geo.MapClaim("preview") end
-  local qid = st.task and st.task.id
-  if qid and IsInLog(qid) then OpenQuestDetails(qid) end
-  Geo.OpenWorldMap(Geo.PointUi(st.p), true)
   Geo.MapHookWorldMap()
-  C_Timer.After(0.05, function()
-    if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
-      local o = Geo.MapOwner()
-      if o and o.mode == "preview" then Geo.MapRelease() end
-      return
-    end
-    Geo.MapSync()
-    local u, v = Geo.MapUV(st.p)
-    if u then pcall(OM.api.ShowWorld, u, v) end
-  end)
+  CenterOn(st)
 end
 
 function Geo.MapWholeGet()
@@ -412,15 +422,15 @@ function Geo.MapHookWorldMap()
   WorldMapFrame:HookScript("OnShow", function() C_Timer.After(0, Geo.MapSync) end)
   WorldMapFrame:HookScript("OnUpdate", Geo.MapPlayerTick)
   WorldMapFrame:HookScript("OnHide", function()
+    Geo.mapClick = (Geo.mapClick or 0) + 1 -- no quest shown after the map closed
     local o = Geo.MapOwner()
     if o and o.mode == "preview" then Geo.MapRelease() end
   end)
 end
 
--- At login: locks, a map still held from before a /reload given back (the focus is not kept),
--- redraw on each opening, preview ended when the map closes, option in OpenMap's menu.
+-- At login: a map still held from before a /reload given back (the focus is not kept), redraw on
+-- each opening, preview ended when the map closes, option in OpenMap's menu.
 function Geo.MapInit()
-  Geo.MapInstallLocks()
   if Geo.MapOwner() then pcall(Geo.MapRelease) end
   Geo.MapHookWorldMap()
   pcall(OM.api.RegisterCallback, ADDON_NAME, "OpenMap_StitchedChanged", function() Geo.MapSync() end)
