@@ -1057,6 +1057,90 @@ StaticPopupDialogs["FQP_AUTO_ADD"] = {
   preferredIndex = 3,
 }
 
+---------------------------------------------------------------------------
+-- What ends the followed step, by its kind: handler(step, event, a1, a2)
+---------------------------------------------------------------------------
+-- A quest turned in ends its step, whatever it is but a pick-up.
+local function TurnedIn(s, event, a1, a2)
+  local qid = s.task.id
+  if event == "QUEST_TURNED_IN" and qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest turned in"]) end
+end
+
+local STEP_EVENTS = {}
+
+function STEP_EVENTS.bind(_, event)
+  if event == "HEARTHSTONE_BOUND" then CP.AutoUpdate(L["Hearthstone bound"]) end
+end
+
+function STEP_EVENTS.hearth(s, event, a1)
+  if event == "FQP_HEARTH_ARRIVED" and tostring(a1 or "hearth") == tostring(s.via or "hearth") then
+    CP.AutoUpdate(a1 and a1 ~= "hearth" and L["Teleport done"] or L["Back by hearthstone"])
+  elseif event == "FQP_HEARTH_ARRIVED" or event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK" then
+    CP.CheckArrival(s, L["Arrived at the hearthstone destination"])
+  end
+end
+
+function STEP_EVENTS.travel(s, event)
+  if event == "FQP_TAXI_TAKEOFF" then
+    CP.TakeOff(s)
+  elseif s.task.mode ~= "flight" and (event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK") then
+    CP.CheckArrival(s, L["Arrival of the "] .. (K.MODE_NAME[s.task.mode] or s.task.mode or L["transport"]))
+  end
+end
+
+function STEP_EVENTS.fm(_, event)
+  if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
+end
+
+function STEP_EVENTS.skill(s, event)
+  if event == "SKILL_LINES_CHANGED" and CP.StepDone(s) then CP.AutoUpdate(L["Skill level reached"]) end
+end
+
+function STEP_EVENTS.service(s, event)
+  if event == K.SERVICE_EVENTS[s.task.service or "vendor"] then
+    Geo.ServiceClear() -- done: the next computations no longer plan it
+    CP.AutoUpdate(L["Service done"])
+  end
+end
+
+function STEP_EVENTS.dungeon(s, event)
+  if (event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED") and CP.StepDone(s) then
+    CP.AutoUpdate(L["Dungeon done"])
+  end
+end
+
+function STEP_EVENTS.take(s, event, a1, a2)
+  local qid = s.task.id
+  if event == "QUEST_ACCEPTED" and qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest picked up"]) end
+end
+
+function STEP_EVENTS.obj(s, event, a1, a2)
+  local qid = s.task.id
+  if event == "QUEST_TURNED_IN" then
+    TurnedIn(s, event, a1, a2)
+  elseif event == "BAG_UPDATE_DELAYED" then
+    if s.r and s.r.tg and s.r.tg.sourceItem and CP.StepDone(s) then
+      CP.AutoUpdate(L["Item obtained"], s, function() return CP.StepDone(s) end)
+    end
+  elseif event == "QUEST_LOG_UPDATE" and qid then
+    local now = CP.Progress(qid)
+    local rec = CP.FocusRecord()
+    -- Objective of the step found in the game: done when it is (another objective of the quest
+    -- done meanwhile is a step done ahead, CP.AheadCheck); otherwise any progress of the quest.
+    local known = IsInLog(qid) and Geo.TargetObjective(qid, s.r and s.r.tg, GetObjectives(qid))
+    if known then
+      if rec then rec.progress = now end
+      if CP.StepDone(s) then CP.AutoUpdate(L["Objective completed"], s, function() return CP.StepDone(s) end) end
+    elseif rec and now > (rec.progress or 0) then
+      rec.progress = now
+      -- Objective not identified: only the whole quest done (every objective) ends the step.
+      CP.AutoUpdate(L["Objective completed"], s, function() return CP.QuestObjectivesDone(qid) end)
+    elseif rec and now < (rec.progress or 0) then
+      rec.progress = now -- item destroyed / given back: follow the new value
+    end
+  end
+end
+
 function CP.OnGameEvent(event, a1, a2)
   if event == "QUEST_ACCEPTED" then pcall(CP.AutoAddAccepted, a1, a2) end
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
@@ -1088,62 +1172,7 @@ function CP.OnGameEvent(event, a1, a2)
     CP.EscortFailed(s)
     return
   end
-  if s.kind == "bind" then
-    if event == "HEARTHSTONE_BOUND" then CP.AutoUpdate(L["Hearthstone bound"]) end
-  elseif s.kind == "hearth" then
-    if event == "FQP_HEARTH_ARRIVED" and tostring(a1 or "hearth") == tostring(s.via or "hearth") then
-      CP.AutoUpdate(a1 and a1 ~= "hearth" and L["Teleport done"] or L["Back by hearthstone"])
-    elseif event == "FQP_HEARTH_ARRIVED" then
-      CP.CheckArrival(s, L["Arrived at the hearthstone destination"])
-    elseif event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK" then
-      CP.CheckArrival(s, L["Arrived at the hearthstone destination"])
-    end
-  elseif s.kind == "travel" then
-    if event == "FQP_TAXI_TAKEOFF" then
-      CP.TakeOff(s)
-    elseif s.task.mode ~= "flight" and (event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK") then
-      CP.CheckArrival(s, L["Arrival of the "] .. (K.MODE_NAME[s.task.mode] or s.task.mode or L["transport"]))
-    end
-  elseif s.kind == "fm" then
-    if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
-  elseif s.kind == "skill" then
-    if event == "SKILL_LINES_CHANGED" and CP.StepDone(s) then CP.AutoUpdate(L["Skill level reached"]) end
-  elseif s.kind == "service" then
-    if event == K.SERVICE_EVENTS[s.task.service or "vendor"] then
-      Geo.ServiceClear() -- done: the next computations no longer plan it
-      CP.AutoUpdate(L["Service done"])
-    end
-  elseif s.kind == "dungeon" then
-    if (event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED") and CP.StepDone(s) then
-      CP.AutoUpdate(L["Dungeon done"])
-    end
-  elseif event == "QUEST_TURNED_IN" and s.kind ~= "take" then
-    if qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest turned in"]) end
-  elseif s.kind == "take" then
-    if event == "QUEST_ACCEPTED" and qid and (a1 == qid or a2 == qid) then CP.AutoUpdate(L["Quest picked up"]) end
-  elseif s.kind == "obj" then
-    if event == "BAG_UPDATE_DELAYED" then
-      if s.r and s.r.tg and s.r.tg.sourceItem and CP.StepDone(s) then
-        CP.AutoUpdate(L["Item obtained"], s, function() return CP.StepDone(s) end)
-      end
-    elseif event == "QUEST_LOG_UPDATE" and qid then
-      local now = CP.Progress(qid)
-      local rec = CP.FocusRecord()
-      -- Objective of the step found in the game: done when it is (another objective of the quest
-      -- done meanwhile is a step done ahead, CP.AheadCheck); otherwise any progress of the quest.
-      local known = IsInLog(qid) and Geo.TargetObjective(qid, s.r and s.r.tg, GetObjectives(qid))
-      if known then
-        if rec then rec.progress = now end
-        if CP.StepDone(s) then CP.AutoUpdate(L["Objective completed"], s, function() return CP.StepDone(s) end) end
-      elseif rec and now > (rec.progress or 0) then
-        rec.progress = now
-        -- Objective not identified: only the whole quest done (every objective) ends the step.
-        CP.AutoUpdate(L["Objective completed"], s, function() return CP.QuestObjectivesDone(qid) end)
-      elseif rec and now < (rec.progress or 0) then
-        rec.progress = now -- item destroyed / given back: follow the new value
-      end
-    end
-  end
+  (STEP_EVENTS[s.kind] or TurnedIn)(s, event, a1, a2) -- (turn-in steps: TurnedIn)
 end
 
 -- Shared with the next files.
