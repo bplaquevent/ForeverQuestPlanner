@@ -148,21 +148,45 @@ function Geo.StepTooltip(owner, st, n, hint, anchor)
   GameTooltip:Show()
 end
 
--- A click on a step, its pin on the map or its line in the steps panel: the map centered on it, the
--- quest log on its quest. Map closed: it opens on the step (Geo.ShowStep).
-function Geo.ClickStep(st)
-  if not (WorldMapFrame and WorldMapFrame:IsShown()) then
-    Geo.ShowStep(st)
-    return
-  end
-  local u, v = Geo.MapUV(st.p)
+-- Zoom at which a place is shown: the player's, kept within the zoom of a zone (a whole zone is
+-- about 9; further out the view cannot center on a point, a city's own map shows it at 32).
+K.STEP_ZOOM_MIN, K.STEP_ZOOM_MAX = 8, 16
+local function StepZoom()
+  local ok, _, _, zoom = pcall(OM.api.GetView)
+  return math.max(K.STEP_ZOOM_MIN, math.min(K.STEP_ZOOM_MAX, ok and zoom or K.STEP_ZOOM_MIN))
+end
+
+-- The quest log on the step's quest, then the world map centered on the step, opened if needed.
+-- The quest comes first: it opens the map on the quest's zone, and the game closes its details as
+-- soon as the map changes; no map is changed after it (OpenMap's view centers on any point).
+local function CenterOn(st)
+  local zoom = StepZoom() -- read before the quest log changes the map, and with it the zoom
   local qid = st.task and st.task.id
-  if qid and IsInLog(qid) then
-    -- The quest log opens on the quest (it moves the map to the quest's zone): the step is centered after it.
-    OpenQuestDetails(qid)
-    if u then C_Timer.After(0, function() pcall(OM.api.ShowWorld, u, v) end) end
-  elseif u then
-    pcall(OM.api.ShowWorld, u, v)
+  local details = qid and IsInLog(qid)
+  if details then OpenQuestDetails(qid) end
+  if not (WorldMapFrame and WorldMapFrame:IsShown()) then Geo.OpenWorldMap(nil, true) end
+  C_Timer.After(0.05, function() -- once the map is up and laid out
+    if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
+      local o = Geo.MapOwner()
+      if o and o.mode == "preview" then Geo.MapRelease() end
+      return
+    end
+    Geo.MapSync()
+    local u, v = Geo.MapUV(st.p)
+    if u and OM.api.IsStitched() then
+      pcall(OM.api.ShowWorld, u, v, zoom)
+    elseif not details then -- OpenMap's map off: the game's, on the step's zone
+      Geo.OpenWorldMap(Geo.PointUi(st.p), true)
+    end
+  end)
+end
+
+-- A click on a step, its pin on the map or its line in the steps panel. Map closed: as Geo.ShowStep.
+function Geo.ClickStep(st)
+  if WorldMapFrame and WorldMapFrame:IsShown() then
+    CenterOn(st)
+  else
+    Geo.ShowStep(st)
   end
 end
 K.CLICK_STEP_TIP = L["Click: center the map and select the quest in the quest log"]
@@ -338,33 +362,21 @@ end
 function Geo.MapGlide(p)
   C_Timer.After(0.05, function()
     local u, v = Geo.MapUV(p)
-    if u then pcall(OM.api.ShowWorld, u, v) end
+    if u then pcall(OM.api.ShowWorld, u, v, StepZoom()) end
   end)
 end
 
 ---------------------------------------------------------------------------
 -- Preview (click on a step of the Roadbook) and the "Whole Roadbook on the map" option
 ---------------------------------------------------------------------------
--- Click on a step of a Roadbook tab (done or not): the world map opens centered on it, with the
--- Roadbook drawn (previewed when no Roadbook holds the map), and the quest log on its quest.
+-- Shows a step (done or not): the world map opens centered on it, with the Roadbook drawn
+-- (previewed when no Roadbook holds the map), and the quest log on its quest.
 -- The Forever Quest Planner window stays open.
 function Geo.ShowStep(st)
   if not (st and st.p) or st.nopin then return end
   if not Geo.MapOwner() and Geo.Frozen() then Geo.MapClaim("preview") end
-  local qid = st.task and st.task.id
-  if qid and IsInLog(qid) then OpenQuestDetails(qid) end
-  Geo.OpenWorldMap(Geo.PointUi(st.p), true)
   Geo.MapHookWorldMap()
-  C_Timer.After(0.05, function()
-    if not (WorldMapFrame and WorldMapFrame:IsShown()) then -- the map could not open (combat…)
-      local o = Geo.MapOwner()
-      if o and o.mode == "preview" then Geo.MapRelease() end
-      return
-    end
-    Geo.MapSync()
-    local u, v = Geo.MapUV(st.p)
-    if u then pcall(OM.api.ShowWorld, u, v) end
-  end)
+  CenterOn(st)
 end
 
 function Geo.MapWholeGet()
