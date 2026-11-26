@@ -2,7 +2,7 @@
 -- Loads a Roadbook problem captured in game by /fqp dump (then /reload) and runs the solver
 -- (Solver.lua, the same file as in the game) on it.
 --
--- Usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N] [--list N]
+-- Usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N] [--list N] [--service]
 --   <file>       the SavedVariables file (WTF/Account/<ACCOUNT>/SavedVariables/ForeverQuestPlanner.lua)
 --                or a saved case (tools/cases/<name>.lua)
 --   --char NAME  character to use ("Name-Realm"; default: the most recent capture)
@@ -13,7 +13,8 @@
 --                by the solver (the capture's own custom list, if any, otherwise)
 --   --list N     "Generate" with a duration or level goal (--goal) on a list made of the first N captured
 --                quests (0: empty list): kept whole and completed, or only its best part kept
---   --service    service shortcut test: a service step at the place of the last quest step, that must come first
+--   --service    service shortcut test (with --custom or --list): a service step at the place of the last
+--                quest step, that must come first
 --   --steps      print every step of the Roadbooks
 
 local root = ((arg[0]:match("^(.*)/[^/]*$")) or ".") .. "/.."
@@ -29,7 +30,10 @@ local i = 1
 while arg[i] do
   local a = arg[i]
   if a == "--char" or a == "--save" or a == "--goal" or a == "--evals" or a == "--custom" or a == "--list" then
-    opts[a:sub(3)] = arg[i + 1]
+    local value = arg[i + 1]
+    if not value or value:sub(1, 2) == "--" then fail(a .. ": a value is missing") end
+    if (a == "--evals" or a == "--custom" or a == "--list") and not tonumber(value) then fail(a .. ": a number is expected") end
+    opts[a:sub(3)] = value
     i = i + 1
   elseif a == "--steps" then
     opts.steps = true
@@ -42,7 +46,8 @@ while arg[i] do
   end
   i = i + 1
 end
-if not file then fail("usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N] [--list N]") end
+if not file then fail("usage: lua5.1 tools/bench.lua <file> [--char NAME] [--save NAME] [--goal GOAL] [--steps] [--evals N] [--custom N] [--list N] [--service]") end
+if opts.service and not (opts.custom or opts.list) then fail("--service: with --custom or --list") end
 
 -- Solver (an addon file: called with the addon name and namespace).
 local chunk, err = loadfile(root .. "/Solver.lua")
