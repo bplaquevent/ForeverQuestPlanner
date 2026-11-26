@@ -308,28 +308,23 @@ local function SkillName(id)
 end
 
 -- Professions known by the character: skillLine -> rank, localized names, and whether reading succeeded.
--- Forever uses C_SkillInfo (like Questie); the other APIs are fallbacks.
+-- Forever uses C_SkillInfo; the other APIs are fallbacks.
 local skillCache, skillCacheTime = nil, 0
 local function PlayerSkills(fresh) -- fresh: read again (a skill changed)
   local now = GetTime()
   if not fresh and skillCache and now - skillCacheTime < 5 then return skillCache[1], skillCache[2], skillCache[3] end
   local skills, names, known = {}, {}, false
-  if C_SkillInfo and C_SkillInfo.GetNumSkillLines and C_SkillInfo.GetSkillLineInfo then
-    -- Expand collapsed categories to see every line (from the end to the beginning).
-    if C_SkillInfo.ExpandSkillHeader then
-      for i = C_SkillInfo.GetNumSkillLines(), 1, -1 do
-        local line = C_SkillInfo.GetSkillLineInfo(i)
-        if line and line.isHeader and line.isCollapsed then pcall(C_SkillInfo.ExpandSkillHeader, i) end
-      end
-    end
-    for i = 1, C_SkillInfo.GetNumSkillLines() do
-      local line = C_SkillInfo.GetSkillLineInfo(i)
-      if line and not line.isHeader and line.skillID and ns.PROFESSIONS[line.skillID] then
-        skills[line.skillID] = line.rank or 0
+  if C_SkillInfo and C_SkillInfo.GetNumSkillLines and C_SkillInfo.GetSkillLineInfoByID then
+    -- One by one by skill line: the game's list only gives the lines of its expanded categories, and
+    -- expanding them would undo the player's folding.
+    for id in pairs(ns.PROFESSIONS) do
+      local line = C_SkillInfo.GetSkillLineInfoByID(id) -- nil: not learned
+      if line then
+        skills[id] = line.rank or 0
         if line.name then names[line.name] = true end
       end
     end
-    known = C_SkillInfo.GetNumSkillLines() > 0
+    known = C_SkillInfo.GetNumSkillLines() > 0 -- no line at all: the skills are not loaded yet
   elseif GetProfessions and GetProfessionInfo then
     local list = { GetProfessions() }
     for i = 1, 6 do
