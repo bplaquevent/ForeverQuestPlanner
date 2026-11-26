@@ -8,6 +8,7 @@ local Geo, GeoReady, ICON, K, L, MatchWords, Normalize = ns.Geo, ns.GeoReady, ns
 local PinIcon, Plural, Print, RemainingObjectives = ns.PinIcon, ns.Plural, ns.Print, ns.RemainingObjectives
 local Snapshot = ns.Snapshot
 local RenderAvailable, RenderExport, RenderList, RenderNear = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear
+local FocusExport = ns.FocusExport
 local RenderTodo, Settings, ShowMessage, State, StateIcons = ns.RenderTodo, ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons
 local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
 local ErrorTrace, Guard = ns.ErrorTrace, ns.Guard
@@ -53,8 +54,9 @@ local function RoadbookQuestText(it)
 end
 
 -- Quests of the list under their categories (Geo.RoadbookCategories), with the search. One line each
--- with its state; the ones not turned in can be removed (CP.SkipQuest: out of the list, the Roadbook
--- computed again). Returns the number of quests shown and the number of quests of the tab.
+-- with its state; those of the list not turned in can be removed (CP.SkipQuest: out of the list, the
+-- Roadbook computed again). Returns the number of quests of the list shown and their number (the
+-- others, kept for their steps done, are shown without being counted).
 function Geo.RoadbookQuestItems(items, fz, query)
   local quests = Geo.RoadbookQuests(fz)
   local notInLog = {}
@@ -63,18 +65,21 @@ function Geo.RoadbookQuestItems(items, fz, query)
   end
   ns.RequestQuestTags(notInLog) -- their kinds: shown again once loaded (QuestTags.lua)
   local shown, lines = {}, {}
+  local listedShown, listed = 0, 0
   for _, it in ipairs(quests) do
+    if it.listed then listed = listed + 1 end
     local text = RoadbookQuestText(it)
     if #query == 0 or MatchWords(Normalize(text), query) then
       local id, title = it.id, it.title
       shown[#shown + 1] = it
+      if it.listed then listedShown = listedShown + 1 end
       lines[it] = { text = text, questID = it.log and id or nil, linkQuest = id,
         place = not (it.log or it.done) and function() return Geo.GiverPoint(id, PlayerPos()) end or nil, placeTitle = title,
-        b3 = not it.done and { text = L["Remove"], fn = function() CP.ConfirmSkipQuest({ task = { id = id, title = title } }) end,
+        b3 = it.listed and not it.done and { text = L["Remove"], fn = function() CP.ConfirmSkipQuest({ task = { id = id, title = title } }) end,
           tip = { L["Remove"], L["Removes the quest from the list (with the prerequisites added only for it); the steps to come of the Roadbook are computed again."] } } or nil }
     end
   end
-  if #shown == 0 then return 0, #quests end
+  if #shown == 0 then return 0, listed end
   local LABEL = { done = L["Turned in"], turnin = L["To turn in"], singles = L["Doable single quests"],
     later = L["Later - level too high"] }
   local following = CP.CurrentFocus() ~= nil
@@ -87,15 +92,17 @@ function Geo.RoadbookQuestItems(items, fz, query)
     local b3
     if c.kind ~= "done" then
       local ids = {}
-      for _, it in ipairs(c.quests) do ids[#ids + 1] = { id = it.id } end
-      b3 = select(2, Geo.CustomBulkButtons(ids))
+      for _, it in ipairs(c.quests) do
+        if it.listed then ids[#ids + 1] = { id = it.id } end
+      end
+      if #ids > 0 then b3 = select(2, Geo.CustomBulkButtons(ids)) end
     end
     -- Collapsed while the Roadbook is followed (the route matters more).
     items[#items + 1] = { header = true, kind = c.kind == "done" and "info" or c.kind, key = "rbq:" .. c.key,
       open = not following, label = label .. " - " .. Plural(#c.quests, L["quest"]), b3 = b3 }
     for _, it in ipairs(c.quests) do items[#items + 1] = lines[it] end
   end
-  return #shown, #quests
+  return listedShown, listed
 end
 
 -- Roadbook tab: the quests of the list under a fixed header; the Roadbook's steps are in the panel
@@ -336,6 +343,7 @@ local function SelectTab(name)
     end)
   end
   Refresh()
+  if name == "export" then FocusExport() end
 end
 
 local RefreshUnsafe

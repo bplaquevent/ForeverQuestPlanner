@@ -55,6 +55,7 @@ local ACCENTS = {
 
 local function Normalize(s)
   s = tostring(s or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+  s = s:gsub("|T.-|t", ""):gsub("|A.-|a", "") -- icons: their file names are not part of the text
   s = s:gsub("[\1-\127\194-\244][\128-\191]*", function(c) return ACCENTS[c] or c end)
   return s:lower()
 end

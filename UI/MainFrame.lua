@@ -150,7 +150,18 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
     return math.min(math.max(v, lo), hi)
   end
   local timeTip = L["The list is completed with the quests earning the most XP within this time (all its quests kept), or, when it is longer, only its quests earning the most XP within this time are kept."]
-  local timeRadio, tx = Radio(gx, y, L["a session of"], function() CP.SetGoal("time", GoalTime()) end)
+  local timeRadio, levelRadio
+  local function SyncRadios()
+    timeRadio:SetChecked(State.xpGoal.kind == "time")
+    levelRadio:SetChecked(State.xpGoal.kind == "level")
+  end
+  -- A click toggles the radio button by itself, even on the goal already chosen: set again after it.
+  local function Choose(kind, value)
+    CP.SetGoal(kind, value)
+    SyncRadios()
+  end
+  local tx, lx
+  timeRadio, tx = Radio(gx, y, L["a session of"], function() Choose("time", GoalTime()) end)
   Tooltip(timeRadio, L["For a play session"], timeTip)
   -- Each dropdown right after its label.
   local TIMES = { { key = 3600, label = "1 h" }, { key = 7200, label = "2 h" }, { key = 10800, label = "3 h" },
@@ -160,7 +171,7 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
   timeDD:SetPoint("LEFT", box, "TOPLEFT", tx + 4, y)
   Tooltip(timeDD, L["For a play session"], timeTip)
   local levelTip = L["The list is completed with the quests reaching this level the fastest (all its quests kept), or, when it goes beyond, only its quests reaching it the fastest are kept (at most 10 levels above yours)."]
-  local levelRadio, lx = Radio(tx + 4 + 60 + 26, y, L["level"], function() CP.SetGoal("level", GoalLevel()) end)
+  levelRadio, lx = Radio(tx + 4 + 60 + 26, y, L["level"], function() Choose("level", GoalLevel()) end)
   Tooltip(levelRadio, L["To reach the level"], levelTip)
   -- Levels from the current level + 1 to K.GOAL_LEVEL_SPAN levels above (at most max level).
   local levelDD = Geo.Dropdown(box, 60, function()
@@ -184,8 +195,7 @@ function Geo.CreateGoalLine(box, y, Radio, Caption, Tooltip)
     local xpLeft = UnitLevel("player") < Geo.MaxLevel()
     timeRadio:SetEnabled(xpLeft)
     levelRadio:SetEnabled(xpLeft)
-    timeRadio:SetChecked(State.xpGoal.kind == "time")
-    levelRadio:SetChecked(State.xpGoal.kind == "level")
+    SyncRadios()
     Geo.DropdownSync(timeDD)
     Geo.DropdownSync(levelDD)
   end

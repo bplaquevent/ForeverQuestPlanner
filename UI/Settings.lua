@@ -37,7 +37,8 @@ end
 function Geo.SetParam(d, v)
   local st = Settings()
   st.params = st.params or {}
-  st.params[d.key] = (math.abs(v - d.default) < 1e-6) and nil or v
+  if math.abs(v - d.default) < 1e-6 then v = nil end -- the default is not saved
+  st.params[d.key] = v
   Geo.ApplyParams()
 end
 
@@ -203,6 +204,7 @@ function Geo.CreateSettingsPanel(f)
   reset:SetText(L["Defaults"])
   reset:SetScript("OnClick", function()
     Settings().params = nil
+    Settings().noElite = nil -- "Include elite quests", in the difficulty box
     Geo.ApplyParams()
     MarkScanDirty()
     panel.Update()

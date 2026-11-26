@@ -101,7 +101,8 @@ function CP.FocusStep(s)
       .. (s.task.title or "?"))
   end
   Geo.MapClaim("track") -- the followed Roadbook holds the map (RoadbookMap.lua)
-  if not s.nopin then PinPoint(s.p, s.task.title, CP.StepPinLabel(s), qid) end
+  if s.nopin then ClearPin() -- no place to go to: the former step's pin goes
+  else PinPoint(s.p, s.task.title, CP.StepPinLabel(s), qid) end
   CP.RefreshButton()
   CP.WatchTransport(s)
 end
