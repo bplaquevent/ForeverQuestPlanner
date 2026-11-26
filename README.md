@@ -165,7 +165,8 @@ To add a language, copy `frFR.lua`, change the locale code and translate the val
 
 Bugs and feature requests are tracked in the [GitHub Issues](https://github.com/bplaquevent/ForeverQuestPlanner/issues).
 Mention the addon version (`## Version` in the `.toc`). For a problem in a Roadbook plan, attach a `/fqp dump`
-capture (see [Test bench](#test-bench)).
+capture (see [Test bench](#test-bench)). When an error shows up in the chat (each one is told once per session),
+copy it into the report.
 
 ## License
 
