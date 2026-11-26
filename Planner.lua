@@ -64,7 +64,6 @@ function Geo.SkillNeed(id, q)
   for _, t in ipairs(parts) do
     local s2, n2 = Geo.SkillFromText(t)
     if s2 and (not skill or (s2 == skill and n2 > need)) then skill, need = s2, n2 end
-    if s2 and s2 == skill then break end
   end
   if not skill then return nil end
   local have = skills[skill] or 0

@@ -707,6 +707,12 @@ function Geo.ListFromRoute(route, unplanned)
   return out
 end
 
+-- What a proposed list was made from: changes of the list (State.customToken) and computations
+-- (CP.computeToken). The list is not locked while the confirmation is open.
+local function ProposalBasis()
+  return tostring(State.customToken) .. "|" .. tostring(ns.CP.computeToken)
+end
+
 -- Generated Roadbook: the list becomes its quests (after a confirmation when quests of the list
 -- leave it), then it is saved. done(accepted).
 -- prepare(route): optional, returns the route to save (the steps done of the former Roadbook put first).
@@ -717,7 +723,12 @@ function Geo.AcceptGenerated(route, info, done, prepare)
   for _, e in ipairs(Geo.CustomList()) do
     if not keep[e.id] then dropped = dropped + 1 end
   end
+  local basis = ProposalBasis()
   local function apply()
+    if ProposalBasis() ~= basis then -- accepting would drop what was done meanwhile
+      Print(L["The list or the Roadbook changed while the confirmation was open."])
+      return done(false)
+    end
     Geo.CustomSetList(list)
     State.customToken = (State.customToken or 0) + 1 -- no pending recompute of the former list
     State.customUnplanned = info.unplanned

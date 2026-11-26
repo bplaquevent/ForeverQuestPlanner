@@ -34,7 +34,7 @@ end
 
 -- Fields of a step and of its task saved as they are; the others are written out below.
 local STEP_FIELDS = { "kind", "at", "xp", "work", "gain", "spots", "escort", "glue", "via", "bindDest", "search",
-  "done", "afterSource", "skill", "npc", "nopin" }
+  "done", "afterSource", "skill", "npc", "nopin", "laterFM" }
 local TASK_FIELDS = { "id", "title", "level", "xp", "starter", "reqLevel", "tags", "npc", "mode", "from", "dest",
   "kind", "quick", "dungeon", "warn", "levelWarn", "orderWarn", "spell", "service", "npcId" }
 
@@ -97,6 +97,21 @@ end
 function Geo.SaveRoute()
   local fz, rec = frozen, Geo.FrozenRec()
   if fz and rec then rec.steps = SerializeRoute(fz.route) end
+end
+
+-- Steps removed from / inserted into the loaded plan (then saved: Geo.SaveRoute). info.levels, the
+-- level after each step, is indexed as the route: both only change together, here.
+function Geo.RouteRemove(fz, i)
+  table.remove(fz.route, i)
+  local levels = fz.info.levels
+  if levels and i <= #levels then table.remove(levels, i) end
+end
+
+-- An inserted step is reached at the level of the step before it.
+function Geo.RouteInsert(fz, i, st)
+  table.insert(fz.route, i, st)
+  local levels = fz.info.levels
+  if levels and i - 1 <= #levels then table.insert(levels, i, levels[i - 1]) end
 end
 
 -- A new or adapted plan, saved (Geo.AdoptPlan, Roadbook.lua: saved, then redrawn).

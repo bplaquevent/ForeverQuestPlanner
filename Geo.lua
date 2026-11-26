@@ -932,16 +932,18 @@ end
 function Geo.MatchObjectives(objs, t)
   local map, used = {}, {}
   for i, tg in ipairs(t) do
-    if not tg.sourceItem then
-      local match
-      if tg.name then
-        for j, o in ipairs(objs) do
-          if not used[j] and o.text and o.text:find(tg.name, 1, true) then match = j break end
+    if not tg.sourceItem and tg.name then
+      for j, o in ipairs(objs) do
+        if not used[j] and o.text and o.text:find(tg.name, 1, true) then
+          map[i], used[j] = j, true
+          break
         end
       end
-      if not match and objs[i] and not used[i] then match = i end
-      if match then map[i], used[match] = match, true end
     end
+  end
+  -- Positions last: they never take an objective that a target names.
+  for i, tg in ipairs(t) do
+    if not (tg.sourceItem or map[i]) and objs[i] and not used[i] then map[i], used[i] = i, true end
   end
   return map, used
 end
