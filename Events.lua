@@ -95,6 +95,7 @@ On({ "PLAYER_LOGIN" }, function()
   C_Timer.NewTicker(3, function() Guard(CP.NearbyCheck) end) -- steps on the spot first (Roadbook.lua)
   if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
   ScheduleSnapshot()
+  CP.ScheduleResume() -- the saved Roadbook is followed again, unless paused
 end)
 
 On({ "PLAYER_LOGOUT" }, function() Snapshot() end)

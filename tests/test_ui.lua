@@ -146,8 +146,9 @@ Geo.ServiceSet = function(s) pending = s end
 Geo.ServiceClear = function() pending = nil end
 Geo.areaToUi, Geo.parent, Geo.ready = {}, {}, true
 CP.Replan = function() error("replan broke") end
+Geo.SetPaused(true)
 local raised = not pcall(CP.ServiceClick, "vendor")
-check("service shortcut in error: nothing left pending", not raised and CP.turningOn == nil and pending == nil)
+check("service shortcut in error: nothing left pending, the pause stays", not raised and Geo.Paused() and pending == nil)
 check("and told", chat():find("replan broke", 1, true) ~= nil)
 
 -- an error of the quest log button is told

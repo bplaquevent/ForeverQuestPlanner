@@ -59,7 +59,7 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
 - A file can only import from files loaded before it. For a call to a later file, call `ns.Name()` at runtime
   (example: `Refresh` in `Available.lua` forwards to the real one in `UI/Window.lua`).
 - Saved data: `Settings()` returns the character's own table (`ForeverQuestPlannerSettings.chars[CharKey()]`,
-  one record per thing: `custom`, `roadbook`, `pin`, `mapSaved`, `dismissedPlaces`);
+  one record per thing: `custom`, `roadbook`, `pin`, `mapSaved`, `dismissedPlaces`, `trackingPaused`);
   what is learned in game is apart, to be kept longer, in `LearnedData()` (zone passes, teleport arrivals, class
   trainers, for every character) and `LearnedChar()` (mount speed, bind point: the current character's, dropped
   when the game's identifier of the character differs).

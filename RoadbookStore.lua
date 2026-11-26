@@ -170,6 +170,17 @@ function Geo.Tracking()
   return ns.CP.CurrentFocus() ~= nil
 end
 
+-- The tracking is automatic: a Roadbook is followed as soon as it is computed, unless the player
+-- paused it. The pause is saved and stays, whatever happens to the Roadbook and its list meanwhile,
+-- until the tracking is turned on again or the Roadbook is emptied ("Empty", CP.DoEmpty).
+function Geo.Paused()
+  return Settings().trackingPaused == true
+end
+
+function Geo.SetPaused(paused)
+  Settings().trackingPaused = paused and true or nil
+end
+
 -- Every step of the Roadbook is done: it can only be extended (custom: quests added), generated again or emptied.
 function Geo.IsFinished()
   local fz = Geo.Frozen()

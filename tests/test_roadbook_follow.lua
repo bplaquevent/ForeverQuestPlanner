@@ -248,24 +248,23 @@ do
   check("then it is asked", #popups == 2 and popups[2].data.id == 2)
 end
 
--- 10. no tracking left to start after a computation given up or the Roadbook emptied
+-- 10. a computation given up or the Roadbook emptied leaves nothing under way
 do
   local t = session()
   local Geo, CP = t.Geo, t.CP
-  CP.focusAfter = true
   Geo.CustomSetList = function() end
   Geo.MapOwner = function() return nil end
   CP.TrackOff = function() end
+  t.State.computing = true
   CP.DoEmpty()
-  check("emptied", CP.focusAfter == nil)
+  check("emptied", t.State.computing == nil)
   t.waitScan.fn = function(_, _, giveUp)
     giveUp()
     return true
   end
   t.env.GetTime = function() return 0 end
-  CP.focusAfter = true
   CP.Recompute({ kind = "time", value = 60 }, true)
-  check("given up waiting for the scan", CP.focusAfter == nil and t.State.computing == nil)
+  check("given up waiting for the scan", t.State.computing == nil)
 end
 
 -- 11. an error of OpenMap while drawing is told
@@ -277,6 +276,85 @@ do
   Geo.WalkWay = function() return 1, { { c = 0, x = 1, y = 1 } } end
   Geo.MapWalk({}, 0, 0, { c = 0, x = 0, y = 0 }, { c = 0, x = 9, y = 9 }, 1, 1)
   check("told in the chat", table.concat(t.log.chat, " "):find("broken FromYards", 1, true) ~= nil)
+end
+
+-- 12. the tracking is automatic: a computed Roadbook is followed, unless the player paused it
+do
+  local t = session()
+  local Geo, CP, State = t.Geo, t.CP, t.State
+  local focus, computed, fail = nil, 0, false
+  local plan = { step("take", 1, 10), step("turnin", 1, 20) }
+  CP.CurrentFocus = function() return focus end
+  CP.ClearFocus = function() focus = nil end
+  CP.FocusNext = function() focus = Geo.Frozen().route[2] end
+  CP.StopFocus = function() focus = nil end
+  CP.StepDone = function() return false end
+  CP.Busy = function() return false end
+  CP.RefuseWhileComputing = function() return State.computing == true end
+  Geo.ServicePending = function() return nil end
+  t.ns.Settings().custom = { list = { { id = 1 } } }
+  t.env.GetTime = function() return 0 end
+  Geo.RequestPlan = function(_, cb)
+    computed = computed + 1
+    if fail then return cb(nil, "no") end
+    cb({ { kind = "start", p = { c = 0, x = 0, y = 0 } }, plan[1], plan[2] }, nil,
+      { count = 1, xp = 0, total = 0, levels = { 30, 30, 30 }, custom = true })
+  end
+
+  CP.Recompute("custom", true)
+  check("first computation: followed at once, computed once", focus ~= nil and computed == 1)
+  CP.Pause()
+  check("paused: not followed, the pause saved", focus == nil and t.ns.Settings().trackingPaused == true)
+  CP.Recompute("custom", true) -- the list changed
+  check("paused, list changed: computed, still paused", computed == 2 and focus == nil and Geo.Paused())
+  check("paused: not computed again by itself", CP.Replan("x ") == false and computed == 2)
+  check("paused: the Recompute icon computes, the pause stays", CP.Replan("x ", nil, true) and computed == 3
+    and focus == nil)
+  CP.DoTrackOn()
+  check("turned on again: computed and followed", computed == 4 and focus ~= nil and not Geo.Paused())
+
+  -- login: the followed step is lost
+  focus = nil
+  CP.Resume()
+  check("login: computed from here and followed", computed == 5 and focus ~= nil)
+  CP.Resume()
+  check("already followed: nothing", computed == 5)
+  focus = nil
+  Geo.SetPaused(true)
+  CP.Resume()
+  check("login while paused: nothing", computed == 5 and focus == nil)
+  Geo.SetPaused(false)
+  CP.Busy = function() return true end
+  CP.Resume()
+  check("login in flight or fight: waits", computed == 5 and focus == nil)
+  CP.Busy = function() return false end
+  t.tick()
+  check("then resumes", computed == 6 and focus ~= nil)
+  focus, fail = nil, true
+  CP.Resume()
+  check("computation failed: the saved Roadbook is followed", computed == 7 and focus ~= nil)
+  focus, fail = nil, false
+  CP.StepDone = function() return true end
+  CP.Resume()
+  check("finished Roadbook: nothing", computed == 7 and focus == nil)
+
+  CP.StepDone = function() return false end
+  CP.Pause()
+  Geo.CustomSetList = function() end
+  Geo.MapOwner = function() return nil end
+  CP.DoEmpty()
+  check("emptied: the pause lifted", not Geo.Paused() and t.ns.Settings().trackingPaused == nil)
+  CP.Recompute("custom", true)
+  check("the next Roadbook is followed", computed == 8 and focus ~= nil)
+end
+
+-- 13. the login asks for the Roadbook to be resumed
+do
+  local asked = 0
+  local env, ns, log = H.session(nil, { ["ObjectiveButton.lua"] = function() end })
+  ns.CP.ScheduleResume = function() asked = asked + 1 end
+  log.fire("PLAYER_LOGIN")
+  check("resumed after the login", asked == 1)
 end
 
 finish()

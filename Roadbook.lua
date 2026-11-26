@@ -61,7 +61,7 @@ end
 
 -- Roadbook focus, kept in memory separately from the map pin: the game clears its pin when
 -- you reach it (e.g. at the monster area), yet the focus must stay active.
--- It is not kept across /reload.
+-- It is not kept across /reload: the Roadbook is followed again at login (CP.Resume).
 function CP.FocusRecord()
   return CP.focusRec
 end
@@ -341,8 +341,8 @@ function CP.FinishedMessage()
   Print(L["Roadbook finished: add quests to the list to extend it, click \"Adapt\" to complete it, or delete it."])
 end
 
--- Turns the tracking on ("Tracking" box of the steps panel, Objective button): the Objective button
--- follows the Roadbook, which is computed again from here.
+-- Turns the tracking on again ("Tracking" box of the steps panel, Objective button): the Objective
+-- button follows the Roadbook, which is computed again from here.
 function CP.TrackOn()
   if CP.RefuseWhileComputing() then return end
   if not Geo.Frozen() then
@@ -356,20 +356,18 @@ function CP.TrackOn()
   CP.DoTrackOn()
 end
 
--- Tracking turned on: the steps to come are always computed again from here (the Roadbook is not
--- updated while it is not tracked); the focus is placed when the computation ends.
+-- Tracking turned on: the pause ends and the steps to come are computed again from here (the Roadbook
+-- is not updated while it is paused); the focus is placed when the computation ends.
 function CP.DoTrackOn()
   if not Geo.Tracking() then Print(L["Tracking on."]) end
-  CP.turningOn = true -- a computation started here ends with the focus
+  Geo.SetPaused(false)
   local ok, res
   if Geo.Frozen() then
     ok, res = pcall(CP.Replan, L["Tracking on: the steps to come are computed again. "])
   else
-    CP.focusAfter = true
     ok, res = pcall(CP.Recompute, "custom", true)
     res = ok and State.computing and true or false
   end
-  CP.turningOn = nil
   if not ok then Print(L["Roadbook update error: "] .. tostring(res)) end
   if not (ok and res) then CP.FocusNext(false) end
   CP.RefreshButton()
@@ -415,14 +413,13 @@ end
 -- the list in the least time.
 -- opts: { ban = transport not usable on the first leg }. Returns true if a computation started.
 function CP.Replan(msg, opts, manual)
-  -- Never computed again by itself while not tracked (manual: the Recompute icon).
-  if not (manual or Geo.Tracking() or CP.turningOn) then return false end
+  -- Never computed again by itself while paused (manual: the Recompute icon).
+  if not manual and Geo.Paused() then return false end
   if not GeoReady() then return false end
   if CP.RefuseWhileComputing() then return false end
   if not Geo.ServicePending() and (not Geo.HasRoadbook() or #Geo.CustomList() == 0) then return false end
   Print(msg .. string.format(L["Computing the Roadbook (up to %d s)…"], K.PLAN_TIME))
   Geo.Trace("replan", msg)
-  CP.focusAfter = (CP.turningOn or Geo.Tracking()) and true or nil -- the tracking goes on / starts after it
   CP.Recompute("custom", true, nil, nil, { opts = opts or {} })
   return true
 end
@@ -713,11 +710,36 @@ end
 -- Roadbook, its steps and their progress are kept (computed again only by the Recompute icon or a change of its list).
 function CP.TrackOff(quiet)
   CP.StopFocus()
-  if not quiet then Print(L["Tracking off: the Roadbook is only computed again by the Recompute icon or a change of its list. Turn the tracking on to follow it again."]) end
+  if not quiet then Print(L["Tracking paused: until you turn it on again, the Roadbook is only computed again by the Recompute icon or a change of its list."]) end
   C_Timer.After(0.1, Refresh)
 end
 
--- Empties the Roadbook after confirmation: tracking stopped, steps and list emptied.
+-- Tracking paused by the player ("Tracking" box of the steps panel).
+function CP.Pause()
+  Geo.SetPaused(true)
+  CP.TrackOff()
+end
+
+-- At login the followed step is lost: unless paused, the Roadbook is followed again, computed from
+-- where the character is now. Waits while that cannot be done (in flight, fight, dead, no position).
+K.RESUME_DELAY, K.RESUME_RETRY = 5, 10 -- seconds after the login, between two tries
+function CP.Resume()
+  -- A computation under way ends with the focus.
+  if Geo.Paused() or Geo.Tracking() or State.computing or not Geo.FrozenRec() or not GeoReady() then return end
+  if CP.Busy() or not PlayerPos() then
+    CP.ScheduleResume(K.RESUME_RETRY)
+    return
+  end
+  if Geo.IsFinished() then return end
+  if not CP.Replan(L["Roadbook resumed: the steps to come are computed again. "]) then CP.FocusNext(false) end
+end
+
+function CP.ScheduleResume(delay)
+  C_Timer.After(delay or K.RESUME_DELAY, function() Guard(CP.Resume) end)
+end
+
+-- Empties the Roadbook after confirmation: tracking stopped, steps and list emptied, a pause lifted
+-- (the next Roadbook is followed).
 function CP.Empty()
   StaticPopup_Show("FQP_EMPTY")
 end
@@ -733,7 +755,8 @@ function CP.DoEmpty()
   Geo.ServiceClear()
   Geo.CustomSetList({}, true)
   Geo.ForgetDismissedPlaces()
-  CP.focusAfter, CP.asks = nil, nil
+  Geo.SetPaused(false) -- back to the default: the tracking is automatic
+  CP.asks = nil
   State.customUnplanned = nil
   State.customToken = (State.customToken or 0) + 1 -- no pending recompute
   Print(L["Roadbook emptied."])
@@ -794,9 +817,8 @@ function CP.SetGoal(kind, value)
 end
 
 -- "Adapt" button: the list is completed or trimmed for the chosen session or level and the Roadbook
--- computed again; its steps done and its tracking are kept.
+-- computed again; its steps done and a pause of its tracking are kept.
 function CP.Adapt()
-  CP.focusAfter = Geo.Tracking() and true or nil
   CP.Recompute(Geo.SelectedGoal(), true)
 end
 
@@ -827,7 +849,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
   if goal ~= "custom" and WaitScan(attempt,
     function(n) CP.Recompute(goal, keep, n, token, re) end,
     function()
-      State.computing, CP.focusAfter = nil, nil
+      State.computing = nil
       Guard(CP.RefreshButton)
       Geo.SyncQuestLogButton()
       Refresh()
@@ -836,26 +858,25 @@ function CP.Recompute(goal, keep, attempt, token, re)
   end
   local was = CP.CurrentFocus()
   Geo.Recompute(goal, function(route, err)
-    local refocus = CP.focusAfter -- tracking (re)started during the computation
-    CP.focusAfter = nil
     if not route or #route < 2 then
       Print(err or L["The Roadbook is empty: no step to follow."])
       local followed = CP.CurrentFocus()
       if followed and not CP.InRoadbook(followed) then -- taken out of the list meanwhile
         CP.ClearFocus()
-        CP.FocusNext(false)
+        followed = nil
       end
-      CP.RefreshButton()
-      return
-    end
-    if not keep then
-      Print(L["Roadbook ready: turn on the tracking (Objective button or steps panel) to follow it."])
+      -- The former plan stays: followed unless paused.
+      if not followed and not Geo.Paused() and Geo.Frozen() and not Geo.IsFinished() then CP.FocusNext(false) end
       CP.RefreshButton()
       return
     end
     Print(L["Roadbook computed."])
+    if Geo.Paused() then
+      CP.RefreshButton()
+      return
+    end
     if not was then
-      if refocus then CP.FocusNext(false) else CP.RefreshButton() end
+      CP.FocusNext(false)
       return
     end
     -- Recomputed while followed: the focus goes to the first step of the new plan that can be done
