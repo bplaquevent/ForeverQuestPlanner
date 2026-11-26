@@ -10,4 +10,7 @@ map = ns.Geo.MatchObjectives({ { text = "Loup tué: 0/8" }, { text = "Rapport de
 check("unnamed target: no objective at its position left", map[1] == 2 and map[2] == nil)
 map = ns.Geo.MatchObjectives({ { text = "x" }, { text = "y" } }, { { name = "a" }, { name = "b" } })
 check("no name found: by position", map[1] == 1 and map[2] == 2)
+map = ns.Geo.MatchObjectives({ { text = "Burly Rockjaw Trogg slain: 0/6" }, { text = "Rockjaw Trogg slain: 0/6" } },
+  { { name = "Rockjaw Trogg" }, { name = "Burly Rockjaw Trogg" } })
+check("a name inside another never takes its objective", map[1] == 2 and map[2] == 1)
 finish()

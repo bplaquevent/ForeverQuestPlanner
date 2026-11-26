@@ -2,7 +2,7 @@
 -- they require, their follow-ups, their givers; the character facing them (race, class, professions).
 
 local ADDON_NAME, ns = ...
-local HasBit, IsCompleted, L = ns.HasBit, ns.IsCompleted, ns.L
+local Guard, HasBit, IsCompleted, L = ns.Guard, ns.HasBit, ns.IsCompleted, ns.L
 
 local QDB = {}
 -- Quest categories (QuestieDB sorts) and profession headers: Data/Supplements.lua.
@@ -11,7 +11,7 @@ local PROF_HEADERS = ns.PROFESSION_HEADERS
 
 local function QGet(entity, id, key)
   if not entity or not id then return nil end
-  local ok, v = pcall(entity.Get, id, key)
+  local ok, v = Guard(entity.Get, id, key)
   if ok then return v end
   return nil
 end
@@ -74,7 +74,7 @@ end
 
 -- Ids of a QuestieDB table as a list (some versions give a set); nil if they cannot be read.
 local function AllIds(entity)
-  local ok, ids = pcall(entity.GetAllIds)
+  local ok, ids = Guard(entity.GetAllIds)
   if not ok or type(ids) ~= "table" then return nil end
   if #ids == 0 and next(ids) then
     local list = {}

@@ -25,9 +25,17 @@ local SLOTS = {
 
 local function EquippedItemLevel(slot)
   local link = GetInventoryItemLink("player", slot)
-  if not link then return 0 end
-  local _, _, _, ilvl = GetItemInfoCompat(link)
-  return ilvl or 0
+  if link then
+    local _, _, _, ilvl = GetItemInfoCompat(link)
+    return ilvl or 0
+  end
+  -- An empty off hand beside a two-hand weapon: that weapon is what an off-hand item replaces.
+  local main = slot == 17 and GetInventoryItemLink("player", 16)
+  if main then
+    local _, _, _, ilvl, _, _, _, _, equipLoc = GetItemInfoCompat(main)
+    if equipLoc == "INVTYPE_2HWEAPON" then return ilvl or 0 end
+  end
+  return 0
 end
 
 -- Lowest item level you wear where an item of this equip location goes, or nil if it cannot be worn.

@@ -53,19 +53,19 @@ local function DropRate(itemId, npcId)
   if Geo.dropDB == nil then
     Geo.dropDB = false
     if QuestieLoader and QuestieLoader.ImportModule then
-      local ok, db = pcall(QuestieLoader.ImportModule, QuestieLoader, "DropDB")
+      local ok, db = Guard(QuestieLoader.ImportModule, QuestieLoader, "DropDB")
       if ok and type(db) == "table" and db.GetItemDroprate then Geo.dropDB = db end
     end
   end
   if Geo.dropDB and Geo.dropDB.tablePserver then -- Questie loaded and its drop tables ready
-    local ok, r = pcall(Geo.dropDB.GetItemDroprate, itemId, npcId)
+    local ok, r = Guard(Geo.dropDB.GetItemDroprate, itemId, npcId)
     if ok then return type(r) == "table" and r[1] or nil end
   end
   if Geo.drops == nil then
     Geo.drops = false
-    local ok, mod = pcall(QDB.lib.Support.Get, "QuestieClassicItemDrops")
+    local ok, mod = Guard(QDB.lib.Support.Get, "QuestieClassicItemDrops")
     if ok and type(mod) == "table" then
-      local okC, fix = pcall(QDB.lib.Support.Get, "QuestieItemDropCorrections")
+      local okC, fix = Guard(QDB.lib.Support.Get, "QuestieItemDropCorrections")
       Geo.drops = { wowhead = LoadDataString(mod.wowheadData) or {}, pserver = LoadDataString(mod.cmangosData) or {},
         fix = okC and type(fix) == "table" and type(fix.Era) == "table" and fix.Era or {} }
     end
@@ -165,6 +165,13 @@ local function DungeonEntrance(areaId)
   return w
 end
 
+-- World point of a QuestieDB position { x, y } in a zone; -1 coordinates are a place inside a
+-- dungeon: its entrance.
+local function SpawnPoint(zone, p)
+  if p[1] < 0 then return DungeonEntrance(zone) end
+  return WorldPos(zone, p[1], p[2])
+end
+
 -- Spawn points (sampled) of an NPC or a world object.
 local function EntityPoints(kind, id)
   local cache = Geo[kind]
@@ -179,7 +186,7 @@ local function EntityPoints(kind, id)
         for i = 1, #list, step do
           local p = list[i]
           if type(p) == "table" and p[1] then
-            local w = (p[1] < 0) and DungeonEntrance(zone) or WorldPos(zone, p[1], p[2])
+            local w = SpawnPoint(zone, p)
             if w then pts[#pts + 1] = w end
             if p[1] < 0 then break end
           end
@@ -443,7 +450,8 @@ function Geo.KnownNodes()
     local id = byName[name]
     if id and not set[id] and Geo.NodeUsable(id) then set[id], count = true, count + 1 end
   end
-  Geo.knownCache = { learned = learned, n = n, set = set, count = count }
+  -- Without the game's taxi names yet (Geo.TaxiNames), the nodes are read again next time.
+  if Geo.taxiNames then Geo.knownCache = { learned = learned, n = n, set = set, count = count } end
   return set, count
 end
 
@@ -808,7 +816,7 @@ function Geo.IsEscort(id)
   local Q = QDB.Quest
   local function raw(key)
     if Q and Q.GetRaw then
-      local ok, val = pcall(Q.GetRaw, id, key)
+      local ok, val = Guard(Q.GetRaw, id, key)
       if ok then return val end
     end
     return QGet(Q, id, key)
@@ -834,6 +842,34 @@ function Geo.IsEscort(id)
   return v
 end
 
+-- Number of places where an NPC stands (all its QuestieDB spawns, not only the points sampled).
+local function SpawnCount(npcId)
+  local spawns, n = QGet(QDB.Npc, npcId, "spawns"), 0
+  for _, list in pairs(type(spawns) == "table" and spawns or {}) do
+    if type(list) == "table" then n = n + #list end
+  end
+  return n
+end
+
+-- Target of a kill credit: any of several monsters counts. QuestieDB row: { ids, base id, name, icon }.
+-- The level read for the XP is the first monster located's, the base one when it is (it may be a
+-- mere counter, standing nowhere).
+local function AddCreditTarget(add, o)
+  local ids, pts, seen = {}, {}, {}
+  local function include(id)
+    if seen[id] then return end
+    seen[id] = true
+    local spawns = EntityPoints("npc", id)
+    if #spawns > 0 then ids[#ids + 1] = id end
+    for _, p in ipairs(spawns) do pts[#pts + 1] = p end
+  end
+  include(o[2])
+  for _, id in ipairs(o[1] or {}) do include(id) end
+  local name = o[3] or QGet(QDB.Npc, o[2], "name")
+  if K.TALK_ICONS[o[4]] then add("talk", name, pts)
+  else add("kill", name, pts, nil, ids[1], #ids > 0 and ids or nil) end
+end
+
 -- Target of an item to collect: where it drops (monsters, objects), with the average drop rate.
 function Geo.AddItemTarget(add, itemId)
   -- Drop rate: average over the monsters, each weighted by its number of spawns (the ones met).
@@ -843,7 +879,10 @@ function Geo.AddItemTarget(add, itemId)
     local spawns = EntityPoints("npc", npcs[i])
     for _, p in ipairs(spawns) do pts[#pts + 1] = p end
     local r = DropRate(itemId, npcs[i])
-    if r and #spawns > 0 then rateSum, rateN = rateSum + r * #spawns, rateN + #spawns end
+    if r and #spawns > 0 then
+      local n = SpawnCount(npcs[i])
+      rateSum, rateN = rateSum + r * n, rateN + n
+    end
   end
   local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
   for i = 1, math.min(#objs, K.MAX_DROP_SOURCES) do
@@ -905,10 +944,12 @@ local function QuestTargets(id)
     end
     for _, o in ipairs(obj[3] or {}) do Geo.AddItemTarget(add, o[1]) end
     for _, o in ipairs(obj[5] or {}) do
-      if type(o) == "table" and o[2] then
-        add("kill", o[3] or QGet(QDB.Npc, o[2], "name"), EntityPoints("npc", o[2]), nil, o[2])
-      end
+      if type(o) == "table" and o[2] then AddCreditTarget(add, o) end
     end
+    -- Reputation and spell objectives are done at no known place: counted without a target, so the
+    -- quest has an objective that is not located.
+    if next(obj[4] or {}) then calls = calls + 1 end
+    calls = calls + #(obj[6] or {})
   end
   -- Items needed but not counted by the quest (QuestieDB requiredSourceItems: "bring the remains
   -- to the grave"): one target where each drops, done before the objectives that use it.
@@ -923,8 +964,9 @@ local function QuestTargets(id)
     local pts = {}
     for zone, list in pairs(trig[2]) do
       for _, p in ipairs(list) do
-        local w = WorldPos(zone, p[1], p[2])
+        local w = SpawnPoint(zone, p)
         if w then pts[#pts + 1] = w end
+        if p[1] < 0 then break end -- the dungeon's entrance, once
       end
     end
     add("explore", trig[1], pts)
@@ -964,13 +1006,22 @@ end
 -- Returns { [target index] = objective index }, { [objective index] = true } (the ones matched).
 function Geo.MatchObjectives(objs, t)
   local map, used = {}, {}
+  -- Longest names first: a name contained in another one ("Rockjaw Trogg" in "Burly Rockjaw
+  -- Trogg") must not take its objective.
+  local named = {}
   for i, tg in ipairs(t) do
-    if not tg.sourceItem and tg.name then
-      for j, o in ipairs(objs) do
-        if not used[j] and o.text and o.text:find(tg.name, 1, true) then
-          map[i], used[j] = j, true
-          break
-        end
+    if not tg.sourceItem and tg.name then named[#named + 1] = i end
+  end
+  table.sort(named, function(a, b)
+    local la, lb = #t[a].name, #t[b].name
+    if la ~= lb then return la > lb end
+    return a < b
+  end)
+  for _, i in ipairs(named) do
+    for j, o in ipairs(objs) do
+      if not used[j] and o.text and o.text:find(t[i].name, 1, true) then
+        map[i], used[j] = j, true
+        break
       end
     end
   end

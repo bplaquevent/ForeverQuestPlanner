@@ -171,7 +171,6 @@ end
 function Geo.ServiceNpcs()
   if Geo.svc then return Geo.svc end
   local svc = { vendor = {}, repair = {}, trainer = {}, bank = {}, mail = {} }
-  Geo.svc = svc
   local classLoc, token = UnitClass("player")
   local classEn = token and (token:sub(1, 1) .. token:sub(2):lower()) or nil
   local learned = Geo.LearnedTrainers()
@@ -206,7 +205,7 @@ function Geo.ServiceNpcs()
     end
   end
   -- Mailboxes: objects named "Mailbox" (no flag, neutral).
-  for _, id in ipairs(AllIds(QDB.Object)) do
+  for _, id in ipairs(AllIds(QDB.Object) or {}) do
     local name = QGet(QDB.Object, id, "name")
     if type(name) == "string" then
       local low = name:lower()
@@ -217,6 +216,7 @@ function Geo.ServiceNpcs()
       end
     end
   end
+  Geo.svc = svc -- kept once filled: after an error, read again
   return svc
 end
 

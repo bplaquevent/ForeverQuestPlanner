@@ -80,6 +80,14 @@ local function MissingReputation(rep)
   return string.format(L["%s: %s required"], name or (L["faction "] .. rep[1]), StandingLabel(rep[2]))
 end
 
+-- Is the player's reputation at or above a quest's maximum ({ faction, value }: Questie's rule, the
+-- value itself is already too high)? false when unknown to the character.
+local function ReputationOutgrown(rep)
+  if type(rep) ~= "table" or not rep[1] or not rep[2] then return false end
+  local current = PlayerReputation(rep[1])
+  return current ~= nil and current >= rep[2]
+end
+
 local function AnyNonEmpty(t)
   if type(t) ~= "table" then return false end
   for _, v in pairs(t) do
@@ -190,6 +198,7 @@ local function Offered(id, ctx, done)
   if not WithinReach(id, ctx) or IsInLog(id) then return false end
   local maxL = QGet(Q, id, "requiredMaxLevel")
   if maxL and maxL > 0 and ctx.plevel > maxL then return false end
+  if ReputationOutgrown(QGet(Q, id, "requiredMaxRep")) then return false end
   if EVENT_SORTS[QGet(Q, id, "zoneOrSort") or 0] then return false end
   for _, x in ipairs(QuestBlockers(id)) do
     if IsCompleted(x) or IsInLog(x) then return false end
@@ -277,7 +286,9 @@ local function MissingNeeds(id, ctx, done)
   if startItems then
     local have = false
     for _, itemId in ipairs(startItems) do
-      if ns.Geo.ItemCount(itemId) > 0 then have = true break end
+      local held = ns.Geo.ItemCount(itemId) > 0
+      if ctx.startItems then ctx.startItems[itemId] = held end -- watched: StartItemsChanged
+      have = have or held
     end
     if not have then
       missing.texts[#missing.texts + 1] = L["object: "] .. (QGet(QDB.Item, startItems[1], "name") or ("#" .. startItems[1]))
@@ -430,6 +441,8 @@ function StartScan()
   end
 
   local ctx = BuildScanContext()
+  ctx.startItems = {}
+  scan.startItems = ctx.startItems
   local results, i = {}, 1
   scan.running, scan.error, scan.changed = true, nil, false
   local function step()
@@ -455,7 +468,16 @@ local function ScanIfNeeded()
   if (scan.dirty or not scan.entries) and not (scan.running or scan.error) then StartScan() end
 end
 
+-- Was an item starting a quest, seen by the last scan, picked up or lost since?
+local function StartItemsChanged()
+  for itemId, held in pairs(scan.startItems or {}) do
+    if (ns.Geo.ItemCount(itemId) > 0) ~= held then return true end
+  end
+  return false
+end
+
 -- Shared with the next files.
+ns.StartItemsChanged = StartItemsChanged
 ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan = BuildScanContext, CheckAvailable, Refresh, StartScan, scan
 ns.QuestDoubts = QuestDoubts
 ns.WaitScan, ns.ScanIfNeeded = WaitScan, ScanIfNeeded

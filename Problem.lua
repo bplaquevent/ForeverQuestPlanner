@@ -111,7 +111,7 @@ function Geo.CustomPlanSteps(pos, plevel, near)
   Geo.AwaitTags(notInLog) -- for the names of the instance visits
   local tasks, byId, unplanned = {}, {}, {}
   for _, it in ipairs(list) do
-    local ok, task, why = pcall(Geo.CustomTask, it, pos, plevel, logById)
+    local ok, task, why = Geo.GuardInSteps(Geo.CustomTask, it, pos, plevel, logById)
     if ok and task then
       tasks[#tasks + 1] = task
       byId[it.id] = task

@@ -164,5 +164,6 @@ end
 ns.CleanText, ns.CoinText, ns.Color, ns.ErrorTrace = CleanText, CoinText, Color, ErrorTrace
 ns.FormatNumber, ns.FormatTime, ns.Guard, ns.HasBit = FormatNumber, FormatTime, Guard, HasBit
 ns.IsCompleted, ns.IsInLog, ns.K, ns.L, ns.MoneyText = IsCompleted, IsInLog, K, L, MoneyText
+ns.Told = Told -- for a protected call that is not a pcall (Geo.GuardInSteps)
 ns.MoneyThreshold, ns.Normalize, ns.Print, ns.State = MoneyThreshold, Normalize, Print, State
 ns.TrivialRange = TrivialRange
