@@ -139,7 +139,7 @@ function Geo.MapPanelHeader(route, info, doneCount)
   local sep = Color("777777", " - ")
   local value = function(t) return Color("dddddd", t) end
   local lines = {}
-  if State.computing then lines[1] = Color("ffd100", L["Recomputing… the Roadbook cannot be changed"]) end
+  if State.computing then lines[1] = Color(K.DESC.busy, L["Recomputing… the Roadbook cannot be changed"]) end
   -- Size and progress.
   local total = #route - 1
   local finished = total > 0 and doneCount >= total
@@ -262,7 +262,7 @@ local function RowClick(self, button)
     MenuUtil.CreateContextMenu(self, function(_, root)
       root:CreateTitle(st.task and st.task.title or L["Roadbook step"])
       local computing = State.computing -- what changes the Roadbook waits for it
-      if computing then root:CreateTitle(Color("ffd100", L["Recomputing…"])) end
+      if computing then root:CreateTitle(Color(K.DESC.busy, L["Recomputing…"])) end
       for _, a in ipairs(acts) do
         local d = root:CreateButton(a[1], a[2])
         local locked = computing and not a.reads

@@ -164,6 +164,13 @@ local function QuestDoubts(id, faction)
   return #out > 0 and out or nil
 end
 
+-- A quest the character may take at the levels scanned (ctx), whatever else it still needs: not
+-- turned in, allowed to its race and class, required level within the lookahead.
+local function WithinReach(id, ctx)
+  return (QGet(QDB.Quest, id, "requiredLevel") or 0) <= ctx.plevel + (ctx.lookahead or 0)
+    and not IsCompleted(id) and QuestAllowed(id, ctx.classBit, ctx.raceBit)
+end
+
 local function CheckAvailable(id, ctx)
   local Q = QDB.Quest
   local req = QGet(Q, id, "requiredLevel") or 0
@@ -171,7 +178,7 @@ local function CheckAvailable(id, ctx)
   -- Only the required level decides whether the character can pick the quest up (a high quest
   -- level alone does not hide it).
   -- Quests slightly too high kept for the Roadbook (unlocked by the expected level).
-  if req > ctx.plevel + (ctx.lookahead or 0) then return nil end
+  if not WithinReach(id, ctx) then return nil end
   -- A prerequisite quest the player's race or class could never take (the quest of another race, flagged done
   -- through the exclusive classic chain) does not count as done: what follows it cannot be taken either.
   local function done(q) return (IsCompleted(q) or (ctx.done and ctx.done[q]) or false) and QuestAllowed(q, ctx.classBit, ctx.raceBit) end
@@ -182,9 +189,7 @@ local function CheckAvailable(id, ctx)
   local lowLevel = lvl > 0 and lvl < ctx.plevel - ctx.range
   local maxL = QGet(Q, id, "requiredMaxLevel")
   if maxL and maxL > 0 and ctx.plevel > maxL then return nil end
-  if IsCompleted(id) or IsInLog(id) then return nil end
-
-  if not QuestAllowed(id, ctx.classBit, ctx.raceBit) then return nil end
+  if IsInLog(id) then return nil end
 
   local sort = QGet(Q, id, "zoneOrSort") or 0
   if EVENT_SORTS[sort] then return nil end
@@ -414,4 +419,4 @@ end
 ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan = BuildScanContext, CheckAvailable, Refresh, StartScan, scan
 ns.QuestDoubts = QuestDoubts
 ns.WaitScan = WaitScan
-ns.MarkScanDirty = MarkScanDirty
+ns.MarkScanDirty, ns.WithinReach = MarkScanDirty, WithinReach

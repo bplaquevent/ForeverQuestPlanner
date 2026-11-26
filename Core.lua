@@ -226,6 +226,7 @@ K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your le
 -- required level (checked by the solver's evaluation).
 K.LOOKAHEAD_LEVELS = 5
 K.MAX_QUESTS = 40 -- quest log size on the Forever server
+K.DESC_SEP = " · " -- between the informations of one line (quest descriptions, UI/QuestDesc.lua)
 
 -- Quest categories (QuestieDB sorts) and profession headers: Data/Supplements.lua.
 local CLASS_SORTS, PROF_SORTS, EVENT_SORTS = ns.SORT_CLASS, ns.SORT_PROFESSION, ns.SORT_EVENT
@@ -906,7 +907,7 @@ local function RemainingObjectives(q)
   for _, o in ipairs(q.objectives or {}) do
     if not o.finished and o.text then parts[#parts + 1] = o.text end
   end
-  return table.concat(parts, " · ")
+  return table.concat(parts, K.DESC_SEP)
 end
 
 ---------------------------------------------------------------------------

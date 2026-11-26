@@ -74,8 +74,6 @@ PanelTemplates_SetNumTabs
 PanelTemplates_SetTab
 PanelTemplates_TabResize
 PlaySound
-QuestLog_SetSelection
-QuestLog_Update
 QuestMapFrame_OpenToQuestDetails
 QuestieLoader
 ReloadUI

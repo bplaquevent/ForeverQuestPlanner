@@ -9,7 +9,7 @@ local Settings, StartPoints, State, TravelSpeed, TurnInText = ns.Settings, ns.St
 local UnitTime, WorldPos, scan, LogQuests, AllIds, SkillName = ns.UnitTime, ns.WorldPos, ns.scan, ns.LogQuests, ns.AllIds, ns.SkillName
 local LogEntry, Normalize, GeoReady = ns.LogEntry, ns.Normalize, ns.GeoReady
 local IdKind, LogKind, RequestQuestTags, QuestTagsSettled = ns.IdKind, ns.LogKind, ns.RequestQuestTags, ns.QuestTagsSettled
-local IsCompleted, QuestAllowed = ns.IsCompleted, ns.QuestAllowed
+local WithinReach = ns.WithinReach
 local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
@@ -491,8 +491,7 @@ function Geo.FollowUpIds(tasks, ctx)
     local from = todo[i]
     if from.depth < K.MAX_FOLLOW_DEPTH then
       for _, b in ipairs(NextIds(from.id)) do
-        if not seen[b] and not IsCompleted(b) and QuestAllowed(b, ctx.classBit, ctx.raceBit)
-          and (QGet(QDB.Quest, b, "requiredLevel") or 0) <= ctx.plevel + ctx.lookahead then
+        if not seen[b] and WithinReach(b, ctx) then
           seen[b] = true
           out[#out + 1] = b
           todo[#todo + 1] = { id = b, depth = from.depth + 1 }

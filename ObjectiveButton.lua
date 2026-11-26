@@ -175,7 +175,7 @@ function CP.RefreshButton()
     local sub = CP.PackInfos(b.sub, d, maxW)
     if types ~= "" then sub = types .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
     -- Roadbook adapted while followed: the step stays shown meanwhile, replaced at the end if needed.
-    if State.computing then sub = Color("ffd100", L["Recomputing…"]) .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
+    if State.computing then sub = Color(K.DESC.busy, L["Recomputing…"]) .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
     b.sub:SetText(sub)
     b.current = s
   else

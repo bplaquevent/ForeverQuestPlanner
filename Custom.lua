@@ -8,7 +8,7 @@ local RemainingTargets, Settings, QuestPrereqs, Color = ns.RemainingTargets, ns.
 local PlayerFaction, QuestDoubts, State, PlayerBits, QuestAllowed = ns.PlayerFaction, ns.QuestDoubts, ns.State, ns.PlayerBits, ns.QuestAllowed
 local Analyze, IsClassMeta, IsProfMeta, LogById, LogQuests = ns.Analyze, ns.IsClassMeta, ns.IsProfMeta, ns.LogById, ns.LogQuests
 local QuestCategory, QuestMeta = ns.QuestCategory, ns.QuestMeta
-local QuestKind, RequestQuestTags = ns.QuestKind, ns.RequestQuestTags
+local QuestKind = ns.QuestKind
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.DUNGEON_WAVE_DEPTH = 20 -- safety: dungeon visits following one another
@@ -790,11 +790,6 @@ function Geo.RoadbookQuests(fz)
   for _, u in ipairs((fz and fz.info.unplanned) or State.customUnplanned or {}) do why[u.id] = u.reason end
   for _, it in ipairs(list) do add(it.id, it.title, it.level, fz ~= nil) end
   local logById, plevel = LogById(), UnitLevel("player")
-  local notInLog = {}
-  for _, it in ipairs(quests) do
-    if not (logById[it.id] or IsCompleted(it.id)) then notInLog[#notInLog + 1] = it.id end
-  end
-  RequestQuestTags(notInLog) -- shown again once loaded (QuestTags.lua)
   for _, it in ipairs(quests) do
     it.reason = why[it.id]
     it.log = logById[it.id]

@@ -47,8 +47,8 @@ end
 -- Quest types of a quest, colored: "Escort · Collect" ("" if none, at most 3).
 function Geo.QuestTypesText(id)
   local types, parts = Geo.QuestTypes(id), {}
-  for i = 1, math.min(#types, 3) do parts[#parts + 1] = Color("80c0ff", K.QUEST_TYPE_LABEL[types[i]]) end
-  return table.concat(parts, Color("80c0ff", K.DESC_SEP))
+  for i = 1, math.min(#types, 3) do parts[#parts + 1] = Color(K.DESC.badge, K.QUEST_TYPE_LABEL[types[i]]) end
+  return table.concat(parts, Color(K.DESC.badge, K.DESC_SEP))
 end
 
 -- "  [35] Elite · Dungeon · Escort · Collect": o = { id, level, tag (game tag, log quests),
@@ -63,7 +63,7 @@ function Geo.QuestBadges(o)
   if id and Geo.IsEliteQuest(id) then parts[#parts + 1] = Color("ff8040", L["Elite"]) end
   if tag and tag ~= "" and not (id and Geo.IsGameElite(id)) then parts[#parts + 1] = tag -- "Elite": said above
   elseif o.kind then
-    local label = Color("80c0ff", K.KIND_LABEL[o.kind])
+    local label = Color(K.DESC.badge, K.KIND_LABEL[o.kind])
     parts[#parts + 1] = o.instance and Geo.WithLevel(label, o.instance) or label
   end
   local isClass = o.isClass
@@ -78,10 +78,10 @@ function Geo.QuestBadges(o)
   for i = 1, math.min(#types, 3) do parts[#parts + 1] = K.QUEST_TYPE_LABEL[types[i]] end
   local badge = Geo.LevelBadge(o.level)
   -- each part in square brackets, coloured on its own (colour codes do not nest; some parts carry their own colours)
-  local blue = Color("80c0ff", "[")
+  local blue = Color(K.DESC.badge, "[")
   for i, p in ipairs(parts) do
-    if not p:find("^|c") then p = Color("80c0ff", p) end
-    parts[i] = blue .. p .. Color("80c0ff", "]")
+    if not p:find("^|c") then p = Color(K.DESC.badge, p) end
+    parts[i] = blue .. p .. Color(K.DESC.badge, "]")
   end
   return "  " .. badge .. (#parts > 0 and (" " .. table.concat(parts, " ")) or "")
 end
@@ -92,9 +92,9 @@ end
 --   follow-ups in color, the rest in gray), warnings (orange), blockers (red), rewards.
 --   Informations on one line are separated by " · ".
 K.DESC = { action = "bbbbbb", meta = "888888", xp = "80c0ff", warn = "ffb060", bad = "ff6060",
-  good = "40ff40", chain = "c080ff" }
+  good = "40ff40", chain = "c080ff",
+  badge = "80c0ff", abandon = "ff8040", busy = "ffd100" }
 K.DESC_LINE = "\n       "
-K.DESC_SEP = " · "
 
 -- White title + badges (o: options of Geo.QuestBadges; none for a step that is not a quest).
 function Geo.QuestTitle(title, o)

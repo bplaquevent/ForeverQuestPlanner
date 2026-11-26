@@ -57,6 +57,11 @@ end
 -- computed again). Returns the number of quests of the list.
 function Geo.RoadbookQuestItems(items, fz, query)
   local quests = Geo.RoadbookQuests(fz)
+  local notInLog = {}
+  for _, it in ipairs(quests) do
+    if not (it.log or it.done) then notInLog[#notInLog + 1] = it.id end
+  end
+  ns.RequestQuestTags(notInLog) -- their kinds: shown again once loaded (QuestTags.lua)
   local shown, lines = {}, {}
   for _, it in ipairs(quests) do
     local text = RoadbookQuestText(it)

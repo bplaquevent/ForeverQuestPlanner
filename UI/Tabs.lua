@@ -62,8 +62,8 @@ local function RenderTodo(a)
     local addAll, removeAll = Geo.CustomBulkButtons(list)
     items[#items + 1] = { header = true, kind = kind, key = key, label = text, b1 = addAll, b2 = removeAll }
     for _, q in ipairs(quests) do
-      local body = "  " .. StateIcons(q.id) .. (q._abandon and Color("ff8040", L["[To abandon] "]) or "") .. QuestLine(q)
-      if q._abandon then body = body .. Geo.DescLine(Color("ff8040", L["Reason: "] .. q._abandon)) end
+      local body = "  " .. StateIcons(q.id) .. (q._abandon and Color(K.DESC.abandon, L["[To abandon] "]) or "") .. QuestLine(q)
+      if q._abandon then body = body .. Geo.DescLine(Color(K.DESC.abandon, L["Reason: "] .. q._abandon)) end
       body = body .. detail(q) .. QuestFigures(q)
       if q._chain then body = body .. Geo.DescLine(Color(K.DESC.chain, q._chain)) end
       items[#items + 1] = {
@@ -90,7 +90,7 @@ local function RenderTodo(a)
   end
 
   if #a.abandon > 0 and not searching then
-    items[#items + 1] = { text = Color("ff8040", string.format(L["%s recommended for abandoning: orange lines marked [To abandon], in their category."], Plural(#a.abandon, L["quest"]))),
+    items[#items + 1] = { text = Color(K.DESC.abandon, string.format(L["%s recommended for abandoning: orange lines marked [To abandon], in their category."], Plural(#a.abandon, L["quest"]))),
       tint = { 0.9, 0.5, 0.25 }, stripe = { 1, 0.5, 0.15 } }
   end
 
