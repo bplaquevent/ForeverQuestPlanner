@@ -7,6 +7,7 @@ local L, OnWaypointChanged, PlayerPos, Print, Color, Refresh = ns.L, ns.OnWaypoi
 local ScheduleSnapshot, Settings, Snapshot, State = ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State
 local ToggleMainFrame, MarkScanDirty = ns.ToggleMainFrame, ns.MarkScanDirty
 local CheckDataVersion, EraseData, LearnedChar = ns.CheckDataVersion, ns.EraseData, ns.LearnedChar
+local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
 -- Events
@@ -82,16 +83,16 @@ On({ "PLAYER_LOGIN" }, function()
   end
   if st.nearRadius then State.nearRadius = st.nearRadius end
   if st.availFilter then State.availFilter = st.availFilter end
-  pcall(Geo.ApplyParams)
+  Guard(Geo.ApplyParams)
   local okM, errM = pcall(Geo.MapInit) -- the Roadbook on OpenMap's map (RoadbookMap.lua)
   if not okM then Print(L["Map drawing error: "] .. tostring(errM)) end
   CreateMinimapButton()
-  pcall(Geo.QuestLogButtonInit) -- "+ Roadbook" in the game's quest log (UI/QuestLogHook.lua)
+  Guard(Geo.QuestLogButtonInit) -- "+ Roadbook" in the game's quest log (UI/QuestLogHook.lua)
   C_Timer.NewTicker(K.PASS_TICK, function()
-    pcall(Geo.PassTick) -- zone passes learned on foot
-    pcall(Geo.LearnMountSpeed)
+    Guard(Geo.PassTick) -- zone passes learned on foot
+    Guard(Geo.LearnMountSpeed)
   end)
-  C_Timer.NewTicker(3, function() pcall(CP.NearbyCheck) end) -- steps on the spot first (Roadbook.lua)
+  C_Timer.NewTicker(3, function() Guard(CP.NearbyCheck) end) -- steps on the spot first (Roadbook.lua)
   if CP.CHECKPOINT_TOGGLE.get() then CP.CreateCheckpointButton() end
   ScheduleSnapshot()
 end)
@@ -100,8 +101,8 @@ On({ "PLAYER_LOGOUT" }, function() Snapshot() end)
 
 On({ "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "SPELLS_CHANGED" }, function(event)
   Geo.ForgetTeleportDests()
-  pcall(CP.ScheduleRecallCheck, 3)
-  if event == "BAG_UPDATE_DELAYED" then pcall(CP.OnGameEvent, event) end -- source item looted
+  Guard(CP.ScheduleRecallCheck, 3)
+  if event == "BAG_UPDATE_DELAYED" then Guard(CP.OnGameEvent, event) end -- source item looted
 end)
 
 On({ "HEARTHSTONE_BOUND" }, function(event)
@@ -109,13 +110,13 @@ On({ "HEARTHSTONE_BOUND" }, function(event)
   local s = CP.focused
   local planned = s and s.kind == "bind" and CP.IsStepFocused(s)
   local p = planned and s.p or PlayerPos()
-  pcall(Geo.RecordBind, p)
+  Guard(Geo.RecordBind, p)
   if planned then
-    C_Timer.After(0.5, function() pcall(Geo.RestampRecalls) end)
+    C_Timer.After(0.5, function() Guard(Geo.RestampRecalls) end)
   else
-    pcall(CP.ScheduleRecallCheck, 3) -- another bind location: the route is adapted
+    Guard(CP.ScheduleRecallCheck, 3) -- another bind location: the route is adapted
   end
-  pcall(CP.OnGameEvent, event)
+  Guard(CP.OnGameEvent, event)
   if WindowShown() then C_Timer.After(0.5, Refresh) end
 end)
 
@@ -123,16 +124,16 @@ On({ "UNIT_SPELLCAST_SUCCEEDED" }, function(_, unit, _, spellID)
   local e = K.RECALL_BY_SPELL[spellID]
   if unit == "player" and (spellID == K.HEARTH_SPELL or e) then
     local key = e and spellID or "hearth"
-    pcall(CP.RecallCast, key)
+    Guard(CP.RecallCast, key)
     C_Timer.After(5, function()
       if e and not e.bind then
-        pcall(Geo.RecordTeleport, spellID, PlayerPos()) -- the real arrival of this teleport
+        Guard(Geo.RecordTeleport, spellID, PlayerPos()) -- the real arrival of this teleport
       else
         local name = GetBindLocation and GetBindLocation()
         local st = LearnedChar().bind
-        if not (st and st.name == name) then pcall(Geo.RecordBind, PlayerPos()) end
+        if not (st and st.name == name) then Guard(Geo.RecordBind, PlayerPos()) end
       end
-      pcall(CP.OnGameEvent, "FQP_HEARTH_ARRIVED", key)
+      Guard(CP.OnGameEvent, "FQP_HEARTH_ARRIVED", key)
     end)
   end
 end)
@@ -141,7 +142,7 @@ On({ "PLAYER_CONTROL_LOST" }, function()
   C_Timer.After(0.5, function()
     if UnitOnTaxi and UnitOnTaxi("player") and not f.onTaxi then
       f.onTaxi = true
-      pcall(CP.OnGameEvent, "FQP_TAXI_TAKEOFF")
+      Guard(CP.OnGameEvent, "FQP_TAXI_TAKEOFF")
     end
   end)
 end)
@@ -149,14 +150,14 @@ end)
 On({ "PLAYER_CONTROL_GAINED" }, function()
   if f.onTaxi then
     f.onTaxi = nil
-    C_Timer.After(1, function() pcall(CP.OnGameEvent, "FQP_TAXI_LANDED") end)
+    C_Timer.After(1, function() Guard(CP.OnGameEvent, "FQP_TAXI_LANDED") end)
   end
 end)
 
 On({ "UPDATE_FACTION", "SKILL_LINES_CHANGED" }, function(event)
   if event == "SKILL_LINES_CHANGED" then
-    pcall(ns.PlayerSkills, true) -- read again: a "raise the skill" step may be done
-    pcall(CP.OnGameEvent, event)
+    Guard(ns.PlayerSkills, true) -- read again: a "raise the skill" step may be done
+    Guard(CP.OnGameEvent, event)
   end
   if not f.rescanPending then
     f.rescanPending = true
@@ -173,29 +174,29 @@ On({ "QUEST_DATA_LOAD_RESULT" }, function(_, questID)
 end)
 
 On({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD" }, function()
-  pcall(CP.OnGameEvent, "ZONE_CHANGED_NEW_AREA")
+  Guard(CP.OnGameEvent, "ZONE_CHANGED_NEW_AREA")
 end)
 
 On({ "USER_WAYPOINT_UPDATED" }, function()
   OnWaypointChanged()
-  C_Timer.After(0.2, function() pcall(CP.RefreshButton) end)
+  C_Timer.After(0.2, function() Guard(CP.RefreshButton) end)
   if WindowShown() then C_Timer.After(0.1, Refresh) end
 end)
 
 On({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }, function(event)
-  pcall(Geo.TrainerSeen, event == "PLAYER_TARGET_CHANGED" and "target" or "mouseover")
+  Guard(Geo.TrainerSeen, event == "PLAYER_TARGET_CHANGED" and "target" or "mouseover")
 end)
 
 On({ "TAXIMAP_OPENED", "MERCHANT_SHOW", "TRAINER_SHOW", "BANKFRAME_OPENED", "MAIL_SHOW" }, function(event, ...)
-  if event == "TRAINER_SHOW" then pcall(Geo.TrainerOpened) end
-  pcall(CP.OnGameEvent, event, ...)
+  if event == "TRAINER_SHOW" then Guard(Geo.TrainerOpened) end
+  Guard(CP.OnGameEvent, event, ...)
 end)
 
 -- The quest log or the level changed.
 On({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "PLAYER_LEVEL_UP" }, function(event, ...)
   ScheduleSnapshot()
   State.abandonIds = nil -- recommendations for abandoning computed again on the next display
-  pcall(CP.OnGameEvent, event, ...)
+  Guard(CP.OnGameEvent, event, ...)
   if event == "QUEST_LOG_UPDATE" then
     if State.mainFrame and State.mainFrame:IsShown() and State.currentTab == "groups" and not f.pendingRefresh then
       f.pendingRefresh = true

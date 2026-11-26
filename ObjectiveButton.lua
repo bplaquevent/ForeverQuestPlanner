@@ -6,6 +6,7 @@ local ADDON_NAME, ns = ...
 local Geo, ActivePin, CP, Color, Dist, FormatTime, GeoReady = ns.Geo, ns.ActivePin, ns.CP, ns.Color, ns.Dist, ns.FormatTime, ns.GeoReady
 local GetObjectives, ICON, IsInLog, K, L, PlayerPos, PointText = ns.GetObjectives, ns.ICON, ns.IsInLog, ns.K, ns.L, ns.PlayerPos, ns.PointText
 local Print, Refresh, Settings, State, TurnInText = ns.Print, ns.Refresh, ns.Settings, ns.State, ns.TurnInText
+local ErrorTrace, Guard = ns.ErrorTrace, ns.Guard
 
 -- Click on the button. Roadbook being computed: nothing (until it is computed and tracked), unless it
 -- is adapted while followed (the followed step stays shown, the click works on it). No
@@ -44,9 +45,7 @@ function CP.ObjectiveClickUnsafe(button)
 end
 
 function CP.ObjectiveClick(button)
-  local ok, err = xpcall(function() CP.ObjectiveClickUnsafe(button) end, function(e)
-    return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
-  end)
+  local ok, err = xpcall(function() CP.ObjectiveClickUnsafe(button) end, ErrorTrace)
   if not ok then Print(L["|cffff6060Error while validating the checkpoint|r (copy it to report it):\n"] .. err) end
 end
 
@@ -176,7 +175,7 @@ function CP.RefreshButton()
     local sub = CP.PackInfos(b.sub, d, maxW)
     if types ~= "" then sub = types .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
     -- Roadbook adapted while followed: the step stays shown meanwhile, replaced at the end if needed.
-    if State.computing then sub = Color("ffd100", L["Recomputing…"]) .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
+    if State.computing then sub = Color(K.DESC.busy, L["Recomputing…"]) .. ((sub and sub ~= "") and ("\n" .. sub) or "") end
     b.sub:SetText(sub)
     b.current = s
   else
@@ -495,7 +494,7 @@ function CP.CreateServiceBar(b)
     ib:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
       GameTooltip:AddLine(def.label)
-      local ok, npc = pcall(Geo.NearestService, def.key)
+      local ok, npc = Guard(Geo.NearestService, def.key)
       if ok and npc then
         GameTooltip:AddLine(string.format(L["Nearest: %s (~%s)"], npc.name or "?", FormatTime(npc.time or 0)), 1, 1, 1)
       else

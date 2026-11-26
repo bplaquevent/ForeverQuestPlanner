@@ -6,9 +6,11 @@ local PlayerPos = ns.PlayerPos
 local Analyze, CP, Color, CreateScrollPanel, CreateSearchBox = ns.Analyze, ns.CP, ns.Color, ns.CreateScrollPanel, ns.CreateSearchBox
 local Geo, GeoReady, ICON, K, L, MatchWords, Normalize = ns.Geo, ns.GeoReady, ns.ICON, ns.K, ns.L, ns.MatchWords, ns.Normalize
 local PinIcon, Plural, Print, RemainingObjectives = ns.PinIcon, ns.Plural, ns.Print, ns.RemainingObjectives
+local Snapshot = ns.Snapshot
 local RenderAvailable, RenderExport, RenderList, RenderNear = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear
 local RenderTodo, Settings, ShowMessage, State, StateIcons = ns.RenderTodo, ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons
 local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
+local ErrorTrace, Guard = ns.ErrorTrace, ns.Guard
 local Refresh -- the window's refresh, defined below (Available.lua forwards to it)
 
 -- Roadbook being computed: the list is emptied and the waiting animation is shown instead.
@@ -55,6 +57,11 @@ end
 -- computed again). Returns the number of quests of the list.
 function Geo.RoadbookQuestItems(items, fz, query)
   local quests = Geo.RoadbookQuests(fz)
+  local notInLog = {}
+  for _, it in ipairs(quests) do
+    if not (it.log or it.done) then notInLog[#notInLog + 1] = it.id end
+  end
+  ns.RequestQuestTags(notInLog) -- their kinds: shown again once loaded (QuestTags.lua)
   local shown, lines = {}, {}
   for _, it in ipairs(quests) do
     local text = RoadbookQuestText(it)
@@ -74,7 +81,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
   for _, c in ipairs(Geo.RoadbookCategories(shown)) do
     local label
     if c.kind == "zone" then label = Geo.WithLevel(c.name, c.name)
-    elseif K.KIND_TITLE[c.kind] then label = Geo.WithLevel(K.KIND_TITLE[c.kind] .. c.name, c.name)
+    elseif K.KIND_LABEL[c.kind] then label = Geo.WithLevel(ns.KindTitle({ c.kind }, c.name), c.name)
     else label = LABEL[c.kind] end
     -- "Remove all" on a category (not the turned in ones: nothing left to remove).
     local b3
@@ -102,7 +109,8 @@ local function RenderXP()
     ShowMessage(qp, "xp", L["Unable to convert QuestieDB positions to this client's map."])
     return
   end
-  if Geo.RenderBusy(panel) then pcall(CP.RefreshButton) return end
+  if Geo.RenderBusy(panel) then Guard(CP.RefreshButton) return end
+  Snapshot() -- the quests of the list as the log has them now
   local query = State.xpQuery
   local searching = #query > 0
 
@@ -128,7 +136,7 @@ local function RenderXP()
   if searching and total > (shown or 0) then count = (shown or 0) .. " / " .. Plural(total, L["quest"]) end
   Geo.PaneHeader(qp, L["Quests"], Color("aaaaaa", L["Quests of the list: "] .. count))
   RenderList(qp, "xp", qItems, searching)
-  pcall(CP.RefreshButton)
+  Guard(CP.RefreshButton)
 end
 
 -- State check boxes (several allowed), one row of the filter box.
@@ -335,9 +343,7 @@ local RefreshUnsafe
 local lastError
 Refresh = function()
   if not (State.mainFrame and State.mainFrame:IsShown()) then return end
-  local ok, err = xpcall(RefreshUnsafe, function(e)
-    return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
-  end)
+  local ok, err = xpcall(RefreshUnsafe, ErrorTrace)
   if not ok and err ~= lastError then
     lastError = err
     Print(L["|cffff6060Error while updating the window|r (copy it to report it):\n"] .. err)
@@ -359,8 +365,8 @@ RefreshUnsafe = function()
     if panels.xp.UpdateMode then panels.xp.UpdateMode() end
     RenderXP()
   else
-    local a = Analyze()
-    RenderTodo(a)
+    Snapshot()
+    RenderTodo(Analyze())
   end
 end
 

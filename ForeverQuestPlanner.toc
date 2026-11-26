@@ -3,7 +3,7 @@
 ## Notes: Plans your quests: optimized Roadbook, quest log analysis, available quests, log export.
 ## Notes-frFR: Planifie tes quêtes : Roadbook optimisé, analyse du journal, quêtes disponibles, export du journal.
 ## Author: Claude
-## Version: 2.58.113
+## Version: 2.58.116
 ## Dependencies: QuestieDB, OpenMap
 ## OptionalDeps: Questie
 ## SavedVariables: ForeverQuestPlannerDB, ForeverQuestPlannerSettings, ForeverQuestPlannerBench
@@ -16,6 +16,11 @@ Data\Supplements.lua
 Data\GameData.lua
 Solver.lua
 Core.lua
+SavedData.lua
+QuestData.lua
+QuestLog.lua
+QuestAnalysis.lua
+OpenMapLink.lua
 QuestTags.lua
 Available.lua
 Geo.lua

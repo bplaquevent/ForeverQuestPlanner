@@ -9,7 +9,8 @@ local Settings, StartPoints, State, TravelSpeed, TurnInText = ns.Settings, ns.St
 local UnitTime, WorldPos, scan, LogQuests, AllIds, SkillName = ns.UnitTime, ns.WorldPos, ns.scan, ns.LogQuests, ns.AllIds, ns.SkillName
 local LogEntry, Normalize, GeoReady = ns.LogEntry, ns.Normalize, ns.GeoReady
 local IdKind, LogKind, RequestQuestTags, QuestTagsSettled = ns.IdKind, ns.LogKind, ns.RequestQuestTags, ns.QuestTagsSettled
-local IsCompleted, QuestAllowed = ns.IsCompleted, ns.QuestAllowed
+local WithinReach, SetKinds = ns.WithinReach, ns.SetKinds
+local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -490,8 +491,7 @@ function Geo.FollowUpIds(tasks, ctx)
     local from = todo[i]
     if from.depth < K.MAX_FOLLOW_DEPTH then
       for _, b in ipairs(NextIds(from.id)) do
-        if not seen[b] and not IsCompleted(b) and QuestAllowed(b, ctx.classBit, ctx.raceBit)
-          and (QGet(QDB.Quest, b, "requiredLevel") or 0) <= ctx.plevel + ctx.lookahead then
+        if not seen[b] and WithinReach(b, ctx) then
           seen[b] = true
           out[#out + 1] = b
           todo[#todo + 1] = { id = b, depth = from.depth + 1 }
@@ -525,7 +525,7 @@ function Geo.Followers(task, ctx, plevel)
   for _, b in ipairs(ids) do
     if not seen[b] then
       seen[b] = true
-      local ok, en = pcall(CheckAvailable, b, c)
+      local ok, en = Guard(CheckAvailable, b, c)
       if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
         and (Geo.UnlockLevel(en) or math.huge) <= Geo.PlanCeiling(plevel) then
@@ -634,10 +634,13 @@ function Geo.LogTag(id)
 end
 
 -- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
--- a quest event (Events.lua clears State.abandonIds).
+-- a quest event (Events.lua clears State.abandonIds), on a fresh capture of the log.
 function Geo.ToAbandon(questId)
   if not State.abandonIds then
-    pcall(ns.Analyze)
+    Guard(function()
+      ns.Snapshot()
+      ns.Analyze()
+    end)
     State.abandonIds = State.abandonIds or {} -- no new try on each line after an error
   end
   return State.abandonIds[questId] or false
@@ -654,7 +657,7 @@ function Geo.LeftOut(id, kind)
   return false
 end
 
--- Whether the game tags a quest of the log as elite (read with the log, Core.lua).
+-- Whether the game tags a quest of the log as elite (read with the log, QuestLog.lua).
 function Geo.IsGameElite(id)
   local q = LogEntry(id)
   return q and q.gameElite or false
@@ -797,20 +800,22 @@ local function CurrentZoneNames()
   return names
 end
 
--- Kind of a group of available quests: "pvp", "raid", "dungeon", or nil. g.instance: an instance's.
-local function GroupKind(g)
-  local n = { pvp = 0, raid = 0, dungeon = 0 }
-  for _, e in ipairs(g.list) do
-    if e.kind then n[e.kind] = n[e.kind] + 1 end
+-- Kinds of a group of available quests (SetKinds), or nil. A group takes them when it is an instance's
+-- (g.instance), or when all its quests have a kind (a zone is not turned into a PvP one by one quest).
+local function GroupKinds(g)
+  if not g.instance then
+    for _, e in ipairs(g.list) do
+      if not e.kind then return nil end
+    end
   end
-  if not g.instance and n.pvp < #g.list and n.raid + n.dungeon < #g.list then return nil end
-  return (n.pvp > 0 and "pvp") or (n.raid > 0 and "raid") or (n.dungeon > 0 and "dungeon") or nil
+  local kinds = SetKinds(g.list)
+  return #kinds > 0 and kinds or nil
 end
 
 -- The available quests (scan.entries) a filter of the "Available" tab shows, grouped, the groups in
 -- their order. filter: "all", "zone", "dungeon", "pvp", "class", "custom" (the Roadbook list);
 -- matches(entry): the search, optional; showLow: low-level quests too. Returns the groups
--- ({ name, kind ("zone", "dungeon", "class", "pvp"), list = entries }) and the number of quests.
+-- ({ name, kind ("zone", "dungeon", "raid", "pvp", "class"), kinds (all of them, or nil), list = entries }) and the number of quests.
 function Geo.AvailableGroups(filter, matches, showLow)
   local zoneNames = filter == "zone" and CurrentZoneNames() or nil
   local hereMaps = filter == "zone" and CurrentMapSet() or {}
@@ -862,10 +867,12 @@ function Geo.AvailableGroups(filter, matches, showLow)
       if e.instance and key == e.instance then g.instance = true end
     end
   end
-  -- A group of places takes a kind when it is an instance's, or when all its quests are of that kind
-  -- (a zone is not turned into a PvP one by a single quest).
+  -- The kinds of the groups of places: named in their title, the first one colouring and placing them.
   for _, g in ipairs(groups) do
-    if not g.rank then g.kind = GroupKind(g) or g.kind end
+    if not g.rank then
+      g.kinds = GroupKinds(g)
+      g.kind = g.kinds and g.kinds[1] or g.kind
+    end
   end
   -- Order of the groups: class, professions, dungeons, standard zones, PvP; then alphabetical.
   local function Rank(g)

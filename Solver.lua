@@ -101,6 +101,24 @@ function S.ZoneId(W, p)
   return row and row[math.floor(p.x / g.cell)] or nil
 end
 
+-- All the shortest paths between n points (Floyd-Warshall), in place: D[i][j] the lengths, nxt[i][j]
+-- the first point on the way from i to j.
+local function ShortestPaths(D, nxt, n)
+  for m = 1, n do
+    local Dm = D[m]
+    for i = 1, n do
+      local dim = D[i][m]
+      if dim < math.huge then
+        local Di, Ni, nim = D[i], nxt[i], nxt[i][m]
+        for j = 1, n do
+          local v = dim + Dm[j]
+          if v < Di[j] then Di[j], Ni[j] = v, nim end
+        end
+      end
+    end
+  end
+end
+
 -- Shortest ways between the passes of a continent (Floyd-Warshall): two passes are joined when
 -- they share a zone (a straight line across it).
 function S.PassGraph(W, c)
@@ -127,19 +145,7 @@ function S.PassGraph(W, c)
       nxt[i][j] = j
     end
   end
-  for m = 1, n do
-    local Dm = D[m]
-    for i = 1, n do
-      local dim = D[i][m]
-      if dim < math.huge then
-        local Di, Ni, nim = D[i], nxt[i], nxt[i][m]
-        for j = 1, n do
-          local v = dim + Dm[j]
-          if v < Di[j] then Di[j], Ni[j] = v, nim end
-        end
-      end
-    end
-  end
+  ShortestPaths(D, nxt, n)
   g = { pts = pts, byZone = byZone, D = D, nxt = nxt }
   W.passGraph[c] = g
   return g
@@ -316,19 +322,7 @@ function S.Network(W, known, speed, ban)
       and S.Near(hubs[j].p, ban.to, S.BAN_RADIUS)
     if i and j and not banned and k.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = k.TRANSPORT_TIME, l[3] end
   end
-  for m = 1, n do
-    local Dm = D[m]
-    for i = 1, n do
-      local dim = D[i][m]
-      if dim < math.huge then
-        local Di, Ni, nim = D[i], nxt[i], nxt[i][m]
-        for j = 1, n do
-          local v = dim + Dm[j]
-          if v < Di[j] then Di[j], Ni[j] = v, nim end
-        end
-      end
-    end
-  end
+  ShortestPaths(D, nxt, n)
   -- (weak keys: in game a network outlives the computations, points like the player's place do not)
   net = { key = key, hubs = hubs, D = D, nxt = nxt, via = via, speed = speed, near = setmetatable({}, WEAK), travel = {} }
   W.nets[key] = net

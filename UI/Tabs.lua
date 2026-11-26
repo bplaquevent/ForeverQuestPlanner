@@ -8,6 +8,7 @@ local Normalize, PassStates, PlayerPos, Plural, PointText = ns.Normalize, ns.Pas
 local QuestHaystack, RemainingObjectives, RenderList, Settings = ns.QuestHaystack, ns.RemainingObjectives, ns.RenderList, ns.Settings
 local ShowMessage, StartScan, State, StateIcons, journalStates = ns.ShowMessage, ns.StartScan, ns.State, ns.StateIcons, ns.journalStates
 local nearStates, panels, scan = ns.nearStates, ns.panels, ns.scan
+local KindNames, KindTitle = ns.KindNames, ns.KindTitle
 
 ---------------------------------------------------------------------------
 -- Quest log tab (to do / to abandon)
@@ -62,8 +63,8 @@ local function RenderTodo(a)
     local addAll, removeAll = Geo.CustomBulkButtons(list)
     items[#items + 1] = { header = true, kind = kind, key = key, label = text, b1 = addAll, b2 = removeAll }
     for _, q in ipairs(quests) do
-      local body = "  " .. StateIcons(q.id) .. (q._abandon and Color("ff8040", L["[To abandon] "]) or "") .. QuestLine(q)
-      if q._abandon then body = body .. Geo.DescLine(Color("ff8040", L["Reason: "] .. q._abandon)) end
+      local body = "  " .. StateIcons(q.id) .. (q._abandon and Color(K.DESC.abandon, L["[To abandon] "]) or "") .. QuestLine(q)
+      if q._abandon then body = body .. Geo.DescLine(Color(K.DESC.abandon, L["Reason: "] .. q._abandon)) end
       body = body .. detail(q) .. QuestFigures(q)
       if q._chain then body = body .. Geo.DescLine(Color(K.DESC.chain, q._chain)) end
       items[#items + 1] = {
@@ -90,7 +91,7 @@ local function RenderTodo(a)
   end
 
   if #a.abandon > 0 and not searching then
-    items[#items + 1] = { text = Color("ff8040", string.format(L["%s recommended for abandoning: orange lines marked [To abandon], in their category."], Plural(#a.abandon, L["quest"]))),
+    items[#items + 1] = { text = Color(K.DESC.abandon, string.format(L["%s recommended for abandoning: orange lines marked [To abandon], in their category."], Plural(#a.abandon, L["quest"]))),
       tint = { 0.9, 0.5, 0.25 }, stripe = { 1, 0.5, 0.15 } }
   end
 
@@ -112,7 +113,7 @@ local function RenderTodo(a)
   end
 
   for _, g in ipairs(a.instances) do
-    category(g.kind, g.kind .. ":" .. g.name, Geo.WithLevel(K.KIND_TITLE[g.kind] .. g.name, g.name), g.quests, normalDetail)
+    category(g.kind, g.kind .. ":" .. g.name, Geo.WithLevel(KindTitle({ g.kind }, g.name), g.name), g.quests, normalDetail)
   end
 
   if #singles > 0 then
@@ -186,7 +187,9 @@ local function RenderAvailable()
     local list = {}
     for _, e in ipairs(g.list) do list[#list + 1] = { id = e.id, title = e.name, level = e.level } end
     local addAll, removeAll = Geo.CustomBulkButtons(list)
-    items[#items + 1] = { header = true, kind = g.kind, key = g.name, label = (g.kind == "class" and g.name or Geo.WithLevel(g.name, g.name)) .. " - " .. Plural(#g.list, L["quest"]),
+    local title = g.kinds and string.format(L["%s (%s)"], g.name, KindNames(g.kinds)) or g.name
+    if g.kind ~= "class" then title = Geo.WithLevel(title, g.name) end
+    items[#items + 1] = { header = true, kind = g.kind, key = g.name, label = title .. " - " .. Plural(#g.list, L["quest"]),
       b1 = addAll, b2 = removeAll }
     for _, e in ipairs(g.list) do
       local D = K.DESC

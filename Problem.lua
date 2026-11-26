@@ -198,7 +198,7 @@ function Pb.Network(w, live)
   local known = Geo.KnownNodes()
   local usable = {}
   w.nodes = {}
-  for id in pairs(OM.flights.nodes) do
+  for id in pairs(OM.FlightNodes()) do
     if Geo.NodeUsable(id) then
       usable[id] = true
       w.nodes[#w.nodes + 1] = { id = id, name = Geo.NodeName(id), p = Geo.NodePoint(id), known = known[id] or nil }
@@ -206,8 +206,8 @@ function Pb.Network(w, live)
   end
   table.sort(w.nodes, function(a, b) return a.id < b.id end)
   w.edges = {}
-  for _, e in ipairs(OM.flights.paths) do
-    if usable[e[1]] and usable[e[2]] then w.edges[#w.edges + 1] = { e[1], e[2], e[3] } end
+  for _, e in ipairs(OM.FlightPaths()) do
+    if usable[e.from] and usable[e.to] then w.edges[#w.edges + 1] = { e.from, e.to, e.length } end
   end
   local dk = Geo.Docks()
   w.docks, w.links = {}, {}
@@ -223,9 +223,9 @@ function Pb.Network(w, live)
     -- Zone of a point (map API, cached by Geo.ZoneIdAt), its name and its levels (OpenMap), read when needed.
     w.zoneAt = function(p) return (Geo.ZoneIdAt(p)) end
     w.zones = setmetatable({}, { __index = function(t, id)
-      local lv = OM.levels[id]
+      local lv = OM.ZoneLevels()[id]
       local info = C_Map.GetMapInfo(id)
-      local z = { min = lv and lv[1], max = lv and lv[2], name = info and info.name }
+      local z = { min = lv and lv.min, max = lv and lv.max, name = info and info.name }
       t[id] = z
       return z
     end })
@@ -320,8 +320,8 @@ function Pb.Grid(P)
         local id, name = Geo.ZoneIdRaw({ c = c, x = (ix + 0.5) * cell, y = (iy + 0.5) * cell })
         id = id or 0
         if id ~= 0 and not zones[id] then
-          local lv = OM.levels[id]
-          zones[id] = { name = name, min = lv and lv[1], max = lv and lv[2] }
+          local lv = OM.ZoneLevels()[id]
+          zones[id] = { name = name, min = lv and lv.min, max = lv and lv.max }
         end
         if id == cur then
           n = n + 1

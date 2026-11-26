@@ -3,8 +3,10 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, Color, HasBit, K, L, OM, QDB, QGet = ns.AreaName, ns.Color, ns.HasBit, ns.K, ns.L, ns.OM, ns.QDB, ns.QGet
+local Guard = ns.Guard
 local LearnedData, LearnedChar, PlayerFaction, NpcFriendly = ns.LearnedData, ns.LearnedChar, ns.PlayerFaction, ns.NpcFriendly
 local Print = ns.Print
+local GetObjectives = ns.GetObjectives
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
@@ -103,25 +105,18 @@ end
 function Geo.Instances()
   if Geo.instances then return Geo.instances end
   local out = {}
-  for _, e in ipairs(OM.places.instances) do
+  for _, e in ipairs(OM.Instances()) do
     local p
-    if e[1] then
-      p = { c = e[1], x = e[2], y = e[3] }
+    if e.c then
+      p = { c = e.c, x = e.x, y = e.y }
     elseif e.map then
-      local ok, cont, pos = pcall(C_Map.GetWorldPosFromMapPos, e.map, CreateVector2D(e[2], e[3]))
+      local ok, cont, pos = pcall(C_Map.GetWorldPosFromMapPos, e.map, CreateVector2D(e.u, e.v))
       if ok and cont and pos then
         local wx, wy = pos:GetXY()
         p = { c = cont, x = wx, y = wy }
       end
     end
-    if p then
-      local lo, hi
-      for _, w in ipairs(e[4]) do
-        if w[4] and (not lo or w[4] < lo) then lo = w[4] end
-        if w[5] and (not hi or w[5] > hi) then hi = w[5] end
-      end
-      out[#out + 1] = { p = p, min = lo, max = hi }
-    end
+    if p then out[#out + 1] = { p = p, min = e.minLevel, max = e.maxLevel } end
   end
   Geo.instances = out
   return out
@@ -365,15 +360,15 @@ end
 
 -- A flight node the character can use: its faction, and its class when it flies only one (Nighthaven).
 function Geo.NodeUsable(id)
-  local n = OM.flights.nodes[id]
-  if not (n and HasBit(n[5], PlayerFactionBit())) then return false end
-  return not n[6] or n[6] == select(2, UnitClass("player"))
+  local n = OM.FlightNodes()[id]
+  if not (n and HasBit(n.faction, PlayerFactionBit())) then return false end
+  return not n.class or n.class == select(2, UnitClass("player"))
 end
 
 -- Flight node -> world point.
 function Geo.NodePoint(id)
-  local n = OM.flights.nodes[id]
-  return n and { c = n[2], x = n[3], y = n[4] } or nil
+  local n = OM.FlightNodes()[id]
+  return n and { c = n.c, x = n.x, y = n.y } or nil
 end
 
 -- The game's names of the flight nodes (client language) and name -> node, from the game's own
@@ -389,23 +384,22 @@ function Geo.TaxiNames()
       end
     end
   end
-  for id, n in pairs(OM.flights.nodes) do
-    if type(n[1]) == "string" and not byName[n[1]] then byName[n[1]] = id end
+  for id, n in pairs(OM.FlightNodes()) do
+    if type(n.name) == "string" and not byName[n.name] then byName[n.name] = id end
   end
   if next(byId) then Geo.taxiNames = { byName = byName, byId = byId } end
   return { byName = byName, byId = byId }
 end
 
 function Geo.NodeName(id)
-  local n = OM.flights.nodes[id]
-  return Geo.TaxiNames().byId[id] or (n and n[1]) or "?"
+  local n = OM.FlightNodes()[id]
+  return Geo.TaxiNames().byId[id] or (n and n.name) or "?"
 end
 
 -- Flight nodes learned by the character: OpenMap's list (it records them at every flight master),
 -- by name, turned into node numbers. Returns the set and its size.
 function Geo.KnownNodes()
-  local char = OM.worldmap.char
-  local learned = type(char) == "table" and type(char.flightsKnown) == "table" and char.flightsKnown or {}
+  local learned = OM.LearnedFlights()
   local n = 0
   for _ in pairs(learned) do n = n + 1 end
   local c = Geo.knownCache
@@ -440,9 +434,9 @@ end
 function Geo.NodeAt(p)
   if not p then return nil end
   local best, bd
-  for id, n in pairs(OM.flights.nodes) do
-    if n[2] == p.c then
-      local dx, dy = n[3] - p.x, n[4] - p.y
+  for id, n in pairs(OM.FlightNodes()) do
+    if n.c == p.c then
+      local dx, dy = n.x - p.x, n.y - p.y
       local d = math.sqrt(dx * dx + dy * dy)
       if d < K.NODE_MATCH and (not bd or d < bd) then best, bd = id, d end
     end
@@ -452,16 +446,16 @@ end
 
 -- Boat, zeppelin and airship lines of OpenMap, each with its faction filled in: OpenMap's own `faction`
 -- field when it has one, else the supplement of Data/Supplements.lua (a line OpenMap gives none),
--- else the convention of its kind. Rows keep OpenMap's layout (t[1] kind ... t[8]) plus `faction`
+-- else the convention of its kind. Rows as ns.OM.Transports gives them, `faction` always set
 -- ("Alliance", "Horde" or "Neutral": everyone). Built once.
 function Geo.Transports()
   if Geo.transports then return Geo.transports end
   local out = {}
-  for _, t in ipairs(OM.places.transports) do
+  for _, t in ipairs(OM.Transports()) do
     local row = {}
     for k, v in pairs(t) do row[k] = v end
-    local sup = ns.TRANSPORT_SUPPLEMENT[t[2]]
-    row.faction = t.faction or (sup and sup.faction) or ns.TRANSPORT_KIND_FACTION[t[1]] or "Neutral"
+    local sup = ns.TRANSPORT_SUPPLEMENT[t.route]
+    row.faction = t.faction or (sup and sup.faction) or ns.TRANSPORT_KIND_FACTION[t.kind] or "Neutral"
     out[#out + 1] = row
   end
   Geo.transports = out
@@ -478,9 +472,9 @@ end
 K.DOCK_TOWN = 1200 -- yards: a flight node this close names the dock
 function Geo.DockName(c, x, y, route)
   local best, bd
-  for id, n in pairs(OM.flights.nodes) do
-    if n[2] == c then
-      local dx, dy = n[3] - x, n[4] - y
+  for id, n in pairs(OM.FlightNodes()) do
+    if n.c == c then
+      local dx, dy = n.x - x, n.y - y
       local d = math.sqrt(dx * dx + dy * dy)
       if d < K.DOCK_TOWN and (not bd or d < bd) then best, bd = id, d end
     end
@@ -506,10 +500,10 @@ function Geo.Docks()
     return #docks
   end
   for _, t in ipairs(Geo.Transports()) do
-    local mode = Geo.IsShip(t[1]) and t[1]
+    local mode = Geo.IsShip(t.kind) and t.kind
     if mode and (t.faction == "Neutral" or t.faction == faction) then
-      local a = dockAt(t[3], t[4], t[5], mode, t[2])
-      local b = dockAt(t[6], t[7], t[8], mode, t[2])
+      local a = dockAt(t.from.c, t.from.x, t.from.y, mode, t.route)
+      local b = dockAt(t.to.c, t.to.x, t.to.y, mode, t.route)
       links[#links + 1] = { a, b, mode }
     end
   end
@@ -673,15 +667,15 @@ end
 -- Level range "lo-hi" in the quest colours for the player (OpenMap's own colouring).
 function Geo.LevelRange(lo, hi)
   if not lo then return "" end
-  local ok, code, range = pcall(OM.worldmap.LevelColor, lo, hi or lo)
+  local ok, code, range = Guard(OM.LevelColor, lo, hi or lo)
   if not ok or not code then return lo .. "-" .. (hi or lo) end
   return code .. range .. "|r"
 end
 
 -- Level range of the zone (uiMapID), coloured, or nil.
 function Geo.ZoneLevelText(uiMapID)
-  local lv = uiMapID and OM.levels[uiMapID]
-  return lv and lv[1] and Geo.LevelRange(lv[1], lv[2]) or nil
+  local lv = uiMapID and OM.ZoneLevels()[uiMapID]
+  return lv and Geo.LevelRange(lv.min, lv.max) or nil
 end
 
 -- Level range of a place known by its name (quest log headers, Available categories): a dungeon
@@ -692,14 +686,14 @@ function Geo.PlaceLevelText(name)
   if not Geo.placeLevels then
     if not GeoReady() then return nil end
     local idx = {}
-    for ui, lv in pairs(OM.levels) do
-      local info = lv[1] and C_Map.GetMapInfo and C_Map.GetMapInfo(ui)
-      if info and info.name and info.name ~= "" then idx[info.name] = { lv[1], lv[2] } end
+    for ui, lv in pairs(OM.ZoneLevels()) do
+      local info = C_Map.GetMapInfo and C_Map.GetMapInfo(ui)
+      if info and info.name and info.name ~= "" then idx[info.name] = { lv.min, lv.max } end
     end
     for area, ui in pairs(Geo.areaToUi) do
-      local lv = OM.levels[ui]
-      local n = lv and lv[1] and AreaName(area)
-      if n and not idx[n] then idx[n] = { lv[1], lv[2] } end
+      local lv = OM.ZoneLevels()[ui]
+      local n = lv and AreaName(area)
+      if n and not idx[n] then idx[n] = { lv.min, lv.max } end
     end
     for d in pairs(QDB.dungeons) do -- a dungeon wins over a zone of the same name
       local w = DungeonEntrance(d)
@@ -844,7 +838,7 @@ end
 local function QuestTargets(id)
   local t = Geo.targets[id]
   if t then return t end
-  t = {}
+  t = { id = id }
   local calls = 0
   local function add(kind, name, points, rate, mob, mobIds)
     calls = calls + 1
@@ -982,18 +976,31 @@ function Geo.TargetObjective(id, tg, objs)
   return nil
 end
 
+-- Quantities the game asks for a quest out of the log (its data loaded: Geo.AwaitTags):
+-- { [target index] = quantity }, only the targets the game gives one for.
+local function GameCounts(t)
+  local objs, out = GetObjectives(t.id), {}
+  for i, j in pairs((Geo.MatchObjectives(objs, t))) do
+    local need = objs[j].need
+    if need and need > 0 then out[i] = need end
+  end
+  return out
+end
+
 -- Remaining objectives: matches the game's objectives (with progress) to QuestieDB targets.
+-- q: the quest in the log, nil for a quest to pick up (the game's quantities, else the default ones).
 local function RemainingTargets(q, t)
   local out = {}
   local objs = (q and q.objectives) or {}
   local map, used = Geo.MatchObjectives(objs, t)
+  local asked = q and {} or GameCounts(t)
   local allDone = true -- every objective listed by the game is done
   for _, o in ipairs(objs) do
     if not (o.finished or (o.need and o.have and o.need > 0 and o.have >= o.need)) then allDone = false end
   end
   for i, tg in ipairs(t) do
     local match = tg.sourceItem and -1 or map[i] -- source item: needed while it is not in the bags
-    local count = tg.defaultCount
+    local count = asked[i] or tg.defaultCount
     -- The game lists its objectives and none is this "talk" target: a hidden objective (QuestieDB lists
     -- the turn-in NPC of "On Patrol" after the 3 NPCs to meet; the game shows only those 3 and the quest
     -- completes once the player has spoken to the turn-in NPC). Planned once every listed objective is done.

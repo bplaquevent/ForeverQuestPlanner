@@ -2,9 +2,12 @@
 
 World of Warcraft addon for the **Forever** server (client 1.60.1, Interface 16001: Classic-era API, Lua 5.1).
 QuestieDB (quest data, NPC/object spawns, chains) and OpenMap (map, flight network) are required dependencies (`## Dependencies` in the `.toc`):
-call their data and functions directly, never copy them or write code paths that work without them.
-No way to run the game here: check with `tools/check.sh` (compiles every file, detects unknown globals and `ns.X` imported before its export).
-Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cases/*.lua>` on a problem captured by `/fqp dump`.
+call their data and functions directly (OpenMap's through `ns.OM`, `OpenMapLink.lua`), never copy them or write code paths that work without them.
+No way to run the game here: check with `tools/check.sh` (compiles every file, detects unknown globals and `ns.X` imported before its export)
+and `tests/run.sh` (tests with the game faked by `tests/harness.lua`: a test replaces a name of `ns` between two files, never the code's text).
+A change of the game logic comes with its test in `tests/test_*.lua`.
+Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cases/*.lua>` on a problem captured by `/fqp dump`;
+`tools/bench_compare.sh` checks that a change leaves the routes of the saved cases as they are.
 
 ## Files (load order = `ForeverQuestPlanner.toc`)
 
@@ -15,9 +18,14 @@ Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cas
 | `Data/Supplements.lua` | what the data we read lacks or gets wrong, completed: faction of the transport lines OpenMap does not give one (`ns.TRANSPORT_SUPPLEMENT`, `ns.TRANSPORT_KIND_FACTION`, read through `Geo.Transports`), QuestieDB's quest categories (`ns.SORT_*`), profession headers, capitals (`ns.CITY_MAPS`), class teleport spells (`ns.RECALL_SPELLS`), start bind points (`ns.START_BINDS`), continent maps, recognised sub titles and mailbox names |
 | `Data/GameData.lua` | fixed facts of the game (Classic rules): professions (`ns.PROFESSIONS`: name, text name, trainer words), `ns.XP_TABLE` |
 | `Solver.lua` | Roadbook solver in pure Lua (no game API, also run by `tools/bench.lua`): XP formulas (`MobXP`, `QuestXP`), the only travel model, also used by the game: world (`S.World`, walks `S.WalkWay` / `S.WalkCost`, passes, danger, network `S.Network` / `S.Route` / `S.Travel`), level-ups `S.LevelUp`, route evaluation `S.Evaluate` (its walked legs: `res.legs`), goal value `S.Objective`, teleports `S.AddRecalls` / `S.Simulate`, objective order ranks `S.Ranks` / `S.RankPreds`, hunting spot variants `S.Variants`, optimizer `S.Optimize` (a search context passed to `S.Construct`, `S.LocalSearch` with its moves `S.Move*`, `S.DestroyAndRebuild`, `S.AddNearbyFlightMasters`; the list: `S.ValidCustom`, `S.BuildCustom`; list with a duration or level: kept and completed or trimmed, `S.MixPrepare`, units `S.InsertUnit` / `S.WithoutUnit`; tuning `S.OPT`) |
-| `Core.lua` | utilities (`Print`, `Settings` = saved data of the character, erasing the saved data `EraseData` / `CheckDataVersion`, `Color`…), constants table `K`, `State`, QuestieDB access (`QDB`, `QGet`, `AllIds`, `QuestAllowed`, `NpcFriendly`, `PlayerFaction`, QuestieDB codes `K.TALK_ICONS` / `K.ELITE_RANKS` / `K.UNIQUE_RANKS`, `QuestPrereqs` / `AllPrereqs`, `QuestMeta`, `ChainInfo`), quest log capture (`Snapshot`, read only through `LogRecord` / `LogQuests` / `LogById` / `LogEntry`), quest categories (`QuestCategory`), what a quest done in a group is, dungeon, raid or PvP (`QuestKind` / `LogKind` / `IdKind`, names `K.KIND_*`), text normalisation for searches (`Normalize`), formats (`FormatTime`, `FormatNumber`, `MoneyText`), interest of the log quests' rewards, `Analyze()` (returns copies of the captured quests: derived fields are never saved) |
+| `Core.lua` | what every file shares: `Print`, errors told in the chat (`Guard` / `ErrorTrace`), `Color`, text normalisation for searches (`Normalize`), formats (`FormatTime`, `FormatNumber`, `MoneyText`, `CoinText`), bit test, `IsCompleted` / `IsInLog`, constants table `K`, `State` |
+| `SavedData.lua` | saved data: `Settings` = the character's, `LearnedData` / `LearnedChar`, format numbers, erasing (`EraseData` / `CheckDataVersion`) |
+| `QuestData.lua` | QuestieDB access (`QDB`, `QGet`, `AllIds`, `QuestAllowed`, `NpcFriendly`, `PlayerFaction`, `QuestPrereqs` / `AllPrereqs`, `QuestMeta`, `ChainInfo`), dependencies check (`InitDeps`), quest givers texts, professions of the character |
+| `QuestLog.lua` | quest log capture (`Snapshot`, read only through `LogRecord` / `LogQuests` / `LogById` / `LogEntry`), the game's quest tag (`GameTag` / `TagKind`) |
+| `QuestAnalysis.lua` | what a quest done in a group is, dungeon, raid or PvP (`QuestKind` / `LogKind` / `IdKind`, names `K.KIND_*` in `Core.lua`), every kind of a set of quests, in one order (`SetKinds`, `KindNames` / `KindTitle`), quest categories (`QuestCategory`), interest of the log quests' rewards, `Analyze()` (analysis of the last capture, without capturing: the caller calls `Snapshot()` first; returns copies of the captured quests: derived fields are never saved) |
+| `OpenMapLink.lua` | the only file that knows OpenMap: checks at login (`OM.Init`), its data with named fields (flight nodes and paths, transports, instances, zone levels, learned flights), its worldmap functions, public API and pin sets, all as `ns.OM`. Nothing else reads the global `OpenMap` / `OpenMapAPI` |
 | `QuestTags.lua` | loading of the quest data the game needs to give the tag of a quest out of the log: batches asked once per session (`RequestQuestTags` / `QuestTagsSettled` / `TagProgress`), event `QuestDataLoaded` |
-| `Available.lua` | available quests: `CheckAvailable`, frame-sliced scan `StartScan` / `scan` (results shown once their tags are loaded; to scan again: `MarkScanDirty`), wait for it `WaitScan` |
+| `Available.lua` | available quests: `CheckAvailable`, quests within reach `WithinReach`, frame-sliced scan `StartScan` / `scan` (results shown once their tags are loaded; to scan again: `MarkScanDirty`), wait for it `WaitScan` |
 | `Geo.lua` | world coordinates, travel times, zone passes (`Geo.ZoneIdAt`, `Geo.Passes`, walks in the live world `Geo.WalkWay` / `WalkTime`, learning `Geo.PassTick`), flight nodes, transport lines and docks (named after their town `Geo.DockName`), directions `RouteText`, points (`Geo.CopyPoint`), travel speed (mount speed learned by `Geo.LearnMountSpeed`), quest targets (`QuestTargets`, quest giver places `Geo.StartPlaces`, a quest giver's point `Geo.GiverPoint`) |
 | `Planner.lua` | computations spread over frames (`Geo.RunSliced`, `Geo.Yield`), Roadbook model: profession level to turn in (`Geo.SkillNeed`), Nearby items, XP / levels, monster spots, tasks, quests left out of the automatic choice (`Geo.LeftOut`), their follow-ups (`Geo.Followers` / `FollowUpIds`), waiting for tags in a computation (`Geo.AwaitTags`), what a quest is (`Geo.QuestTypes`, `Geo.IsFollowUp`, `Geo.LogTag`, `Geo.ToAbandon`), maximum level (`Geo.MaxLevel`), groups of the Available tab (`Geo.AvailableGroups`) |
 | `Rewards.lua` | quest rewards: data (`Geo.QuestRewards` / `Geo.RewardItem`, index by item `Geo.RewardIndex`); they play no part in the Roadbook, chosen on XP and time |
@@ -57,7 +65,7 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
   when the game's identifier of the character differs).
 - No migration code: the code only knows the current form of the saved data. A change that makes saved data
   unusable (a field renamed, moved, of another type or meaning; not a new field that may be absent) raises the
-  number of its set (`Core.lua`): `DATA_VERSION` for the characters' data and the captures, `LEARNED_VERSION` for
+  number of its set (`SavedData.lua`): `DATA_VERSION` for the characters' data and the captures, `LEARNED_VERSION` for
   what was learned (`LearnedData()`, `LearnedChar()` included). The addon then erases that set at login, for every character. The
   developer's own data is converted outside the game by a throwaway script, never committed.
 - Mutable variables read by several files live in the `State` table (`State.mainFrame`, `State.currentTab`,
@@ -68,6 +76,8 @@ Find code with `grep -n "function Name\|Name =" *.lua UI/*.lua` instead of readi
 
 ## Conventions
 
+- Never drop an error: call the addon's own functions and the dependencies' through `ns.Guard` (as `pcall`, the error
+  told in the chat once). Bare `pcall` is for the game calls expected to fail, and for a call that tells its own message.
 - No new hand-written list or list row of game data (zones, quests, NPCs, words…): take it from the game or the
   dependencies, or learn it in game. The existing lists (`Data/`, and some in the code), which predate this rule,
   are still to be audited one by one; nothing is removed from them without the user's agreement.
