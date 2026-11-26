@@ -63,8 +63,8 @@ function Geo.Boardings(choice, net)
   local hubs, cur = net.hubs, choice.i
   local run
   while cur ~= choice.j do
-    local nx = net.nxt[cur][choice.j]
-    local mode = net.via[cur][nx]
+    local nx = choice.nxt[cur][choice.j]
+    local mode = choice.via[cur][nx]
     if mode == "flight" then
       if not run then
         run = { hub = hubs[cur], mode = "flight" }
@@ -321,7 +321,8 @@ end
 
 -- Ways back usable by the Roadbook now, according to the options: the hearthstone (key "hearth"),
 -- then the class spells known (key = spell id). Each one: { key, bind (to the bind point) or p,
--- cast, cd, ready (s until usable), charges (uses left, nil = unlimited), spell, name }.
+-- cast, cd, ready (s until usable), charges (uses left, nil = unlimited), reagent (item id of the
+-- charges, shared by the spells using it), spell, name }.
 function Geo.RecallSources()
   local out = {}
   if not Settings().noHearth then
@@ -339,7 +340,7 @@ function Geo.RecallSources()
       if (charges == nil or charges > 0) and (e.bind or p) then
         local name = Geo.SpellName(e.spell)
         out[#out + 1] = { key = e.spell, spell = e.spell, bind = e.bind, p = p, cast = e.cast, cd = e.cd or 0,
-          ready = Geo.SpellReady(e.spell), charges = charges, name = name or ("#" .. e.spell) }
+          ready = Geo.SpellReady(e.spell), charges = charges, reagent = e.reagent, name = name or ("#" .. e.spell) }
       end
     end
   end

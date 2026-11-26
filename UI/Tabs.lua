@@ -6,7 +6,7 @@ local Color, CurrentMapSet, EntryHaystack, Geo, GeoReady = ns.Color, ns.CurrentM
 local IsWatched, K, L, MatchWords, MoneyText, NearItems = ns.IsWatched, ns.K, ns.L, ns.MatchWords, ns.MoneyText, ns.NearItems
 local Normalize, PassStates, PlayerPos, Plural, PointText = ns.Normalize, ns.PassStates, ns.PlayerPos, ns.Plural, ns.PointText
 local QuestHaystack, RemainingObjectives, RenderList, Settings = ns.QuestHaystack, ns.RemainingObjectives, ns.RenderList, ns.Settings
-local ShowMessage, StartScan, State, StateIcons, journalStates = ns.ShowMessage, ns.StartScan, ns.State, ns.StateIcons, ns.journalStates
+local ShowMessage, ScanIfNeeded, State, StateIcons, journalStates = ns.ShowMessage, ns.ScanIfNeeded, ns.State, ns.StateIcons, ns.journalStates
 local nearStates, panels, scan = ns.nearStates, ns.panels, ns.scan
 local KindNames, KindTitle = ns.KindNames, ns.KindTitle
 
@@ -168,7 +168,7 @@ local function RenderAvailable()
     return
   end
   if scan.dirty or not scan.entries then
-    if not scan.running then StartScan() end
+    ScanIfNeeded()
     if scan.running or scan.dirty then
       ShowMessage(panel, "avail", ScanText(L["Scanning the QuestieDB database…"]))
       return
@@ -224,7 +224,7 @@ local function RenderNear()
     ShowMessage(panel, "near", L["Unable to convert QuestieDB positions to this client's map."])
     return
   end
-  if (scan.dirty or not scan.entries) and not scan.running then StartScan() end
+  ScanIfNeeded()
 
   local found, err = NearItems(State.nearRadius)
   if not found then

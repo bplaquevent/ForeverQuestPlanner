@@ -8,7 +8,7 @@ local IsCompleted, IsInLog, K, L, PinPoint, PlayerPos, Print = ns.IsCompleted, n
 local QDB, QGet, Refresh, Settings, Snapshot, KnownFlights = ns.QDB, ns.QGet, ns.Refresh, ns.Settings, ns.Snapshot, ns.KnownFlights
 local State, TravelSpeed, WatchOnly, IsWatched, SetWatched = ns.State, ns.TravelSpeed, ns.WatchOnly, ns.IsWatched, ns.SetWatched
 local MarkScanDirty, LogEntry, IsQuestComplete, WaitScan = ns.MarkScanDirty, ns.LogEntry, ns.IsQuestComplete, ns.WaitScan
-local Guard = ns.Guard
+local Guard, AllPrereqs = ns.Guard, ns.AllPrereqs
 
 ---------------------------------------------------------------------------
 -- Roadbook checkpoints: focus on the next step from a floating button
@@ -193,6 +193,39 @@ function Geo.KeepOnlyDone()
   return true
 end
 
+-- The steps to come of the quests no longer in the list leave the saved Roadbook, with the transports
+-- and teleports leading to them (an instance visit: once none of its quests is in the list).
+function Geo.DropUnlisted()
+  local fz = Geo.Frozen()
+  if not fz then return end
+  local function unlisted(st)
+    local members = st.task and st.task.members
+    if st.kind == "dungeon" and members then
+      for _, m in ipairs(members) do
+        if not unlisted(m) then return false end
+      end
+      return #members > 0
+    end
+    local id = st.task and st.task.id
+    return id ~= nil and not Geo.InCustom(id)
+  end
+  local dropped, onTheWay = 0, false
+  for i = #fz.route, 2, -1 do
+    local st = fz.route[i]
+    local way = st.kind == "travel" or st.kind == "hearth"
+    local drop = not CP.StepDone(st) and ((way and onTheWay) or (not way and unlisted(st)))
+    if not way then onTheWay = drop end
+    if drop then
+      Geo.RouteRemove(fz, i)
+      dropped = dropped + 1
+    end
+  end
+  if dropped > 0 then
+    Geo.SaveRoute()
+    Geo.MapSync()
+  end
+end
+
 -- Option chosen in the Roadbook tab, for the next "Adapt": { kind = "time" | "level", value } (the
 -- list completed or trimmed for it).
 function Geo.SelectedGoal()
@@ -230,10 +263,20 @@ function Geo.Recompute(goal, cb, keepDone, re)
         route = Geo.KeepDone(old, CP.StepDone, route, info, info)
       end
       Geo.AdoptPlan(route, info)
+    elseif keepDone and goal == "custom" then
+      Guard(Geo.DropUnlisted) -- the former plan stays, without the quests taken out of the list
     end
     if cb then cb(route, err, info) end
     C_Timer.After(0.1, Refresh)
   end, re and re.opts)
+end
+
+function CP.InRoadbook(st)
+  local fz = Geo.Frozen()
+  for i = 2, fz and #fz.route or 0 do
+    if fz.route[i] == st then return true end
+  end
+  return false
 end
 
 -- Focuses the first step of the active Roadbook that is not done yet.
@@ -352,9 +395,18 @@ function CP.RecallCheck()
   for i = 2, #route do if not CP.StepDone(route[i]) then first = i break end end
   if not first then return false end
   local changed, why = Geo.RecallChanged(rec.recall, now)
-  if not changed then return false end
+  if not changed then
+    CP.recallTried = nil
+    return false
+  end
+  -- Already computed for this state, without a new plan saved (the computation failed): not again.
+  if CP.recallTried and not Geo.RecallChanged(CP.recallTried, now) then return false end
   Geo.Trace("recall", why or "position changed")
-  return CP.Replan(L["Position or hearthstone / teleport cooldowns changed: the steps to come are updated. "])
+  if not CP.Replan(L["Position or hearthstone / teleport cooldowns changed: the steps to come are updated. "]) then
+    return false
+  end
+  CP.recallTried = now
+  return true
 end
 
 -- Roadbook adapted (position or cooldowns changed, quest or transport skipped, quest giver found):
@@ -463,6 +515,53 @@ function CP.StepLevelOk(st, plevel)
   return not (t.id and t.level) or t.level <= Geo.MaxQuestLevel(t.id, plevel, nil, "")
 end
 
+-- Order rules of the steps to come of the saved route (indexes todo), as the plan has them
+-- (Geo.CustomConstraints): { [step] = steps before it }, and the glued steps ({ [step] = steps }).
+function CP.RouteRules(route, todo)
+  local tasks, byId, links = {}, {}, {}
+  local function add(id, kind, container)
+    if not id then return end
+    local task = byId[id]
+    if not task then
+      task = { id = id, kind = "do", stops = {}, order = {}, pres = {} }
+      byId[id] = task
+      tasks[#tasks + 1] = task
+    end
+    if kind == "take" then task.kind = "take" end
+    local stop = container.kind == "dungeon" and { kind = kind, inside = container } or container
+    task.stops[#task.stops + 1] = stop
+    if kind == "turnin" then task.turnin = stop end
+    if task.order[#task.order] ~= container then task.order[#task.order + 1] = container end
+  end
+  local waiting = {}
+  for _, i in ipairs(todo) do
+    local st = route[i]
+    waiting[st] = true
+    if st.kind == "dungeon" then
+      for _, m in ipairs(st.task.members or {}) do add(m.task and m.task.id, m.kind, st) end
+    else
+      add(st.task.id, st.kind, st)
+    end
+  end
+  for _, i in ipairs(todo) do
+    local st, prev = route[i], route[i - 1]
+    if st.glue and waiting[prev] then
+      links[st] = links[st] or {}
+      links[prev] = links[prev] or {}
+      table.insert(links[st], prev)
+      table.insert(links[prev], st)
+    end
+  end
+  for _, task in ipairs(tasks) do
+    -- (the turn-in last, as Geo.CustomConstraints expects it)
+    if task.turnin and task.stops[#task.stops] ~= task.turnin then task.stops[#task.stops + 1] = task.turnin end
+    for _, p in ipairs(AllPrereqs(task.id)) do
+      if byId[p] and byId[p] ~= task then task.pres[#task.pres + 1] = byId[p] end
+    end
+  end
+  return (Geo.CustomConstraints(tasks)), links
+end
+
 function CP.NearbyCheck()
   local fz = Geo.Frozen()
   if not fz or not Geo.Tracking() or State.computing or CP.autoPending or Geo.ServicePending() then return end
@@ -485,31 +584,10 @@ function CP.NearbyCheck()
       if near and CP.StepLevelOk(st, plevel) then C[st] = true end
     end
   end
-  -- Possible now: the steps of its quest that come before it (pick-up, objectives) are in too; a glued
-  -- chain whole.
-  local changed = true
-  while changed do
-    changed = false
-    for _, i in ipairs(todo) do
-      local st = route[i]
-      if C[st] then
-        local ok = true
-        local rank, id = K.NEARBY_KINDS[st.kind], st.task.id
-        if id then
-          for _, j in ipairs(todo) do
-            local o = route[j]
-            if o.task.id == id and K.NEARBY_KINDS[o.kind] < rank and not C[o] then ok = false break end
-          end
-        end
-        if ok and st.glue and route[i - 1] and i > 2 and not C[route[i - 1]] then ok = false end
-        if ok and route[i + 1] and route[i + 1].glue and not C[route[i + 1]] then ok = false end
-        if not ok then
-          C[st] = nil
-          changed = true
-        end
-      end
-    end
-  end
+  -- Possible now: by the order rules of the plan (Geo.StepsReachable), the same ones Geo.ApplyNearFirst
+  -- keeps to.
+  local pred, links = CP.RouteRules(route, todo)
+  Geo.StepsReachable(C, pred, links)
   -- Violation: a step not wanted first (outside the city, if in one) comes before a wanted one.
   local keys, now, first, other = {}, {}, nil, nil
   for _, i in ipairs(todo) do
@@ -561,7 +639,45 @@ function CP.QuestRemoved(id)
   end
   title = title or tostring(id)
   local text = string.format(L["You abandoned \"%s\".\n\nRemove it from the list, or keep it and pick it up again? The steps to come of the Roadbook are computed again (the steps done stay)."], title)
-  StaticPopup_Show("FQP_QUEST_ABANDONED", text, nil, { id = id, title = title })
+  CP.Ask("FQP_QUEST_ABANDONED", text, { id = id, title = title })
+end
+
+-- Questions asked one window at a time for each kind: a second window of a kind would close the first
+-- one, answering it. An answer starts a computation: the next question waits for its end.
+function CP.Ask(which, text, data)
+  CP.asks = CP.asks or {}
+  local q = CP.asks[which] or {}
+  CP.asks[which] = q
+  for _, e in ipairs(q) do
+    if e.data.id == data.id then return end
+  end
+  q[#q + 1] = { text = text, data = data }
+  CP.AskNext(which)
+end
+
+function CP.AskNext(which)
+  local q = CP.asks and CP.asks[which]
+  CP.asked = CP.asked or {}
+  if CP.asked[which] or not q or #q == 0 then return end
+  if State.computing and which == "FQP_QUEST_ABANDONED" then -- (its answers change the list)
+    if not CP.askWaiting then
+      CP.askWaiting = true
+      C_Timer.After(2, function()
+        CP.askWaiting = nil
+        CP.AskNext(which)
+      end)
+    end
+    return
+  end
+  local e = table.remove(q, 1)
+  CP.asked[which] = true
+  if not StaticPopup_Show(which, e.text, nil, e.data) then CP.asked[which] = nil end
+end
+
+-- A question's window closed: the next one of its kind.
+function CP.Asked(which)
+  if CP.asked then CP.asked[which] = nil end
+  C_Timer.After(0.2, function() CP.AskNext(which) end)
 end
 
 StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
@@ -572,8 +688,10 @@ StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
     if data then CP.SkipQuest({ task = { id = data.id, title = data.title } }) end
   end,
   OnCancel = function(_, data) -- also Escape: the quest stays planned
-    if data then CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ") end
+    -- asked by the player: computed again, tracked or not
+    if data then CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ", nil, true) end
   end,
+  OnHide = function() CP.Asked("FQP_QUEST_ABANDONED") end,
   timeout = 0,
   whileDead = true,
   hideOnEscape = true,
@@ -613,6 +731,8 @@ function CP.DoEmpty()
   Geo.ClearFrozen()
   Geo.ServiceClear()
   Geo.CustomSetList({}, true)
+  Geo.ForgetDismissedPlaces()
+  CP.focusAfter, CP.asks = nil, nil
   State.customUnplanned = nil
   State.customToken = (State.customToken or 0) + 1 -- no pending recompute
   Print(L["Roadbook emptied."])
@@ -706,7 +826,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
   if goal ~= "custom" and WaitScan(attempt,
     function(n) CP.Recompute(goal, keep, n, token, re) end,
     function()
-      State.computing = nil
+      State.computing, CP.focusAfter = nil, nil
       Guard(CP.RefreshButton)
       Geo.SyncQuestLogButton()
       Refresh()
@@ -719,6 +839,11 @@ function CP.Recompute(goal, keep, attempt, token, re)
     CP.focusAfter = nil
     if not route or #route < 2 then
       Print(err or L["The Roadbook is empty: no step to follow."])
+      local followed = CP.CurrentFocus()
+      if followed and not CP.InRoadbook(followed) then -- taken out of the list meanwhile
+        CP.ClearFocus()
+        CP.FocusNext(false)
+      end
       CP.RefreshButton()
       return
     end
@@ -748,6 +873,7 @@ end
 function CP.SkipStep(s)
   local followed = CP.CurrentFocus() == s
   Print(L["Step skipped: "] .. CP.StepLine(s))
+  if s.search and s.task.id then Geo.DismissPlace(s.task.id, s.p) end -- "Not here"
   Geo.MarkDone(s)
   -- Transport skipped: the steps to come are planned again without it for the way to the next step
   -- (only this time: it can be proposed again later).
@@ -814,21 +940,25 @@ end
 -- Automatic update: when the focused Roadbook step is done
 -- (quest picked up, objective done, quest turned in, flight master activated), the step is
 -- marked as done and the focus moves to the next step of the saved Roadbook.
+-- The step followed when the update is asked is the one marked: not another one the focus moved to a
+-- second later (a computation ended meanwhile; the same step in the new plan counts).
 -- step (optional): the step that triggered the update; it is only marked if it still has the focus and
 -- check() (optional) still holds a second later (an objective step is never marked for another's progress).
 function CP.AutoUpdate(reason, step, check)
   if CP.autoPending then return end
   CP.autoPending = true
+  local asked = step or CP.CurrentFocus()
   C_Timer.After(1, function()
     CP.autoPending = nil
-    if step and (CP.CurrentFocus() ~= step or (check and not check())) then
-      Geo.Trace("auto", "refused (" .. reason .. "): " .. Geo.StepTrace(step) .. ", focus on "
-        .. (CP.CurrentFocus() and Geo.StepTrace(CP.CurrentFocus()) or "nothing"))
+    local cur = CP.CurrentFocus()
+    local same = cur == asked or (not step and cur and asked and CP.SameStep(cur, asked))
+    if not same or (check and not check()) then
+      Geo.Trace("auto", "refused (" .. reason .. "): " .. (asked and Geo.StepTrace(asked) or "no step")
+        .. ", focus on " .. (cur and Geo.StepTrace(cur) or "nothing"))
       return
     end
-    Geo.Trace("auto", reason .. ": " .. (CP.CurrentFocus() and Geo.StepTrace(CP.CurrentFocus()) or "no focus"))
+    Geo.Trace("auto", reason .. ": " .. (cur and Geo.StepTrace(cur) or "no focus"))
     Print(string.format(L["%s: next Roadbook step."], reason))
-    local cur = CP.CurrentFocus()
     if cur then Geo.MarkDone(cur) end
     local ok, err = pcall(CP.FocusNext, true, cur)
     if not ok then Print(L["Focus update error: "] .. tostring(err)) end
@@ -962,8 +1092,8 @@ function CP.Reroute(st, pos, msg)
 end
 
 -- Quest picked up while its giver had several places to check (search steps): the place nearest to
--- you is where it was found (done), the other ones leave the Roadbook, and the Roadbook is adapted
--- (CP.Replan), tracked or not. Returns true if the Roadbook was changed.
+-- you is where it was found (done), the other ones leave the Roadbook, and the Roadbook, when tracked,
+-- is adapted (CP.Replan). Returns true if the Roadbook was changed.
 function CP.GiverFound(a1, a2)
   local pos = PlayerPos()
   local handled = false
@@ -1019,15 +1149,6 @@ function CP.SetAutoAdd(on)
   if Geo.MapPanelSync then Guard(Geo.MapPanelSync) end
 end
 
-function CP.AutoAskNext()
-  if CP.autoShown or not CP.autoAsk or #CP.autoAsk == 0 then return end
-  local e = table.remove(CP.autoAsk, 1)
-  CP.autoShown = true
-  if not StaticPopup_Show("FQP_AUTO_ADD", e.title, nil, e) then
-    CP.autoShown = nil
-  end
-end
-
 -- Auto mode: the game tracks a quest as it is accepted; it is untracked, except the active step's quest.
 function CP.AutoUnwatch(id)
   C_Timer.After(0.5, function()
@@ -1043,16 +1164,14 @@ function CP.AutoAddAccepted(a1, a2)
   if type(id) ~= "number" then return end
   CP.AutoUnwatch(id)
   if Geo.InCustom(id) then return end
-  CP.autoAsk = CP.autoAsk or {}
-  for _, e in ipairs(CP.autoAsk) do if e.id == id then return end end
-  CP.autoAsk[#CP.autoAsk + 1] = { id = id, title = QGet(QDB.Quest, id, "name") or ("#" .. id) }
-  CP.AutoAskNext()
+  local title = QGet(QDB.Quest, id, "name") or ("#" .. id)
+  CP.Ask("FQP_AUTO_ADD", title, { id = id, title = title })
 end
 
--- Added as soon as no computation is running.
-function CP.AutoAddSoon(id, title, tries)
+-- Added as soon as no computation is running, however long it takes.
+function CP.AutoAddSoon(id, title)
   if State.computing then
-    if (tries or 0) < 30 then C_Timer.After(2, function() CP.AutoAddSoon(id, title, (tries or 0) + 1) end) end
+    C_Timer.After(2, function() CP.AutoAddSoon(id, title) end)
     return
   end
   Geo.CustomAdd(id, title)
@@ -1065,10 +1184,7 @@ StaticPopupDialogs["FQP_AUTO_ADD"] = {
   OnAccept = function(_, data)
     if data then CP.AutoAddSoon(data.id, data.title) end
   end,
-  OnHide = function()
-    CP.autoShown = nil
-    C_Timer.After(0.2, CP.AutoAskNext)
-  end,
+  OnHide = function() CP.Asked("FQP_AUTO_ADD") end,
   timeout = 0,
   whileDead = true,
   hideOnEscape = true,
@@ -1174,9 +1290,17 @@ function CP.OnGameEvent(event, a1, a2)
     CP.turnedIn = CP.turnedIn or {}
     CP.turnedIn[a1] = true
   end
+  if event == "QUEST_ACCEPTED" and CP.turnedIn then -- taken again (repeatable): not turned in any more
+    if a1 then CP.turnedIn[a1] = nil end
+    if a2 then CP.turnedIn[a2] = nil end
+  end
   if event == "QUEST_REMOVED" then -- turned in or abandoned: known a moment later
     if a1 then C_Timer.After(1, function() Guard(CP.QuestRemoved, a1) end) end
     return
+  end
+  if event == "QUEST_ACCEPTED" then -- picked up: the places found empty count again next time
+    if a1 then Geo.ForgetDismissedPlaces(a1) end
+    if a2 then Geo.ForgetDismissedPlaces(a2) end
   end
   if event == "QUEST_ACCEPTED" and CP.GiverFound(a1, a2) then return end
   if event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED" or event == "QUEST_TURNED_IN" then

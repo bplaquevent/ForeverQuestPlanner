@@ -95,9 +95,13 @@ function Geo.MissingPrereqs(id, out, seen, depth)
       if IsCompleted(p) or seen[p] then ok = true break end
     end
     if not ok then
-      -- One of them is enough: the one in the quest log, otherwise the first one for your class and race.
+      -- One of them is enough: the one in the quest log, else the one already in the list, else the first
+      -- one for your class and race.
       local pick
       for _, p in ipairs(single) do if IsInLog(p) then pick = p break end end
+      if not pick then
+        for _, p in ipairs(single) do if Geo.InCustom(p) then pick = p break end end
+      end
       if not pick then
         for _, p in ipairs(single) do if Geo.ForPlayer(p) then pick = p break end end
       end
@@ -202,6 +206,7 @@ function Geo.CustomRemove(id, quiet)
   if not i then return false, 0 end
   local rec = Geo.CustomRec()
   local e = table.remove(rec.list, i)
+  Geo.ForgetDismissedPlaces(id)
   Geo.Trace("list", "removed " .. tostring(id) .. " " .. tostring(e.title))
   local removed, again = 0, true
   while again do
@@ -549,10 +554,30 @@ function Geo.CustomConstraints(tasks)
   return pred, succ
 end
 
--- Identity of a quest step (game step of the plan or of the saved route): kind, quest (or dungeon), target.
+-- Identity of a quest step (game step of the plan or of the saved route): kind, quest (or dungeon), target;
+-- one of the places where a quest giver may stand (search): that place.
 function Geo.StepKey(st)
   local t = st.task or {}
-  return st.kind .. ":" .. tostring(t.id or t.dungeon) .. ":" .. tostring(st.r and st.r.tg and st.r.tg.name)
+  local place = st.search and st.p and st.p.x and string.format("@%.0f,%.0f", st.p.x, st.p.y) or ""
+  return st.kind .. ":" .. tostring(t.id or t.dungeon) .. ":" .. tostring(st.r and st.r.tg and st.r.tg.name) .. place
+end
+
+-- Keeps in chosen (a set of steps) the ones that can be done with the other chosen ones alone: every
+-- step before them (pred) and every step glued to them (links) chosen too.
+function Geo.StepsReachable(chosen, pred, links)
+  local changed = true
+  while changed do
+    changed = false
+    for s in pairs(chosen) do
+      local ok = true
+      for _, p in ipairs(pred[s] or {}) do if not chosen[p] then ok = false end end
+      for _, g in ipairs(links[s] or {}) do if not chosen[g] then ok = false end end
+      if not ok then
+        chosen[s] = nil -- (removing the key being visited: allowed by next)
+        changed = true
+      end
+    end
+  end
 end
 
 -- Steps on the spot first (CP.NearbyCheck): near = { keys = StepKey of the steps wanted first, city = uiMapID
@@ -576,21 +601,7 @@ function Geo.ApplyNearFirst(tasks, steps, pred, near, svc)
       end
     end
   end
-  local changed = true
-  while changed do
-    changed = false
-    for _, s in ipairs(steps) do
-      if chosen[s] then
-        local ok = true
-        for _, p in ipairs(pred[s] or {}) do if not chosen[p] then ok = false end end
-        for _, g in ipairs(link[s] or {}) do if not chosen[g] then ok = false end end
-        if not ok then
-          chosen[s] = nil
-          changed = true
-        end
-      end
-    end
-  end
+  Geo.StepsReachable(chosen, pred, link)
   local first = {}
   for _, s in ipairs(steps) do if chosen[s] then first[#first + 1] = s end end
   if #first == 0 then return 0 end

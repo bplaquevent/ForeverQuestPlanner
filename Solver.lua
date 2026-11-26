@@ -1,7 +1,7 @@
 -- Forever Quest Planner: Roadbook solver in pure Lua (no game API, no global): world model (walks
 -- through the zone passes, dangerous zones, flight / boat / zeppelin network), route evaluation.
 -- The same file runs in the game and in the offline test bench (tools/bench.lua), on a problem
--- captured in game by /fqp dump (Bench.lua):
+-- captured in game by /fqp dump (Problem.lua):
 --   problem = { k = constants, player = {...}, world = {...}, quests = { [id] = {...} }, tasks = {...},
 --               custom = {...}, baseline = {...} }
 
@@ -272,8 +272,10 @@ end
 
 local WEAK = { __mode = "k" }
 
--- Transport network with the flight nodes `known`: hubs (flight masters, docks) and shortest
--- paths between them (Floyd-Warshall). Cached by set of known nodes, speed and banned transport.
+-- Transport network with the flight nodes `known`: hubs (flight masters, docks) and the direct links
+-- between them: the walk and the zone it crosses, the flight or the line. The shortest ways, which
+-- depend on the player level, are given by S.Paths. Cached by set of known nodes, speed and banned
+-- transport.
 function S.Network(W, known, speed, ban)
   local key = S.KnownKey(known) .. "@" .. speed .. S.BanKey(ban)
   local net = W.nets[key]
@@ -292,27 +294,26 @@ function S.Network(W, known, speed, ban)
     dockIndex[i] = #hubs
   end
   local n = #hubs
-  local D, nxt, via = {}, {}, {}
+  -- walk[i][j] (without the danger penalty), worst[i][j] the highest zone minimum level it crosses;
+  -- ride[i][j] the time of the flight or of the line, how[i][j] its mode.
+  local walk, worst, ride, how = {}, {}, {}, {}
+  local levels, seen = {}, {}
   for i = 1, n do
-    D[i], nxt[i], via[i] = {}, {}, {}
+    walk[i], worst[i], ride[i], how[i] = {}, {}, {}, {}
     local a = hubs[i]
     local banned = ban and ban.mode == "flight" and a.node and S.Near(a.p, ban.from, S.BAN_RADIUS)
     local fd = a.node and not banned and S.FlightDists(W, a.node, known) or nil
     for j = 1, n do
-      nxt[i][j] = j
-      if i == j then
-        D[i][j] = 0
-      else
+      if i ~= j then
         local b = hubs[j]
-        local best, how = math.huge, nil
-        local walk = S.WalkTime(W, a.p, b.p, speed)
-        if walk then best, how = walk, "walk" end
-        local len = fd and b.node and fd[b.node]
-        if len then
-          local fl = len / k.FLIGHT_SPEED + k.FLIGHT_OVERHEAD
-          if fl < best then best, how = fl, "flight" end
+        local t, w = S.WalkCost(W, a.p, b.p, speed, math.huge)
+        walk[i][j], worst[i][j] = t, w
+        if w and not seen[w] then
+          seen[w] = true
+          levels[#levels + 1] = w
         end
-        D[i][j], via[i][j] = best, how
+        local len = fd and b.node and fd[b.node]
+        if len then ride[i][j], how[i][j] = len / k.FLIGHT_SPEED + k.FLIGHT_OVERHEAD, "flight" end
       end
     end
   end
@@ -320,13 +321,54 @@ function S.Network(W, known, speed, ban)
     local i, j = dockIndex[l[1]], dockIndex[l[2]]
     local banned = ban and ban.mode ~= "flight" and i and j and S.Near(hubs[i].p, ban.from, S.BAN_RADIUS)
       and S.Near(hubs[j].p, ban.to, S.BAN_RADIUS)
-    if i and j and not banned and k.TRANSPORT_TIME < D[i][j] then D[i][j], via[i][j] = k.TRANSPORT_TIME, l[3] end
+    if i and j and i ~= j and not banned and k.TRANSPORT_TIME < (ride[i][j] or math.huge) then
+      ride[i][j], how[i][j] = k.TRANSPORT_TIME, l[3]
+    end
   end
-  ShortestPaths(D, nxt, n)
+  table.sort(levels)
   -- (weak keys: in game a network outlives the computations, points like the player's place do not)
-  net = { key = key, hubs = hubs, D = D, nxt = nxt, via = via, speed = speed, near = setmetatable({}, WEAK), travel = {} }
+  net = { key = key, hubs = hubs, walk = walk, worst = worst, ride = ride, how = how, levels = levels,
+    paths = {}, speed = speed, near = setmetatable({}, WEAK), travel = {} }
   W.nets[key] = net
   return net
+end
+
+-- Shortest ways between the hubs of a network at a player level (Floyd-Warshall): D[i][j] the times,
+-- nxt[i][j] the first hub on the way, via[i][j] how the direct link is travelled. A walk through a
+-- zone too high is slower, as everywhere (S.WalkCost). Shared by the levels finding the same walks
+-- dangerous.
+function S.Paths(W, net, plevel)
+  local k = W.k
+  local limit = plevel + k.DANGER_MARGIN
+  local from = math.huge -- lowest zone minimum level that is dangerous
+  for _, level in ipairs(net.levels) do
+    if level > limit then from = level break end
+  end
+  local paths = net.paths[from]
+  if paths then return paths end
+  local n = #net.hubs
+  local D, nxt, via = {}, {}, {}
+  for i = 1, n do
+    D[i], nxt[i], via[i] = {}, {}, {}
+    for j = 1, n do
+      nxt[i][j] = j
+      if i == j then
+        D[i][j] = 0
+      else
+        local best, how = net.walk[i][j], nil
+        local w = net.worst[i][j]
+        if w and w > limit then best = best * k.DANGER_FACTOR end
+        if best < math.huge then how = "walk" end
+        local ride = net.ride[i][j]
+        if ride and ride < best then best, how = ride, net.how[i][j] end
+        D[i][j], via[i][j] = best, how
+      end
+    end
+  end
+  ShortestPaths(D, nxt, n)
+  paths = { D = D, nxt = nxt, via = via }
+  net.paths[from] = paths
+  return paths
 end
 
 local function NearHubs(W, net, p)
@@ -344,13 +386,15 @@ local function NearHubs(W, net, p)
   return out
 end
 
--- Best way from a to b: direct walk, or walk -> network -> walk. Returns the time and the hubs used.
+-- Best way from a to b: direct walk, or walk -> network -> walk. Returns the time and the way through
+-- the network, if taken: { i, j (hubs of departure and arrival), nxt, via (S.Paths at that level) }.
 function S.Route(W, a, b, net, plevel)
   if not a or not b then return 0, nil end
   local speed = net.speed
   local best = (a.c == b.c) and (S.WalkCost(W, a, b, speed, plevel)) or math.huge
   local choice
   if #net.hubs > 0 then
+    local paths = S.Paths(W, net, plevel)
     -- Walk from each arrival hub to b: computed once, it does not depend on the departure hub.
     local hb, wb = NearHubs(W, net, b), {}
     for m, j in ipairs(hb) do wb[m] = (S.WalkCost(W, net.hubs[j].p, b, speed, plevel)) end
@@ -358,8 +402,8 @@ function S.Route(W, a, b, net, plevel)
       local wa = S.WalkCost(W, a, net.hubs[i].p, speed, plevel)
       if wa < best then
         for m, j in ipairs(hb) do
-          local v = wa + net.D[i][j] + wb[m]
-          if v < best then best, choice = v, { i = i, j = j } end
+          local v = wa + paths.D[i][j] + wb[m]
+          if v < best then best, choice = v, { i = i, j = j, nxt = paths.nxt, via = paths.via } end
         end
       end
     end
@@ -432,16 +476,20 @@ end
 -- XP of a quest turned in at a player level.
 function S.TurnInXP(P, id, level, fallback)
   local q = id and P.quests[id]
-  if not (q and q.qLevel) then return fallback or 0 end
   local pl = P.player
+  if pl.maxLevel and level >= pl.maxLevel then return 0 end
+  if not (q and q.qLevel) then return fallback or 0 end
   local xp = S.QuestXP(q.qLevel, q.baseXP, level, pl.maxLevel)
   local ref = S.QuestXP(q.qLevel, q.baseXP, pl.level, pl.maxLevel)
-  if q.xpNow and ref > 0 then xp = math.floor(xp * q.xpNow / ref + 0.5) end
+  -- No XP by the formula (no quest level or base XP): the game's figure, whatever the level.
+  if ref == 0 then return q.xpNow or fallback or 0 end
+  if q.xpNow then xp = math.floor(xp * q.xpNow / ref + 0.5) end
   return xp
 end
 
 -- XP of a step at a player level: quest turn-in, monsters of an objective.
 function S.StepXP(P, st, level)
+  if P.player.maxLevel and level >= P.player.maxLevel then return 0 end
   if st.kind == "turnin" then
     return S.TurnInXP(P, st.id, level, st.xp)
   elseif st.kind == "obj" then
@@ -454,6 +502,12 @@ function S.StepXP(P, st, level)
     return xp
   end
   return 0
+end
+
+-- What the charges of a way back are counted on: its reagent, shared with the other ones using it,
+-- else the way back itself.
+local function ChargePool(src)
+  return src.reagent or tostring(src.key)
 end
 
 -- Simulates a route (list of steps, route[1] = start) from the problem's starting state.
@@ -471,14 +525,15 @@ function S.Evaluate(P, route, opts)
   local pl = P.player
   local known = S.KnownStart(P)
   local net = S.Network(W, known, pl.speed)
-  -- Transport skipped by the player: not usable on the first leg only (P.ban).
+  -- Transport skipped by the player: not usable on the first leg travelled only (P.ban), teleports apart.
   local banNet = P.ban and S.Network(W, known, pl.speed, P.ban)
   local level, xp, rested = pl.level, pl.xp or 0, pl.rested or 0
   local need = pl.xpMax or Needed(P, level)
   local bind = P.world.bind
-  local sources = {}
+  local sources, charges = {}, {}
   for _, s in ipairs(P.world.recall or {}) do
-    sources[tostring(s.key)] = { ready = s.ready or 0, cd = s.cd or 0, charges = s.charges, src = s }
+    sources[tostring(s.key)] = { ready = s.ready or 0, cd = s.cd or 0, src = s }
+    if s.charges then charges[ChargePool(s)] = s.charges end
   end
   local res = { at = { 0 }, levels = { level }, travel = { 0 }, stepXP = { 0 }, rawXP = { 0 }, nets = {}, legs = {}, binds = {}, violations = {},
     wait = 0, questXP = 0, mobXP = 0 }
@@ -486,7 +541,7 @@ function S.Evaluate(P, route, opts)
   local target = opts.targetLevel
   for i = 2, #route do
     local st = route[i]
-    res.nets[i], res.binds[i] = net, bind
+    res.nets[i], res.binds[i] = banNet or net, bind
     if st.reqLevel and level < st.reqLevel then
       res.violations[#res.violations + 1] = { i = i, kind = "level", ci = st.ci, what = "picked up below its required level " .. st.reqLevel }
     end
@@ -503,15 +558,17 @@ function S.Evaluate(P, route, opts)
             what = string.format("%s on cooldown: %d s to wait", tostring(st.via or "hearth"), s.ready - t) }
           t = s.ready
         end
-        if s.charges then
-          if s.charges <= 0 then res.violations[#res.violations + 1] = { i = i, kind = "recall", what = "no charge left" } end
-          s.charges = s.charges - 1
+        local pool = ChargePool(s.src)
+        if charges[pool] then
+          if charges[pool] <= 0 then res.violations[#res.violations + 1] = { i = i, kind = "recall", what = "no charge left" } end
+          charges[pool] = charges[pool] - 1
         end
         s.ready = t + move + s.cd
         if s.src.bind or st.bindDest then dest = bind or st.p else dest = s.src.p or st.p end
       end
     else
-      local legNet = (i == 2 and banNet) or net
+      local legNet = banNet or net
+      banNet = nil
       res.legs[i] = { from = pos, to = st.p, net = legNet, level = level }
       move = S.Travel(W, legNet, level, pos, st.p)
     end
@@ -649,7 +706,7 @@ end
 ---------------------------------------------------------------------------
 -- Ways back of a route without teleports (`base`: its evaluation): for each leg, the time saved by
 -- each way back (cast, then travel from its arrival); the best ones are kept in order of gain,
--- one per leg, with the cooldown between two uses of the same one and its charges.
+-- one per leg, with the cooldown between two uses of the same one and the charges left (ChargePool).
 function S.AddRecalls(P, core, base)
   local sources = P.world.recall or {}
   if #sources == 0 then return core end
@@ -674,7 +731,7 @@ function S.AddRecalls(P, core, base)
   local byLeg, chosen, used = {}, {}, {}
   for _, c in ipairs(cands) do
     local src = c.src
-    local ok = not byLeg[c.i] and c.t >= (src.ready or 0) and (not src.charges or (used[src] or 0) < src.charges)
+    local ok = not byLeg[c.i] and c.t >= (src.ready or 0) and (not src.charges or (used[ChargePool(src)] or 0) < src.charges)
     if ok and (src.cd or 0) > 0 then
       for _, o in ipairs(chosen) do
         if o.src == src and math.abs(c.t - o.t) < src.cd + src.cast then ok = false break end
@@ -683,7 +740,7 @@ function S.AddRecalls(P, core, base)
     if ok then
       chosen[#chosen + 1] = c
       byLeg[c.i] = c
-      used[src] = (used[src] or 0) + 1
+      used[ChargePool(src)] = (used[ChargePool(src)] or 0) + 1
     end
   end
   local out = { core[1] }
@@ -741,6 +798,7 @@ S.OPT = {
   LNS_SHARE = 30,     -- % of the quests removed by a random destruction
   LNS_NOISE = 0.3,    -- rebuilds: random factor on the XP rates (other choices explored)
   BUILD_SHARE = 0.5,  -- share of the budget the first construction may use
+  WHOLE_SHARE = 0.2,  -- duration goal with a list: share of the budget to put the whole list in order, at most
 }
 
 -- Objective that can be done in any order with the other ones of its quest: monsters to kill, items to
@@ -872,15 +930,13 @@ local function CheapestSlot(P, r, s, lo, hi, glued, rand, noise)
 end
 
 -- Places allowed to a step of the list in a route whose steps are at pos[ci]: after the steps it needs
--- (pred, unless free of the order rules), right after the step it is glued to. nil: not yet.
-local function ListRange(pred, s, pos, n, free)
+-- (rules, S.Rules), right after the step it is glued to. nil: not yet.
+local function ListRange(rules, s, pos, n)
   local lo, hi = 1, n
-  if not free then
-    for _, pc in ipairs(pred[s.ci] or {}) do
-      local j = pos[pc]
-      if not j then return nil end
-      if j > lo then lo = j end
-    end
+  for _, pc in ipairs(rules[s.ci] or {}) do
+    local j = pos[pc]
+    if not j then return nil end
+    if j > lo then lo = j end
   end
   if s.glueTo then
     local j = pos[s.glueTo]
@@ -890,9 +946,33 @@ local function ListRange(pred, s, pos, n, free)
   return lo, hi
 end
 
+-- Quests that keep the quest id from being taken once one of them is (QuestieDB: exclusive quests,
+-- next quest of its chain), as a set; nil when none.
+local function Blockers(P, id)
+  local q = id and P.quests[id]
+  if not (q and q.blockers) then return nil end
+  local set = {}
+  for _, x in ipairs(q.blockers) do set[x] = true end
+  return set
+end
+
+-- Places left to the pick-up of the quest id in the route r by those rules: after the pick-ups of the
+-- quests it keeps from being taken, before the ones of the quests keeping it from being taken.
+local function TakeRange(P, r, id, lo, hi)
+  local mine = Blockers(P, id)
+  for i, st in ipairs(r) do
+    if st.kind == "take" and st.id then
+      if mine and mine[st.id] then hi = math.min(hi, i - 1) end
+      local theirs = Blockers(P, st.id)
+      if theirs and theirs[id] then lo = math.max(lo, i) end
+    end
+  end
+  return lo, hi
+end
+
 -- Inserts a task's steps where they cost the least (quick estimate), in their order, after the turn-in
--- of the quest they follow (a candidate quest or a quest of the list: depCi). Returns the new core and
--- the extra time, or nil.
+-- of the quest they follow (a candidate quest or a quest of the list: depCi) and after the service
+-- shortcut at the head of the route (P.custom.first). Returns the new core and the extra time, or nil.
 function S.InsertTask(P, core, t)
   local r = {}
   for i, st in ipairs(core) do r[i] = st end
@@ -912,11 +992,14 @@ function S.InsertTask(P, core, t)
     end
     if not lo then return nil end
   end
+  local first = P.custom and P.custom.first
+  if first and r[2] and r[2].ci == first then lo = math.max(lo, 2) end
   local delta = 0
   for k, s in ipairs(t.stops) do
-    local hi = #r
+    local from, hi = lo, #r
     if s.glue and k > 1 then hi = lo end
-    local bestI, bestD = CheapestSlot(P, r, s, lo, hi, function(b) return b.glue end)
+    if s.kind == "take" and s.id then from, hi = TakeRange(P, r, s.id, from, hi) end
+    local bestI, bestD = CheapestSlot(P, r, s, from, hi, function(b) return b.glue end)
     if not bestI then return nil end
     table.insert(r, bestI + 1, s)
     delta = delta + bestD + (s.work or 0)
@@ -927,11 +1010,28 @@ end
 
 -- Order rules: each step of a quest after the steps of a lower rank (S.Ranks: pick-up first, free
 -- objectives in any order, fixed ones at their place, turn-in last), escort steps right after the
--- previous step, a follow-up started after the turn-in of the quest it follows.
+-- previous step, a follow-up started after the turn-in of the quest it follows, no candidate quest
+-- in a route where a quest picked up before keeps another from being taken (Blockers; two quests of
+-- the list: the player's choice).
 function S.Valid(P, core)
   local seen, done, ciDone = {}, {}, {}
+  local taken = {} -- quest ids picked up so far: "candidate" or "list"
+  local function take(st, candidate)
+    if st.kind == "take" and st.id then
+      local q = P.quests[st.id]
+      for _, x in ipairs(q and q.blockers or {}) do
+        if taken[x] and (candidate or taken[x] == "candidate") then return false end
+      end
+      taken[st.id] = candidate and "candidate" or "list"
+    end
+    for _, m in ipairs(st.members or {}) do
+      if not take(m, candidate) then return false end
+    end
+    return true
+  end
   for i = 2, #core do
     local s = core[i]
+    if not take(s, s.tn ~= nil) then return false end
     if s.ci then ciDone[s.ci] = true end
     if s.tn then
       local c = seen[s.tn] or 0
@@ -1065,19 +1165,62 @@ end
 -- first = ci of the step that must come first (service shortcut) }.
 S.LEVEL_PENALTY = 3600
 
+-- Order rules of the list the routes keep: { [ci] = { ci of the steps before it } }, from P.custom.pred,
+-- built once per list. Steps glued together (glueTo) move as one block: its first step waits for what
+-- any of them needs. A rule closing a cycle cannot be kept: it is left out, the same one for every
+-- route, and its step marked `relaxed` (warning in game).
+function S.Rules(P)
+  local C = P.custom
+  if C.rules then return C.rules end
+  local rules, head, depth = {}, {}, {}
+  local function block(ci)
+    if not head[ci] then
+      local prev = C.steps[ci] and C.steps[ci].glueTo
+      if prev then head[ci], depth[ci] = block(prev), depth[prev] + 1
+      else head[ci], depth[ci] = ci, 0 end
+    end
+    return head[ci]
+  end
+  local needs = {} -- [block] = set of blocks it comes after
+  local function comesAfter(a, b, seen)
+    if a == b then return true end
+    seen[a] = true
+    for x in pairs(needs[a] or {}) do
+      if not seen[x] and comesAfter(x, b, seen) then return true end
+    end
+    return false
+  end
+  for ci, st in ipairs(C.steps) do
+    local h = block(ci)
+    for _, pc in ipairs(C.pred[ci] or {}) do
+      local g = block(pc)
+      if g == h then
+        if depth[pc] >= depth[ci] then st.relaxed = true end
+      elseif comesAfter(g, h, {}) then
+        st.relaxed = true
+      else
+        needs[h] = needs[h] or {}
+        needs[h][g] = true
+        rules[h] = rules[h] or {}
+        table.insert(rules[h], pc)
+      end
+    end
+  end
+  C.rules = rules
+  return rules
+end
+
 function S.ValidCustom(P, core)
   local pos = {}
   for i, st in ipairs(core) do if st.ci then pos[st.ci] = i end end
-  local pred = P.custom.pred
+  local rules = S.Rules(P)
   -- Service shortcut (P.custom.first): the first step of the route, whatever else is in it.
   if P.custom.first and (not core[2] or core[2].ci ~= P.custom.first) then return false end
   for i, st in ipairs(core) do
     if st.ci then
-      if not st.relaxed then
-        for _, pc in ipairs(pred[st.ci] or {}) do
-          local j = pos[pc]
-          if not j or j > i then return false end
-        end
+      for _, pc in ipairs(rules[st.ci] or {}) do
+        local j = pos[pc]
+        if not j or j > i then return false end
       end
       if st.glueTo and (not core[i - 1] or core[i - 1].ci ~= st.glueTo) then return false end
     end
@@ -1086,9 +1229,10 @@ function S.ValidCustom(P, core)
 end
 
 -- Cheapest insertion (quick estimate) of the steps of the list missing from the core, each one as soon
--- as the steps before it are placed. A cycle in the rules: one step is placed ignoring them (relaxed).
+-- as the steps before it are placed. The core must hold no step coming after a missing one.
 -- noise: random factor on the costs (rebuilds), rand(n): random integer 1..n.
 function S.BuildCustom(P, core, rand, noise)
+  local rules = S.Rules(P)
   local r, placed = {}, {}
   for i, st in ipairs(core) do
     r[i] = st
@@ -1098,29 +1242,20 @@ function S.BuildCustom(P, core, rand, noise)
   for _, st in ipairs(P.custom.steps) do
     if not placed[st.ci] then remaining[#remaining + 1] = st end
   end
-  local relax = false
   while #remaining > 0 do
     local pos = {}
     for i, st in ipairs(r) do if st.ci then pos[st.ci] = i end end
     local best
     for ri, s in ipairs(remaining) do
-      local lo, hi = ListRange(P.custom.pred, s, pos, #r, relax or s.relaxed)
+      local lo, hi = ListRange(rules, s, pos, #r)
       if lo then
         local j, d = CheapestSlot(P, r, s, lo, hi, function(b) return b.glueTo end, rand, noise)
         if j and (not best or d < best.d) then best = { ri = ri, j = j, d = d } end
       end
       S.yield()
     end
-    if best then
-      local s = table.remove(remaining, best.ri)
-      table.insert(r, best.j + 1, s)
-      if relax then s.relaxed = true end
-      relax = false
-    elseif not relax then
-      relax = true
-    else
-      break
-    end
+    if not best then break end
+    table.insert(r, best.j + 1, table.remove(remaining, best.ri))
   end
   return r
 end
@@ -1193,6 +1328,7 @@ end
 -- the steps before it are placed. Returns the new core, or nil (a step before it is not in the core).
 function S.InsertUnit(P, core, u, rand, noise)
   local C = P.custom
+  local rules = S.Rules(P)
   local r = {}
   for i, st in ipairs(core) do r[i] = st end
   local remaining = {}
@@ -1202,7 +1338,7 @@ function S.InsertUnit(P, core, u, rand, noise)
     for i, st in ipairs(r) do if st.ci then pos[st.ci] = i end end
     local best
     for ri, s in ipairs(remaining) do
-      local lo, hi = ListRange(C.pred, s, pos, #r, s.relaxed)
+      local lo, hi = ListRange(rules, s, pos, #r)
       if lo then
         local j, d = CheapestSlot(P, r, s, lo, hi, function(b) return b.glueTo or b.glue end, rand, noise)
         if j and (not best or d < best.d) then best = { ri = ri, j = j, d = d } end
@@ -1214,35 +1350,50 @@ function S.InsertUnit(P, core, u, rand, noise)
   return r
 end
 
--- Removes a unit of the list, and the units needing it (a step before theirs, e.g. a prerequisite
--- turned in).
-function S.WithoutUnit(P, core, u)
-  local C = P.custom
-  local gone = { [u] = true }
+-- Removes from a core the steps of the groups `gone` (groupOf(step): its group, nil for a step that
+-- is not of the list), then the groups needing them: a step before one of theirs, or the one it is
+-- glued to, is no longer there.
+local function WithoutGroups(P, core, gone, groupOf)
+  local rules = S.Rules(P)
   local changed = true
   while changed do
     changed = false
     local present = {}
     for _, st in ipairs(core) do
-      if st.ci and not gone[C.unitOf[st.ci]] then present[st.ci] = true end
+      if st.ci and not gone[groupOf(st)] then present[st.ci] = true end
     end
     for _, st in ipairs(core) do
-      local v = st.ci and C.unitOf[st.ci]
-      if v and not gone[v] and not st.relaxed then
-        for _, pc in ipairs(C.pred[st.ci] or {}) do
-          if not present[pc] then
-            gone[v], changed = true, true
-            break
-          end
+      local v = st.ci and groupOf(st)
+      if v and not gone[v] then
+        local missing = st.glueTo and not present[st.glueTo]
+        for _, pc in ipairs(rules[st.ci] or {}) do
+          if not present[pc] then missing = true end
         end
+        if missing then gone[v], changed = true, true end
       end
     end
   end
   local r = {}
   for _, st in ipairs(core) do
-    if not (st.ci and gone[C.unitOf[st.ci]]) then r[#r + 1] = st end
+    if not (st.ci and gone[groupOf(st)]) then r[#r + 1] = st end
   end
   return r
+end
+
+-- Removes a unit of the list, and the units needing it (a step before theirs, e.g. a prerequisite
+-- turned in).
+function S.WithoutUnit(P, core, u)
+  return WithoutGroups(P, core, { [u] = true }, function(st) return P.custom.unitOf[st.ci] end)
+end
+
+-- Removes the steps of the quests `drop` (a set of quest indexes, ti) of the list, and the steps
+-- needing them (a follow-up, a dungeon visit): S.BuildCustom puts them all back in order.
+function S.WithoutQuests(P, core, drop)
+  local gone = {}
+  for _, st in ipairs(core) do
+    if st.ti and drop[st.ti] then gone[st.ci] = true end
+  end
+  return WithoutGroups(P, core, gone, function(st) return st.ci end)
 end
 
 ---------------------------------------------------------------------------
@@ -1262,6 +1413,7 @@ local function NewSearch(P, goal, opts)
   local custom = goal == "custom"
   local mixed = not custom and P.custom ~= nil and #(P.custom.steps or {}) > 0
   if custom or mixed then
+    S.Rules(P) -- before the variants, copies of the steps, with their mark
     for _, st in ipairs(P.custom.steps) do S.Variants(st) end
   end
   if mixed then S.MixPrepare(P) end
@@ -1377,33 +1529,50 @@ function S.MoveRelocate(X)
   return any
 end
 
--- A quest, a bind or a flight path removed.
-function S.MoveRemove(X)
+-- Each step of the route tried without what without(i, step) takes out (nil: it stays).
+local function TryRemovals(X, without)
   local any = false
   local i = 2
   while i <= #X.core and not S.SearchOut(X) do
-    local st = X.core[i]
-    local c
-    if st.tn then c = Without(X.P, X.core, st.tn)
-    elseif st.kind == "bind" or st.kind == "fm" then
-      c = {}
-      for k, x in ipairs(X.core) do if k ~= i then c[#c + 1] = x end end
-    end
+    local c = without(i, X.core[i])
     if c and S.SearchTry(X, c) then any = true else i = i + 1 end
   end
   return any
+end
+
+-- The route without its step i, a bind or a flight path (steps added by the search); else nil.
+local function WithoutExtra(core, i, st)
+  if st.kind ~= "bind" and st.kind ~= "fm" then return nil end
+  local c = {}
+  for k, x in ipairs(core) do if k ~= i then c[#c + 1] = x end end
+  return c
+end
+
+-- A quest, a bind or a flight path removed.
+function S.MoveRemove(X)
+  return TryRemovals(X, function(i, st)
+    if st.tn then return Without(X.P, X.core, st.tn) end
+    return WithoutExtra(X.core, i, st)
+  end)
+end
+
+-- A bind or a flight path removed (list modes, whose quests are removed apart, or not at all).
+function S.MoveRemoveExtras(X)
+  return TryRemovals(X, function(i, st) return WithoutExtra(X.core, i, st) end)
 end
 
 -- A quest (or chain) added.
 function S.MoveAdd(X)
   local any = false
   local adds = S.Additions(X.P, X.core)
-  for j = 1, math.min(S.OPT.TOP_K, #adds) do
+  local j = 1
+  while j <= math.min(S.OPT.TOP_K, #adds) do -- (an addition kept: a new list, which may be shorter)
     if S.SearchOut(X) then break end
     if S.SearchTry(X, adds[j].core) then
       any = true
       adds = S.Additions(X.P, X.core)
     end
+    j = j + 1
   end
   return any
 end
@@ -1542,9 +1711,12 @@ end
 
 -- The moves of each search, tried in turn until none improves the route.
 local function Moves(X)
-  if X.custom then return { S.MoveRelocate, S.MoveSpots, S.MoveFlightMasters, S.MoveBinds } end
+  if X.custom then
+    return { S.MoveRelocate, S.MoveSpots, S.MoveRemoveExtras, S.MoveFlightMasters, S.MoveBinds }
+  end
   if X.mode == "pick" then
-    return { S.MoveRelocate, S.MoveSpots, S.MoveRemoveUnits, S.MoveAddUnits, S.MoveFlightMasters, S.MoveBinds }
+    return { S.MoveRelocate, S.MoveSpots, S.MoveRemoveExtras, S.MoveRemoveUnits, S.MoveAddUnits, S.MoveFlightMasters,
+      S.MoveBinds }
   end
   return { S.MoveRelocate, S.MoveSpots, S.MoveRemove, S.MoveAdd, S.MoveSwap, S.MoveFlightMasters, S.MoveBinds }
 end
@@ -1586,14 +1758,8 @@ end
 
 -- The route without the quests of drop (a set of RouteQuests keys).
 local function Destroyed(X, keys, drop)
+  if X.custom then return S.WithoutQuests(X.P, X.core, drop) end
   local c = X.core
-  if X.custom then
-    c = {}
-    for _, st in ipairs(X.core) do
-      if not (st.ti and drop[st.ti]) then c[#c + 1] = st end
-    end
-    return c
-  end
   local without = X.mode == "pick" and S.WithoutUnit or Without
   for _, key in ipairs(keys) do
     if drop[key] then c = without(X.P, c, key) end
@@ -1655,6 +1821,21 @@ function S.AddNearbyFlightMasters(X)
   end
 end
 
+-- The whole list in the best order found by a computation of its own ("custom"), within a share of
+-- the budget of X. Returns its core and its evaluation.
+local function OrderList(X, core)
+  local Y = {}
+  for key, v in pairs(X) do Y[key] = v end
+  Y.goal, Y.custom, Y.mixed, Y.valid = "custom", true, false, S.ValidCustom
+  Y.evals, Y.maxEvals, Y.maxTime = 0, X.maxEvals * S.OPT.WHOLE_SHARE, X.maxTime * S.OPT.WHOLE_SHARE
+  Y.core = core
+  Y.res, Y.route = S.SearchSim(Y, core)
+  Y.score = S.Objective(Y.P, Y.res, Y.goal)
+  S.LocalSearch(Y)
+  X.evals = X.evals + Y.evals
+  return Y.core, Y.res
+end
+
 -- Best Roadbook for a goal: construction (quests or chains of quests with the most XP per second
 -- added, until the goal is reached), then local search on the goal value: blocks of steps moved,
 -- quests removed or added, binds at an inn, flight paths activated on the way.
@@ -1668,7 +1849,10 @@ function S.Optimize(P, goal, opts)
   if X.mixed then
     -- The whole list reaching the goal: only its best part; otherwise all of it, completed.
     local whole = S.BuildCustom(P, start, X.rand)
-    X.mode = Reached(X, (S.SearchSim(X, whole))) and "pick" or "keep"
+    local res = S.SearchSim(X, whole)
+    -- A duration: the cheapest insertion alone may be far too long, the list is put in order first.
+    if X.goal.kind == "time" and Reached(X, res) then whole, res = OrderList(X, whole) end
+    X.mode = Reached(X, res) and "pick" or "keep"
     if X.mode == "keep" then start = whole
     elseif P.custom.first then start = { start[1], P.custom.steps[P.custom.first] } end -- service shortcut kept
     X.svcUnit = P.custom.first and P.custom.unitOf[P.custom.first] or nil
