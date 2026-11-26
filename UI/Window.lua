@@ -10,6 +10,7 @@ local Snapshot = ns.Snapshot
 local RenderAvailable, RenderExport, RenderList, RenderNear = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear
 local RenderTodo, Settings, ShowMessage, State, StateIcons = ns.RenderTodo, ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons
 local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
+local ErrorTrace, Guard = ns.ErrorTrace, ns.Guard
 local Refresh -- the window's refresh, defined below (Available.lua forwards to it)
 
 -- Roadbook being computed: the list is emptied and the waiting animation is shown instead.
@@ -103,7 +104,7 @@ local function RenderXP()
     ShowMessage(qp, "xp", L["Unable to convert QuestieDB positions to this client's map."])
     return
   end
-  if Geo.RenderBusy(panel) then pcall(CP.RefreshButton) return end
+  if Geo.RenderBusy(panel) then Guard(CP.RefreshButton) return end
   Snapshot() -- the quests of the list as the log has them now
   local query = State.xpQuery
   local searching = #query > 0
@@ -130,7 +131,7 @@ local function RenderXP()
   if searching and total > (shown or 0) then count = (shown or 0) .. " / " .. Plural(total, L["quest"]) end
   Geo.PaneHeader(qp, L["Quests"], Color("aaaaaa", L["Quests of the list: "] .. count))
   RenderList(qp, "xp", qItems, searching)
-  pcall(CP.RefreshButton)
+  Guard(CP.RefreshButton)
 end
 
 -- State check boxes (several allowed), one row of the filter box.
@@ -337,9 +338,7 @@ local RefreshUnsafe
 local lastError
 Refresh = function()
   if not (State.mainFrame and State.mainFrame:IsShown()) then return end
-  local ok, err = xpcall(RefreshUnsafe, function(e)
-    return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
-  end)
+  local ok, err = xpcall(RefreshUnsafe, ErrorTrace)
   if not ok and err ~= lastError then
     lastError = err
     Print(L["|cffff6060Error while updating the window|r (copy it to report it):\n"] .. err)

@@ -5,6 +5,7 @@
 local ADDON_NAME, ns = ...
 local Geo, Color, GeoReady, IsInLog, K, L, LogQuests = ns.Geo, ns.Color, ns.GeoReady, ns.IsInLog, ns.K, ns.L, ns.LogQuests
 local PointText, Print, QDB, QGet, Refresh, Settings, State = ns.PointText, ns.Print, ns.QDB, ns.QGet, ns.Refresh, ns.Settings, ns.State
+local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
 -- Quest abandon
@@ -107,7 +108,7 @@ end
 
 -- Clears the addon pin (OpenMap's waypoint, when it is still ours).
 local function ClearPin()
-  if ActivePin() then pcall(ns.OM.worldmap.ClearPin) end
+  if ActivePin() then Guard(ns.OM.worldmap.ClearPin) end
   Settings().pin = nil
 end
 

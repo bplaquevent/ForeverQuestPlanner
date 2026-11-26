@@ -13,6 +13,7 @@
 
 local ADDON_NAME, ns = ...
 local CP, ClearPin, Geo, K, L, OM, IsInLog, Print, Settings = ns.CP, ns.ClearPin, ns.Geo, ns.K, ns.L, ns.OM, ns.IsInLog, ns.Print, ns.Settings
+local Guard = ns.Guard
 
 K.MAP_SET = "fqp_roadbook"             -- OpenMap pin set of the steps
 K.MAP_ROUTE_SET = "fqp_roadbook_route" -- and of the route (under the pins)
@@ -50,7 +51,7 @@ function Geo.MapClaim(mode)
     local m, x, y = wm.WaypointPoint()
     saved = { hidden = wm.PinsHidden() and true or false, wp = (m and x) and { m, x, y } or nil }
     Settings().mapSaved = saved
-    pcall(wm.SetPinsHidden, true)
+    Guard(wm.SetPinsHidden, true)
   end
   if mode == "track" then saved.tookWp = true end -- the tracking moves the waypoint
   saved.mode = mode
@@ -65,13 +66,13 @@ function Geo.MapRelease()
   Settings().mapSaved = nil
   local wm = OM.worldmap
   Geo.MapClear()
-  pcall(wm.SetPinsHidden, saved.hidden)
+  Guard(wm.SetPinsHidden, saved.hidden)
   if saved.tookWp then
     ClearPin()
-    if saved.wp then pcall(wm.TrackPoint, saved.wp[1], saved.wp[2], saved.wp[3]) end
+    if saved.wp then Guard(wm.TrackPoint, saved.wp[1], saved.wp[2], saved.wp[3]) end
   end
-  pcall(wm.RefreshWaypoint)
-  if Geo.MapPanelSync then pcall(Geo.MapPanelSync) end -- the panel goes back to the active Roadbook
+  Guard(wm.RefreshWaypoint)
+  if Geo.MapPanelSync then Guard(Geo.MapPanelSync) end -- the panel goes back to the active Roadbook
 end
 
 -- USER_WAYPOINT_UPDATED while a Roadbook is followed: another waypoint replaced ours, ours goes
@@ -82,7 +83,7 @@ function Geo.MapOnWaypoint()
   local m = OM.worldmap.WaypointPoint()
   if m and not Geo.WaypointAt(r.ui, r.x, r.y) then
     Geo.mapRestoring = true
-    pcall(OM.worldmap.TrackPoint, r.ui, r.x, r.y, r.title)
+    Guard(OM.worldmap.TrackPoint, r.ui, r.x, r.y, r.title)
     Geo.mapRestoring = nil
   end
 end
@@ -132,7 +133,7 @@ function Geo.StepTooltip(owner, st, n, hint, anchor)
   GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
   GameTooltip:AddLine(n and string.format(L["Roadbook step %d"], n) or L["Roadbook step done"], 0.6, 0.8, 1)
   GameTooltip:AddLine((CP.StepSummary(st)), 1, 1, 1)
-  local okD, lines = pcall(Geo.StepDetailLines, st)
+  local okD, lines = Guard(Geo.StepDetailLines, st)
   for _, line in ipairs(okD and lines or {}) do GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true) end
   for line in (hint .. "\n"):gmatch("(.-)\n") do GameTooltip:AddLine(line, 0.6, 0.6, 0.6) end
   GameTooltip:Show()
@@ -185,7 +186,7 @@ function Geo.CenterMap(p, centered)
     Geo.MapSync()
     local u, v = Geo.MapUV(p)
     if u and OM.api.IsStitched() then
-      pcall(OM.api.ShowWorld, u, v, zoom)
+      Guard(OM.api.ShowWorld, u, v, zoom)
     else -- OpenMap's map off: the game's, on the point's zone
       Geo.OpenWorldMap(Geo.PointUi(p))
     end
@@ -255,7 +256,7 @@ function Geo.MapWalk(lines, u1, v1, p, q, u2, v2, color)
   local S = OM.stitch
   local pts = { u1, v1 }
   local ok, _, way = false, nil, nil
-  if p and p.c and p.x and q and q.c and q.x then ok, _, way = pcall(Geo.WalkWay, p, q) end
+  if p and p.c and p.x and q and q.c and q.x then ok, _, way = Guard(Geo.WalkWay, p, q) end
   for _, w in ipairs(ok and way or {}) do
     local okW, u, v = pcall(S.FromYards, w.c, w.x, w.y)
     if okW and u then
@@ -367,7 +368,7 @@ function Geo.MapPlayerTick(_, elapsed)
   if not (sets and Geo.MapOwner()) then return end
   local pos, last = ns.PlayerPos(), Geo.mapPlayerAt
   if pos and last and last[1] == pos.c and math.abs(last[2] - pos.x) + math.abs(last[3] - pos.y) < 5 then return end
-  pcall(Geo.MapDrawPlayer)
+  Guard(Geo.MapDrawPlayer)
 end
 
 -- Redraws when the map is open (otherwise at its next opening), with the steps panel beside it.
@@ -421,10 +422,10 @@ end
 -- At login: a map still held from before a /reload given back (the focus is not kept), redraw on
 -- each opening, preview ended when the map closes, option in OpenMap's menu.
 function Geo.MapInit()
-  if Geo.MapOwner() then pcall(Geo.MapRelease) end
+  if Geo.MapOwner() then Guard(Geo.MapRelease) end
   Geo.MapHookWorldMap()
-  pcall(OM.api.RegisterCallback, ADDON_NAME, "OpenMap_StitchedChanged", function() Geo.MapSync() end)
-  pcall(OM.api.RegisterMenuToggle, ADDON_NAME, { id = "roadbook", label = L["Whole Roadbook on the map"],
+  Guard(OM.api.RegisterCallback, ADDON_NAME, "OpenMap_StitchedChanged", function() Geo.MapSync() end)
+  Guard(OM.api.RegisterMenuToggle, ADDON_NAME, { id = "roadbook", label = L["Whole Roadbook on the map"],
     get = Geo.MapWholeGet, set = Geo.MapWholeSet, icon = "Interface\\Icons\\INV_Misc_Book_09",
     section = "Forever Quest Planner" })
 end

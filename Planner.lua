@@ -10,6 +10,7 @@ local UnitTime, WorldPos, scan, LogQuests, AllIds, SkillName = ns.UnitTime, ns.W
 local LogEntry, Normalize, GeoReady = ns.LogEntry, ns.Normalize, ns.GeoReady
 local IdKind, LogKind, RequestQuestTags, QuestTagsSettled = ns.IdKind, ns.LogKind, ns.RequestQuestTags, ns.QuestTagsSettled
 local IsCompleted, QuestAllowed = ns.IsCompleted, ns.QuestAllowed
+local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -525,7 +526,7 @@ function Geo.Followers(task, ctx, plevel)
   for _, b in ipairs(ids) do
     if not seen[b] then
       seen[b] = true
-      local ok, en = pcall(CheckAvailable, b, c)
+      local ok, en = Guard(CheckAvailable, b, c)
       if ok and en and not en.repMissing and not en.missing and not en.repeatable
         and ((en.xp or 0) > 0 or plevel >= Geo.MaxLevel())
         and (Geo.UnlockLevel(en) or math.huge) <= Geo.PlanCeiling(plevel) then
@@ -637,7 +638,7 @@ end
 -- a quest event (Events.lua clears State.abandonIds), on a fresh capture of the log.
 function Geo.ToAbandon(questId)
   if not State.abandonIds then
-    pcall(function()
+    Guard(function()
       ns.Snapshot()
       ns.Analyze()
     end)

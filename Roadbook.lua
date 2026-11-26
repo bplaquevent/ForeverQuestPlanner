@@ -8,6 +8,7 @@ local IsCompleted, IsInLog, K, L, PinPoint, PlayerPos, Print = ns.IsCompleted, n
 local QDB, QGet, Refresh, Settings, Snapshot, KnownFlights = ns.QDB, ns.QGet, ns.Refresh, ns.Settings, ns.Snapshot, ns.KnownFlights
 local State, TravelSpeed, WatchOnly, IsWatched, SetWatched = ns.State, ns.TravelSpeed, ns.WatchOnly, ns.IsWatched, ns.SetWatched
 local MarkScanDirty, LogEntry, IsQuestComplete, WaitScan = ns.MarkScanDirty, ns.LogEntry, ns.IsQuestComplete, ns.WaitScan
+local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
 -- Roadbook checkpoints: focus on the next step from a floating button
@@ -210,7 +211,7 @@ function Geo.Recompute(goal, cb, keepDone, re)
   Geo.RequestPlan(goal, function(route, err, info)
     if not State.computing then return end -- deleted meanwhile
     State.computing = nil
-    pcall(CP.RefreshButton) -- the Objective button can be clicked again
+    Guard(CP.RefreshButton) -- the Objective button can be clicked again
     Geo.SyncQuestLogButton() -- the list can change again
     if route and #route >= 2 and goal ~= "custom" then
       Geo.AcceptGenerated(route, info, function(ok)
@@ -698,7 +699,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
     Geo.SyncQuestLogButton() -- the list is locked
     if not keep then Geo.ClearFrozen() end
     Refresh()
-    pcall(CP.RefreshButton) -- the Objective button waits
+    Guard(CP.RefreshButton) -- the Objective button waits
   end
   if token ~= CP.computeToken then return end -- deleted meanwhile
   -- Available quests change after a pick-up or turn-in: wait for their scan to finish.
@@ -706,7 +707,7 @@ function CP.Recompute(goal, keep, attempt, token, re)
     function(n) CP.Recompute(goal, keep, n, token, re) end,
     function()
       State.computing = nil
-      pcall(CP.RefreshButton)
+      Guard(CP.RefreshButton)
       Geo.SyncQuestLogButton()
       Refresh()
     end) then
@@ -862,7 +863,7 @@ function CP.WatchTransport(s)
       if CP.transportTicker then CP.transportTicker:Cancel() CP.transportTicker = nil end
       return
     end
-    pcall(CP.OnGameEvent, "FQP_TRANSPORT_TICK")
+    Guard(CP.OnGameEvent, "FQP_TRANSPORT_TICK")
   end)
 end
 
@@ -1006,7 +1007,7 @@ function CP.SetAutoAdd(on)
   Print(on and L["Auto mode on: each quest you accept is proposed for the Roadbook list."]
     or L["Auto mode off."])
   Refresh()
-  if Geo.MapPanelSync then pcall(Geo.MapPanelSync) end
+  if Geo.MapPanelSync then Guard(Geo.MapPanelSync) end
 end
 
 function CP.AutoAskNext()
@@ -1150,8 +1151,8 @@ function STEP_EVENTS.obj(s, event, a1, a2)
 end
 
 function CP.OnGameEvent(event, a1, a2)
-  if event == "QUEST_ACCEPTED" then pcall(CP.AutoAddAccepted, a1, a2) end
-  if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() pcall(CP.RefreshButton) end) end
+  if event == "QUEST_ACCEPTED" then Guard(CP.AutoAddAccepted, a1, a2) end
+  if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() Guard(CP.RefreshButton) end) end
   -- Landing after a flight taken during a focus.
   if event == "FQP_TAXI_LANDED" and CP.flying then
     CP.flying = nil -- the focus already moved to the next step at take-off
@@ -1165,12 +1166,12 @@ function CP.OnGameEvent(event, a1, a2)
     CP.turnedIn[a1] = true
   end
   if event == "QUEST_REMOVED" then -- turned in or abandoned: known a moment later
-    if a1 then C_Timer.After(1, function() pcall(CP.QuestRemoved, a1) end) end
+    if a1 then C_Timer.After(1, function() Guard(CP.QuestRemoved, a1) end) end
     return
   end
   if event == "QUEST_ACCEPTED" and CP.GiverFound(a1, a2) then return end
   if event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED" or event == "QUEST_TURNED_IN" then
-    pcall(CP.ScheduleRecallCheck, 3) -- steps done ahead (CP.AheadCheck)
+    Guard(CP.ScheduleRecallCheck, 3) -- steps done ahead (CP.AheadCheck)
   end
   local s = CP.CurrentFocus()
   if not s then return end

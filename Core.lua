@@ -15,6 +15,31 @@ local function Print(msg)
   DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg))
 end
 
+-- An error as told in the chat, with its trace.
+local function ErrorTrace(e)
+  return tostring(e) .. (debugstack and ("\n" .. debugstack(2, 3, 0)) or "")
+end
+
+local ERRORS_TOLD = 10 -- different errors told in the chat per session, at most
+local told, toldCount = {}, 0
+
+local function Told(ok, ...)
+  if not ok then
+    local message = tostring((...))
+    if not told[message] and toldCount < ERRORS_TOLD then
+      told[message], toldCount = true, toldCount + 1
+      Print(L["|cffff6060Error|r (copy it to report it):\n"] .. message)
+    end
+  end
+  return ok, ...
+end
+
+-- pcall for the addon's own functions and its dependencies': an error does not stop the caller, but it
+-- is told in the chat (once per message). Plain pcall is left to the game calls expected to fail.
+local function Guard(fn, ...)
+  return Told(pcall(fn, ...))
+end
+
 -- Formats of the data the addon saves, apart: a number is raised by every change that makes the data
 -- it covers unusable (a field renamed, moved, or of another type or meaning; not a new field that may
 -- be absent). DATA_VERSION: the characters' data (Settings()) and the captures (quest logs, test
@@ -1083,6 +1108,7 @@ ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQues
 ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.QuestAllowed = AllIds, NpcFriendly, PlayerFaction, QuestAllowed
 ns.QuestCategory = QuestCategory
 ns.IdKind, ns.LogKind, ns.QuestKind = IdKind, LogKind, QuestKind
+ns.ErrorTrace, ns.Guard = ErrorTrace, Guard
 ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime
 ns.IsQuestComplete = IsQuestComplete
 ns.SkillName = SkillName

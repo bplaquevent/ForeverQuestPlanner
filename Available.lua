@@ -8,6 +8,7 @@ local NextQuests, PlayerBits, PlayerSkills, QDB, QGet = ns.NextQuests, ns.Player
 local QuestMeta, QuestPrereqs, State, TrivialRange, AllIds = ns.QuestMeta, ns.QuestPrereqs, ns.State, ns.TrivialRange, ns.AllIds
 local PlayerFaction, QuestAllowed, Print, SkillName = ns.PlayerFaction, ns.QuestAllowed, ns.Print, ns.SkillName
 local IdKind, RequestQuestTags, TagProgress = ns.IdKind, ns.RequestQuestTags, ns.TagProgress
+local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
 -- Available quests (QuestieDB), scan spread over several frames
@@ -357,7 +358,7 @@ function StartScan()
   local function step()
     local stop = math.min(i + 249, #ids)
     for k = i, stop do
-      local ok, entry = pcall(CheckAvailable, ids[k], ctx)
+      local ok, entry = Guard(CheckAvailable, ids[k], ctx)
       if ok and entry then results[#results + 1] = entry end
     end
     i = stop + 1

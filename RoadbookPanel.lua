@@ -12,6 +12,7 @@ local ADDON_NAME, ns = ...
 local AreaName, CP, Color, FormatNumber, FormatTime, Geo, K = ns.AreaName, ns.CP, ns.Color, ns.FormatNumber, ns.FormatTime, ns.Geo, ns.K
 local L, Plural, RouteText, Settings, UpdateScrollBar, State = ns.L, ns.Plural, ns.RouteText, ns.Settings, ns.UpdateScrollBar, ns.State
 local IsInLog, OpenQuestDetails = ns.IsInLog, ns.OpenQuestDetails
+local Guard = ns.Guard
 
 K.MAP_PANEL_W = 300   -- px: panel width
 K.MAP_PANEL_ROW = 34  -- px: a step's line
@@ -116,7 +117,7 @@ function Geo.StepDetailLines(st)
   for k = 2, route and #route or 0 do if route[k] == st then i = k break end end
   if i then
     if st.kind ~= "hearth" then
-      local okW, way = pcall(function()
+      local okW, way = Guard(function()
         return RouteText(route[i - 1].p, st.p, Geo.NetFor(route, i, info.speed or K.RUN_SPEED), info.plevel)
       end)
       if okW and way and way ~= L["right here"] then lines[#lines + 1] = Color("ffffff", L["Route: "]) .. way end
@@ -535,7 +536,7 @@ function Geo.MapPanelHeaderSync()
   panel.header:SetShown(not folded)
   local top = K.MAP_PANEL_TITLE - 2
   if not folded then
-    local ok, text = pcall(Geo.MapPanelHeader, fz.route, fz.info, done)
+    local ok, text = Guard(Geo.MapPanelHeader, fz.route, fz.info, done)
     panel.header:SetText(ok and text or "")
     top = K.MAP_PANEL_TITLE + (panel.header:GetStringHeight() or 0) + 4
   end
