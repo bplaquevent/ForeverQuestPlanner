@@ -1049,10 +1049,10 @@ function CP.AutoAddAccepted(a1, a2)
   CP.AutoAskNext()
 end
 
--- Added as soon as no computation is running.
-function CP.AutoAddSoon(id, title, tries)
+-- Added as soon as no computation is running, however long it takes.
+function CP.AutoAddSoon(id, title)
   if State.computing then
-    if (tries or 0) < 30 then C_Timer.After(2, function() CP.AutoAddSoon(id, title, (tries or 0) + 1) end) end
+    C_Timer.After(2, function() CP.AutoAddSoon(id, title) end)
     return
   end
   Geo.CustomAdd(id, title)
@@ -1173,6 +1173,10 @@ function CP.OnGameEvent(event, a1, a2)
   if event == "QUEST_TURNED_IN" and a1 then
     CP.turnedIn = CP.turnedIn or {}
     CP.turnedIn[a1] = true
+  end
+  if event == "QUEST_ACCEPTED" and CP.turnedIn then -- taken again (repeatable): not turned in any more
+    if a1 then CP.turnedIn[a1] = nil end
+    if a2 then CP.turnedIn[a2] = nil end
   end
   if event == "QUEST_REMOVED" then -- turned in or abandoned: known a moment later
     if a1 then C_Timer.After(1, function() Guard(CP.QuestRemoved, a1) end) end

@@ -430,7 +430,7 @@ function CP.ServiceClick(kind)
       if not Geo.KeepOnlyDone() then Geo.ClearFrozen() end
       CP.RefreshButton()
       Refresh()
-    elseif not CP.Replan(L["Service cancelled. "]) then
+    elseif not CP.Replan(L["Service cancelled. "], nil, true) then -- asked by the player: tracked or not
       Refresh()
     end
     return

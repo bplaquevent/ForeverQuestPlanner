@@ -351,6 +351,7 @@ L["The list is completed with the quests earning the most XP within this time (a
 L["The list is completed with the quests reaching this level the fastest (all its quests kept), or, when it goes beyond, only its quests reaching it the fastest are kept (at most 10 levels above yours)."] = "La liste est complétée par les quêtes qui atteignent ce niveau au plus vite (toutes ses quêtes gardées), ou, si elle va au-delà, seules ses quêtes qui l'atteignent au plus vite sont gardées (au plus 10 niveaux au-dessus du tien)."
 L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] = "La liste est vide : ajoute des quêtes avec le bouton \"Ajouter\" des autres onglets, ou choisis une session ou un niveau."
 L["The list or the Roadbook changed while the confirmation was open."] = "La liste ou le Roadbook ont changé pendant que la confirmation était ouverte."
+L["The scan of the available quests failed."] = "Le scan des quêtes disponibles a échoué."
 L["The quest giver is not at this place: the step is marked done and the Objective button moves to the next place to check."] = "Le donneur de quête n'est pas à cet endroit : l'étape est marquée faite et le bouton Objectif passe au lieu suivant à vérifier."
 L["The Roadbook is empty: no step to follow."] = "Le Roadbook est vide : aucune étape à suivre."
 L["Time estimates"] = "Estimation du temps"

@@ -18,6 +18,7 @@ local scan = { running = false, dirty = true, entries = nil }
 
 local function MarkScanDirty()
   scan.dirty, scan.changed = true, true
+  scan.error = nil -- the quests changed: a scan that failed is tried again
 end
 
 -- Levels above yours scanned for the Roadbook: a few by default, up to the target level with a
@@ -344,9 +345,15 @@ local function WaitScan(attempt, retry, giveUp)
   return true
 end
 
+-- The scan could not end (the error is told by ns.Guard): it is over, another one can start.
+local function ScanFailed()
+  scan.running, scan.error = false, L["The scan of the available quests failed."]
+  Guard(Refresh)
+end
+
 -- The scan's results are shown once the game's tags of their quests are loaded.
 local function Publish(results)
-  local function finish()
+  local function conclude()
     for _, en in ipairs(results) do
       local kind, _, _, tagged = IdKind(en.id)
       en.kind, en.tagged = kind, tagged
@@ -355,9 +362,55 @@ local function Publish(results)
     scan.running, scan.dirty = false, scan.changed
     Refresh()
   end
+  local function finish() -- may be called later, once the tags are loaded
+    if not Guard(conclude) then ScanFailed() end
+  end
   local ids = {}
   for _, en in ipairs(results) do ids[#ids + 1] = en.id end
   if RequestQuestTags(ids, finish) then finish() end
+end
+
+-- Last part of a scan: keeps the quests to show among the ones offered, then publishes them.
+local function Conclude(results)
+  -- Quests with missing quest prerequisites are kept only if each prerequisite can be done
+  -- now (in the log or available): "do this first" hints, not whole distant chains.
+  local reachable = {}
+  for _, en in ipairs(results) do if not en.missing then reachable[en.id] = true end end
+  local kept = {}
+  for _, en in ipairs(results) do
+    local ok = true
+    if en.missing then
+      for _, anyOf in ipairs(en.missing.quests) do
+        local one = false
+        for _, q in ipairs(anyOf) do if reachable[q] or IsInLog(q) then one = true break end end
+        if not one then ok = false break end
+      end
+    end
+    if ok then kept[#kept + 1] = en end
+  end
+  -- A quest whose missing prerequisites are all listed quests that lead to it is shown in their
+  -- chain (Geo.ChainLines), not as a row of its own.
+  local listed = {}
+  for _, en in ipairs(kept) do listed[en.id] = en end
+  local heads = {}
+  for _, en in ipairs(kept) do
+    if not en.missing then
+      for _, c in ipairs(ns.Geo.ChainQuests(en.id)) do heads[c.id] = true end
+    end
+  end
+  results = {}
+  for _, en in ipairs(kept) do
+    local inChain = en.missing and heads[en.id]
+    if inChain then
+      for _, anyOf in ipairs(en.missing.quests) do
+        local one = false
+        for _, q in ipairs(anyOf) do if listed[q] then one = true break end end
+        if not one then inChain = false break end
+      end
+    end
+    if not inChain then results[#results + 1] = en end
+  end
+  Publish(results)
 end
 
 function StartScan()
@@ -381,53 +434,21 @@ function StartScan()
     if i <= #ids then
       C_Timer.After(0, step)
     else
-      -- Quests with missing quest prerequisites are kept only if each prerequisite can be done
-      -- now (in the log or available): "do this first" hints, not whole distant chains.
-      local reachable = {}
-      for _, en in ipairs(results) do if not en.missing then reachable[en.id] = true end end
-      local kept = {}
-      for _, en in ipairs(results) do
-        local ok = true
-        if en.missing then
-          for _, anyOf in ipairs(en.missing.quests) do
-            local one = false
-            for _, q in ipairs(anyOf) do if reachable[q] or IsInLog(q) then one = true break end end
-            if not one then ok = false break end
-          end
-        end
-        if ok then kept[#kept + 1] = en end
-      end
-      -- A quest whose missing prerequisites are all listed quests that lead to it is shown in their
-      -- chain (Geo.ChainLines), not as a row of its own.
-      local listed = {}
-      for _, en in ipairs(kept) do listed[en.id] = en end
-      local heads = {}
-      for _, en in ipairs(kept) do
-        if not en.missing then
-          for _, c in ipairs(ns.Geo.ChainQuests(en.id)) do heads[c.id] = true end
-        end
-      end
-      results = {}
-      for _, en in ipairs(kept) do
-        local inChain = en.missing and heads[en.id]
-        if inChain then
-          for _, anyOf in ipairs(en.missing.quests) do
-            local one = false
-            for _, q in ipairs(anyOf) do if listed[q] then one = true break end end
-            if not one then inChain = false break end
-          end
-        end
-        if not inChain then results[#results + 1] = en end
-      end
-      Publish(results)
+      if not Guard(Conclude, results) then ScanFailed() end
     end
   end
   step()
 end
 
 
+-- Scan started by a display that needs its results: not again by itself after a failure (the display
+-- it refreshes would start it again and again), only once the quests changed (MarkScanDirty).
+local function ScanIfNeeded()
+  if (scan.dirty or not scan.entries) and not (scan.running or scan.error) then StartScan() end
+end
+
 -- Shared with the next files.
 ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan = BuildScanContext, CheckAvailable, Refresh, StartScan, scan
 ns.QuestDoubts = QuestDoubts
-ns.WaitScan = WaitScan
+ns.WaitScan, ns.ScanIfNeeded = WaitScan, ScanIfNeeded
 ns.MarkScanDirty, ns.WithinReach = MarkScanDirty, WithinReach
