@@ -443,10 +443,11 @@ function CP.ServiceClick(kind)
   end
   Geo.ServiceSet({ kind = kind, id = npc.id, name = npc.name, p = npc.p })
   CP.ServiceBarSync()
-  CP.turningOn = true -- going to the service means following the Roadbook
+  local paused = Geo.Paused()
+  Geo.SetPaused(false) -- going to the service means following the Roadbook
   local ok, started = Guard(CP.Replan, string.format(L["Going to %s first. "], npc.name or "?"))
-  CP.turningOn = nil -- after an error too: no later computation starts the tracking by itself
   if not (ok and started) then
+    Geo.SetPaused(paused) -- nothing started: the pause stays
     Geo.ServiceClear()
     CP.ServiceBarSync()
   end

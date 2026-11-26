@@ -417,11 +417,11 @@ local function Create()
   panel.auto = auto
   track:SetHitRectInsets(0, -((track.label:GetStringWidth() or 40) + 2), 0, 0)
   track:SetScript("OnClick", function()
-    if Geo.Tracking() then CP.TrackOff() else CP.TrackOn() end
+    if Geo.Tracking() then CP.Pause() else CP.TrackOn() end
     Geo.MapPanelSync()
   end)
   track:SetScript("OnEnter", function(self)
-    Tip(self, L["Tracking"], L["On: the Objective button, the map pin and the watched quest follow the Roadbook. Off: they stop and the Roadbook is only computed again by the Recompute icon or a change of its list (greyed steps). Turning it on computes the steps to come again."])
+    Tip(self, L["Tracking"], L["On, as soon as the Roadbook exists: the Objective button, the map pin and the watched quest follow it. Off: paused until turned on again, even after a change of the list; the Roadbook is only computed again by the Recompute icon or a change of its list (greyed steps). Turning it on computes the steps to come again."])
   end)
   track:SetScript("OnLeave", function() GameTooltip:Hide() end)
   panel.track = track
