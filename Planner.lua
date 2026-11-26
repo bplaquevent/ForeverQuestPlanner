@@ -657,7 +657,7 @@ function Geo.LeftOut(id, kind)
   return false
 end
 
--- Whether the game tags a quest of the log as elite (read with the log, Core.lua).
+-- Whether the game tags a quest of the log as elite (read with the log, QuestLog.lua).
 function Geo.IsGameElite(id)
   local q = LogEntry(id)
   return q and q.gameElite or false

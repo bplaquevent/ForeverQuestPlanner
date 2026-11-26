@@ -16,6 +16,10 @@ Data\Supplements.lua
 Data\GameData.lua
 Solver.lua
 Core.lua
+SavedData.lua
+QuestData.lua
+QuestLog.lua
+QuestAnalysis.lua
 OpenMapLink.lua
 QuestTags.lua
 Available.lua

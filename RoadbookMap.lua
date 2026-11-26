@@ -8,7 +8,7 @@
 -- switch: the player can show them again and add pins); when the Roadbook lets the map go, the map
 -- gets back what it showed before (the player's pins shown or hidden as they were, and the waypoint
 -- followed before tracking). OpenMap's functions are called, never replaced.
--- The drawing uses OpenMap's own pin sets (MapStitch, checked at load, Core.lua): its public API
+-- The drawing uses OpenMap's own pin sets (MapStitch, checked at load, OpenMapLink.lua): its public API
 -- places frames on the game's map canvas, which OpenMap makes see-through in a fight.
 
 local ADDON_NAME, ns = ...

@@ -102,7 +102,7 @@ local questie = {
 }
 
 local initDeps
-local env, ns = H.session(nil, { ["Core.lua"] = function(ns) initDeps = ns.InitDeps end })
+local env, ns = H.session(nil, { ["QuestData.lua"] = function(ns) initDeps = ns.InitDeps end })
 env._G, env.OpenMap, env.OpenMapAPI, env.LibQuestieDB = env, openMap, api, questie
 local failure = initDeps()
 check("dependencies accepted: " .. tostring(failure), failure == nil)
