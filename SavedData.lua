@@ -42,7 +42,7 @@ end
 local checkedLearned -- the learned data checked this session
 
 -- Learned in game. True for every character: zone passes walked ({ c, x, y, a, b, n }), the places
--- really reached by the teleport spells (spell -> point), class trainers. True for one character only:
+-- really reached by the teleport spells (spell -> point). True for one character only:
 -- chars[CharKey()], read through LearnedChar().
 local function LearnedData()
   local root = SettingsRoot()

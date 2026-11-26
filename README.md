@@ -16,7 +16,7 @@ Available in **English** (default) and **French** (used automatically on a Frenc
 - **Everything decided together**: the quests, their order, the hearthstone and class teleports, the binds and the flight masters to activate are chosen at once, each candidate Roadbook being simulated from start to end (travel, cooldowns, level reached at each step, XP at that level). The solver builds a first route, improves it (blocks of steps moved, quests added, removed or swapped), then takes parts of it apart and rebuilds them to escape bad early choices. The computation stops when nothing improves any more, or after 30 s at most (`K.PLAN_TIME`); the waiting messages show this limit, and you can keep playing meanwhile.
 - Travel over the **real flight network** of WoW Forever (only the flight paths you have learned, flight time from the length of each path), the boats, zeppelins and airships of your faction (one-way lines included), with a penalty for zones that are too high for you. On foot, going from a zone to another goes through a **zone pass** (mountain pass, tunnel, bridge) rather than in a straight line over the mountains: passes come from QuestieDB's patrols crossing a border and from the Warcraft Wiki, and those you walk through are **learned** (shared by all your characters): a learned pass is added when no known one joins the same two zones within 150 yards. Zones with no known pass stay in a straight line. Flight network, transport lines and zone levels come from **OpenMap**; the flight paths you have learned are the ones OpenMap records at each flight master (open a flight master's map once).
 - **Level forecast**: quest XP and monster XP (Classic formula, rested XP). **Every quest available** up to the level the Roadbook may reach is considered (not only the nearest ones); a quest is taken on from the level expected along the route (required level and "Max quest level" setting), with the XP it gives at that level.
-- **Service shortcuts**: five icons under the Objective button (vendor, repair, class trainer, bank, mailbox). A click makes the nearest NPC or mailbox of that kind (by travel time) the priority objective: the Roadbook is computed again with the transport steps needed to reach it, then carries on optimally from there. The step is done when its window opens; a second click on the highlighted icon cancels it. Works without a quest list, too. Class trainers that QuestieDB gives no class are learned in game: targeting or hovering one (tooltip naming your class) or opening its window remembers it for the characters of that class.
+- **Service shortcuts**: five icons under the Objective button (vendor, repair, class trainer, bank, mailbox). A click makes the nearest NPC or mailbox of that kind (by travel time) the priority objective: the Roadbook is computed again with the transport steps needed to reach it, then carries on optimally from there. The step is done when its window opens; a second click on the highlighted icon cancels it. Works without a quest list, too. Class trainers are the NPCs whose QuestieDB title names your class (in your language or in English): a trainer with no such title is not proposed.
 - **Objectives in any order**: monsters to kill, items to loot and objects to use are done in the order that suits the route; talking to an NPC, an event, a place to reach or an escort keep their place among the objectives of their quest. With a far level goal, the Roadbook is a **stage** (up to 40 h): at its end, **Adapt** plans the next stage from your real level.
 - **Quest chains** evaluated as a whole (XP, rewards and required level of every step).
 - **Quantities**: how many monsters or items a quest asks for comes from the game, even before you pick the quest up; when the game does not give it, it is read in QuestieDB's objective text, else a default value is used.
@@ -95,7 +95,7 @@ Optional: **Questie**.
 3. Start the game (or `/reload`).
 
 Settings and Roadbooks are saved per character. Of what the addon learns in game, zone passes walked and
-places reached by the teleport spells serve all your characters, class trainers those of the same class;
+places reached by the teleport spells serve all your characters;
 hearthstone places and mount speeds are each character's own.
 
 ## Commands
@@ -118,7 +118,7 @@ hearthstone places and mount speeds are each character's own.
 | `/fqp passes reset` | Forget the zone passes learned on foot |
 | `/fqp npc` | Diagnose the targeted NPC for the service shortcuts (class trainer data) |
 | `/fqp reset` | Erase the saved data of **every character** (after confirmation) and reload the interface: settings, quest lists, Roadbooks and captures. What was learned in game is kept |
-| `/fqp reset all` | The same, and erase what the addon learned in game too (zone passes, teleport arrivals, class trainers, hearthstone places, mount speeds) |
+| `/fqp reset all` | The same, and erase what the addon learned in game too (zone passes, teleport arrivals, hearthstone places, mount speeds) |
 | `/fqp dump` | Capture the Roadbook problem for the test bench (then `/reload`) |
 | `/fqp quest <id or name>` | What QuestieDB says about the matching quests (races, classes, prerequisites, exclusive quests, completed, quest givers: NPCs, objects, items) |
 
@@ -129,7 +129,7 @@ The French command names (`journal`, `dispo`, `autour`, `reglages`, `foyer`) sti
 Addon updates do not convert saved data. It is saved in two sets, each erased at login **only when a version cannot use it** (going back to a former version does the same), which the chat then says:
 
 - the **characters' data**, for **every character**: settings and window positions, quest lists, Roadbooks, and the captures (quest logs, test bench);
-- what the addon **learned in game**: zone passes walked, teleport arrivals and class trainers, common to the characters, and each character's hearthstone place and mount speed. A character deleted and made again with the same name does not get the former one's.
+- what the addon **learned in game**: zone passes walked and teleport arrivals, common to the characters, and each character's hearthstone place and mount speed. A character deleted and made again with the same name does not get the former one's.
 
 `/fqp reset` erases the first set on demand, `/fqp reset all` both.
 

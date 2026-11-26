@@ -5,7 +5,7 @@
 local ADDON_NAME, ns = ...
 local Geo, AllIds, Dist, EntityPoints, HasBit, K, L = ns.Geo, ns.AllIds, ns.Dist, ns.EntityPoints, ns.HasBit, ns.K, ns.L
 local NpcFriendly, OM, PlayerFaction, PlayerPos, QDB, QGet = ns.NpcFriendly, ns.OM, ns.PlayerFaction, ns.PlayerPos, ns.QDB, ns.QGet
-local TravelSpeed = ns.TravelSpeed
+local TravelSpeed, Guard = ns.TravelSpeed, ns.Guard
 
 -- QuestieDB npcFlags (vanilla 1.12 values).
 K.NPC_FLAG_VENDOR, K.NPC_FLAG_TRAINER, K.NPC_FLAG_BANKER, K.NPC_FLAG_REPAIR = 4, 16, 256, 16384
@@ -107,63 +107,16 @@ K.SERVICES = {
 K.SERVICE_EVENTS = { vendor = "MERCHANT_SHOW", repair = "MERCHANT_SHOW", trainer = "TRAINER_SHOW",
   bank = "BANKFRAME_OPENED", mail = "MAIL_SHOW" }
 
--- Class trainers learned in game, by class token: QuestieDB gives some of them no class (sub title
--- "Niveau 10"). Shared by the characters of the same class: { [npcId] = true }.
-function Geo.LearnedTrainers()
-  local _, token = UnitClass("player")
-  local learned = ns.LearnedData()
-  learned.classTrainers = learned.classTrainers or {}
-  learned.classTrainers[token or "?"] = learned.classTrainers[token or "?"] or {}
-  return learned.classTrainers[token or "?"]
-end
-
--- Remember an NPC as a trainer of the player's class (the service lists are read again).
-function Geo.LearnTrainer(id)
-  local learned = Geo.LearnedTrainers()
-  if not id or learned[id] then return end
-  local flags = QGet(QDB.Npc, id, "npcFlags")
-  if type(flags) ~= "number" or not HasBit(flags, K.NPC_FLAG_TRAINER) then return end
-  learned[id] = true
-  Geo.svc, Geo.svcNear = nil, nil
-end
-
-local function UnitNpcId(unit)
-  local guid = UnitGUID and UnitGUID(unit)
-  local kind, _, _, _, _, id = strsplit("-", guid or "")
-  return (kind == "Creature" or kind == "Vehicle") and tonumber(id) or nil
-end
-
--- Window of a trainer opened: a class trainer (not a profession trainer) teaches the player's class.
-function Geo.TrainerOpened()
-  if UnitNpcId("npc") and not (IsTradeskillTrainer and IsTradeskillTrainer()) then
-    Geo.LearnTrainer(UnitNpcId("npc"))
-  end
-end
-
--- Unit targeted or hovered: its tooltip title ("<Paladin Trainer>") names the player's class.
-function Geo.TrainerSeen(unit)
-  local id = UnitNpcId(unit)
-  if not id or Geo.LearnedTrainers()[id] then return end
-  local flags = QGet(QDB.Npc, id, "npcFlags")
-  if type(flags) ~= "number" or not HasBit(flags, K.NPC_FLAG_TRAINER) then return end
-  local classLoc, token = UnitClass("player")
-  if not Geo.scanTip then
-    Geo.scanTip = CreateFrame("GameTooltip", "FQPScanTip", nil, "GameTooltipTemplate")
-  end
-  local tip = Geo.scanTip
-  tip:SetOwner(UIParent, "ANCHOR_NONE")
-  tip:SetUnit(unit)
-  for i = 2, 3 do
-    local fs = _G["FQPScanTipTextLeft" .. i]
-    local text = fs and fs:GetText()
-    if text then
-      local low = text:lower()
-      if (classLoc and low:find(classLoc:lower(), 1, true)) or (token and low:find(token:lower(), 1, true)) then
-        Geo.LearnTrainer(id)
-        break
-      end
-    end
-  end
+-- Does the NPC's sub title name the character's class? QuestieDB's translation ("Maître des paladins"
+-- holds "Paladin"), or its English one ("Paladin Trainer"), read too: a translation may not hold the
+-- class as the game names the character's ("Master Mage": "Maître magicien").
+local function NamesClass(id, classLoc, classEn)
+  local sub = QGet(QDB.Npc, id, "subName")
+  if classLoc and type(sub) == "string" and sub:lower():find(classLoc:lower(), 1, true) then return true end
+  if not (classEn and QDB.Npc.GetRaw) then return false end
+  local ok, english = Guard(QDB.Npc.GetRaw, id, "subName") -- the base text, untranslated
+  return ok and type(english) == "string"
+    and (" " .. english:lower() .. " "):find("%A" .. classEn:lower() .. "%A") ~= nil
 end
 
 -- Vendors, repair NPCs, class trainers and bankers of the player's faction, and mailboxes (objects),
@@ -173,21 +126,13 @@ function Geo.ServiceNpcs()
   local svc = { vendor = {}, repair = {}, trainer = {}, bank = {}, mail = {} }
   local classLoc, token = UnitClass("player")
   local classEn = token and (token:sub(1, 1) .. token:sub(2):lower()) or nil
-  local learned = Geo.LearnedTrainers()
   for _, id in ipairs(PlayerFaction() and AllIds(QDB.Npc) or {}) do
     local flags = QGet(QDB.Npc, id, "npcFlags")
     if type(flags) == "number" and flags > 0 then
       local isVendor = HasBit(flags, K.NPC_FLAG_VENDOR)
       local isRepair = HasBit(flags, K.NPC_FLAG_REPAIR)
       local isBank = HasBit(flags, K.NPC_FLAG_BANKER)
-      local isTrainer = false
-      if HasBit(flags, K.NPC_FLAG_TRAINER) then
-        local sub = QGet(QDB.Npc, id, "subName")
-        -- Case-insensitive: "Maître des paladins" must match the class "Paladin".
-        local low = type(sub) == "string" and sub:lower() or nil
-        isTrainer = (learned[id] or (low and ((classLoc and low:find(classLoc:lower(), 1, true))
-          or (classEn and low:find(classEn:lower(), 1, true))))) and true or false
-      end
+      local isTrainer = HasBit(flags, K.NPC_FLAG_TRAINER) and NamesClass(id, classLoc, classEn)
       if isVendor or isRepair or isTrainer or isBank then
         if NpcFriendly(id) then
           local name = QGet(QDB.Npc, id, "name") or ("#" .. id)

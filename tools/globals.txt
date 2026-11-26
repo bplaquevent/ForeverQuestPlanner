@@ -129,6 +129,5 @@ wipe
 xpcall
 UnitGUID
 strsplit
-IsTradeskillTrainer
 setfenv
 QuestMapFrame_ShowQuestDetails
