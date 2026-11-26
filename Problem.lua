@@ -9,6 +9,7 @@ local ADDON_NAME, ns = ...
 local BuildScanContext, BuildTasks, CharKey, Geo, K, L, OM = ns.BuildScanContext, ns.BuildTasks, ns.CharKey, ns.Geo, ns.K, ns.L, ns.OM
 local PlayerPos, Print, QDB, QGet, Settings, AllPrereqs, State = ns.PlayerPos, ns.Print, ns.QDB, ns.QGet, ns.Settings, ns.AllPrereqs, ns.State
 local TravelSpeed, UnitTime, LogById, WaitScan = ns.TravelSpeed, ns.UnitTime, ns.LogById, ns.WaitScan
+local QuestBlockers = ns.QuestBlockers
 
 local Pb = {}
 K.BENCH_VERSION = 2
@@ -69,8 +70,9 @@ end
 function Pb.AddQuest(P, id, title)
   if not id or P.quests[id] then return end
   local row = QDB.xp and QDB.xp[id]
+  local blockers = QuestBlockers(id)
   P.quests[id] = { title = title, qLevel = row and row[1], baseXP = row and row[2],
-    reqLevel = QGet(QDB.Quest, id, "requiredLevel") }
+    reqLevel = QGet(QDB.Quest, id, "requiredLevel"), blockers = blockers[1] and blockers or nil }
 end
 
 -- Candidate quests of the automatic Roadbook (quest log, available ones) and, depth first, every
@@ -245,7 +247,7 @@ function Pb.World(P, live)
   w.recall = {}
   for _, s in ipairs(Geo.RecallSources()) do
     w.recall[#w.recall + 1] = { key = s.key, bind = s.bind or nil, p = Geo.CopyPoint(s.p), cast = s.cast, cd = s.cd,
-      ready = s.ready, charges = s.charges, spell = s.spell, name = s.name }
+      ready = s.ready, charges = s.charges, reagent = s.reagent, spell = s.spell, name = s.name }
   end
   local bind, bindName = Geo.CurrentBind()
   w.bind, w.bindName = Geo.CopyPoint(bind), bindName

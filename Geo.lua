@@ -740,11 +740,11 @@ local function RouteText(a, b, net, plevel)
     walk(a, hubs[choice.i].p, hubs[choice.i].name)
     local cur, flightFrom = choice.i, nil
     while cur ~= choice.j do
-      local nx = net.nxt[cur][choice.j]
-      local mode = net.via[cur][nx]
+      local nx = choice.nxt[cur][choice.j]
+      local mode = choice.via[cur][nx]
       if mode == "flight" then
         flightFrom = flightFrom or hubs[cur].name
-        if net.via[nx][net.nxt[nx][choice.j]] ~= "flight" or nx == choice.j then
+        if choice.via[nx][choice.nxt[nx][choice.j]] ~= "flight" or nx == choice.j then
           parts[#parts + 1] = Color("80c0ff", L["flight "] .. flightFrom .. " -> " .. hubs[nx].name)
           flightFrom = nil
         end

@@ -172,6 +172,17 @@ local function WithinReach(id, ctx)
     and not IsCompleted(id) and QuestAllowed(id, ctx.classBit, ctx.raceBit)
 end
 
+-- Quests of QuestieDB that keep the quest from being offered once one of them is in the log or turned
+-- in: the exclusive ones and the next quest of its chain.
+local function QuestBlockers(id)
+  local out = {}
+  local excl = QGet(QDB.Quest, id, "exclusiveTo")
+  for _, x in ipairs(type(excl) == "table" and excl or {}) do out[#out + 1] = x end
+  local nx = QGet(QDB.Quest, id, "nextQuestInChain")
+  if nx and nx > 0 then out[#out + 1] = nx end
+  return out
+end
+
 -- The rules that keep a quest from being offered at all, whatever it may still need. done(q): the
 -- prerequisite q counts as done.
 local function Offered(id, ctx, done)
@@ -180,12 +191,9 @@ local function Offered(id, ctx, done)
   local maxL = QGet(Q, id, "requiredMaxLevel")
   if maxL and maxL > 0 and ctx.plevel > maxL then return false end
   if EVENT_SORTS[QGet(Q, id, "zoneOrSort") or 0] then return false end
-  local excl = QGet(Q, id, "exclusiveTo")
-  if type(excl) == "table" then
-    for _, x in ipairs(excl) do if IsCompleted(x) or IsInLog(x) then return false end end
+  for _, x in ipairs(QuestBlockers(id)) do
+    if IsCompleted(x) or IsInLog(x) then return false end
   end
-  local nx = QGet(Q, id, "nextQuestInChain")
-  if nx and nx > 0 and (IsCompleted(nx) or IsInLog(nx)) then return false end
   local parent = QGet(Q, id, "parentQuest")
   if parent and parent > 0 and not IsInLog(parent) then return false end
   local asw = QGet(Q, id, "availableStartingWith")
@@ -452,3 +460,4 @@ ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan = Buil
 ns.QuestDoubts = QuestDoubts
 ns.WaitScan, ns.ScanIfNeeded = WaitScan, ScanIfNeeded
 ns.MarkScanDirty, ns.WithinReach = MarkScanDirty, WithinReach
+ns.QuestBlockers = QuestBlockers
