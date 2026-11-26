@@ -169,6 +169,10 @@ local function RenderAvailable()
   end
   if scan.dirty or not scan.entries then
     ScanIfNeeded()
+    if scan.error then -- the scan could not start
+      ShowMessage(panel, "avail", Color(K.DESC.bad, scan.error))
+      return
+    end
     if scan.running or scan.dirty then
       ShowMessage(panel, "avail", ScanText(L["Scanning the QuestieDB database…"]))
       return

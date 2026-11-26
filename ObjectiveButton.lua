@@ -41,7 +41,8 @@ function CP.ObjectiveClickUnsafe(button)
     return
   end
   local s = CP.CurrentFocus()
-  if s then Geo.ShowStep(s) else Geo.MapPanelOpen(false) end
+  -- No step, or one without a place: the steps panel instead of the map.
+  if s and not s.nopin then Geo.ShowStep(s) else Geo.MapPanelOpen(false) end
 end
 
 function CP.ObjectiveClick(button)
@@ -246,7 +247,7 @@ function CP.CompassTarget()
       return { c = cont, x = x, y = y }
     end
   end
-  if s.p and s.p.c and s.p.x then return s.p end
+  if not s.nopin and s.p and s.p.c and s.p.x then return s.p end
   return nil
 end
 
@@ -443,9 +444,9 @@ function CP.ServiceClick(kind)
   Geo.ServiceSet({ kind = kind, id = npc.id, name = npc.name, p = npc.p })
   CP.ServiceBarSync()
   CP.turningOn = true -- going to the service means following the Roadbook
-  local started = CP.Replan(string.format(L["Going to %s first. "], npc.name or "?"))
-  CP.turningOn = nil
-  if not started then
+  local ok, started = Guard(CP.Replan, string.format(L["Going to %s first. "], npc.name or "?"))
+  CP.turningOn = nil -- after an error too: no later computation starts the tracking by itself
+  if not (ok and started) then
     Geo.ServiceClear()
     CP.ServiceBarSync()
   end

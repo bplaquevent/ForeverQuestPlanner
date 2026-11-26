@@ -396,7 +396,7 @@ function Geo.MapWholeGet()
 end
 
 function Geo.MapWholeSet(v)
-  Settings().mapWhole = (not v) and false or nil -- on by default
+  if v then Settings().mapWhole = nil else Settings().mapWhole = false end -- on by default
   Geo.MapSync()
 end
 

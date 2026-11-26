@@ -58,16 +58,23 @@ local function BuildText()
   return table.concat(lines, "\n")
 end
 
+-- The text may be written again at any time (game events): the keyboard is not taken (FocusExport).
 local function RenderExport()
   local eb = panels.export.scroll.child
   local text = BuildText()
   eb.fullText = text
   eb:SetText(text)
-  eb:SetFocus()
   eb:SetCursorPosition(0)
-  eb:HighlightText()
+  if eb:HasFocus() then eb:HighlightText() end -- still ready for Ctrl+C
   UpdateScrollBar(panels.export.scroll)
 end
 
+-- The tab just opened by the player: its text selected, ready for Ctrl+C.
+local function FocusExport()
+  local eb = panels.export.scroll.child
+  eb:SetFocus()
+  eb:HighlightText()
+end
+
 -- Shared with the next files.
-ns.RenderExport = RenderExport
+ns.FocusExport, ns.RenderExport = FocusExport, RenderExport

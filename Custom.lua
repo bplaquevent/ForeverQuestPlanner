@@ -822,6 +822,7 @@ function Geo.RoadbookQuests(fz)
     local req = not it.log and not it.done and QGet(QDB.Quest, it.id, "requiredLevel")
     if type(req) == "number" and req > plevel then it.reqLevel = req end
     local en = entry[it.id]
+    it.listed = en ~= nil -- false: kept for its steps done, out of the list
     if en and en.pre then
       local by = entry[en.pre]
       it.prereqOf = (by and by.title) or ("#" .. en.pre)

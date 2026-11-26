@@ -371,7 +371,7 @@ local function RenderList(panel, tabKey, items, forceOpen)
         r:SetScript("OnEnter", nil)
         r:SetScript("OnLeave", nil)
         r.hl:Hide()
-        if ckey then
+        if ckey and not forceOpen then -- all open (search, filter): nothing to fold
           r:EnableMouse(true)
           r:SetScript("OnMouseUp", function()
             if it.open then
