@@ -171,29 +171,45 @@ local function WithinReach(id, ctx)
     and not IsCompleted(id) and QuestAllowed(id, ctx.classBit, ctx.raceBit)
 end
 
-local function CheckAvailable(id, ctx)
+-- The rules that keep a quest from being offered at all, whatever it may still need. done(q): the
+-- prerequisite q counts as done.
+local function Offered(id, ctx, done)
   local Q = QDB.Quest
-  local req = QGet(Q, id, "requiredLevel") or 0
-  local lvl = QGet(Q, id, "questLevel") or 0
-  -- Only the required level decides whether the character can pick the quest up (a high quest
-  -- level alone does not hide it).
-  -- Quests slightly too high kept for the Roadbook (unlocked by the expected level).
-  if not WithinReach(id, ctx) then return nil end
-  -- A prerequisite quest the player's race or class could never take (the quest of another race, flagged done
-  -- through the exclusive classic chain) does not count as done: what follows it cannot be taken either.
-  local function done(q) return (IsCompleted(q) or (ctx.done and ctx.done[q]) or false) and QuestAllowed(q, ctx.classBit, ctx.raceBit) end
-  -- Missing prerequisites (quests, professions): the quest is listed with what is missing.
+  if not WithinReach(id, ctx) or IsInLog(id) then return false end
+  local maxL = QGet(Q, id, "requiredMaxLevel")
+  if maxL and maxL > 0 and ctx.plevel > maxL then return false end
+  if EVENT_SORTS[QGet(Q, id, "zoneOrSort") or 0] then return false end
+  local excl = QGet(Q, id, "exclusiveTo")
+  if type(excl) == "table" then
+    for _, x in ipairs(excl) do if IsCompleted(x) or IsInLog(x) then return false end end
+  end
+  local nx = QGet(Q, id, "nextQuestInChain")
+  if nx and nx > 0 and (IsCompleted(nx) or IsInLog(nx)) then return false end
+  local parent = QGet(Q, id, "parentQuest")
+  if parent and parent > 0 and not IsInLog(parent) then return false end
+  local asw = QGet(Q, id, "availableStartingWith")
+  if asw and asw > 0 and not (IsInLog(asw) or done(asw)) then return false end
+  local auc = QGet(Q, id, "availableUntilCompleted")
+  if auc and auc > 0 and IsCompleted(auc) then return false end
+  local dis = QGet(Q, id, "disabledByQuest")
+  if dis and dis > 0 and IsInLog(dis) then return false end
+  local spell = QGet(Q, id, "requiredSpell")
+  if spell and spell ~= 0 and IsSpellKnown then
+    local known = IsSpellKnown(math.abs(spell)) and true or false
+    if (spell > 0) ~= known then return false end
+  end
+  -- A specialization that is a spell (not a profession) must be known.
+  local spec = ctx.skillsKnown and QGet(Q, id, "requiredSpecialization")
+  if spec and spec > 0 and not ns.PROFESSIONS[spec] and IsSpellKnown and not IsSpellKnown(spec) then return false end
+  return AnyNonEmpty(QGet(Q, id, "startedBy"))
+end
+
+-- What a quest offered still needs (prerequisite quests, professions, the item that starts it):
+-- { texts, quests (for each missing prerequisite, the quests any of which would do) }, or nil.
+local function MissingNeeds(id, ctx, done)
+  local Q = QDB.Quest
   local missing = { texts = {}, quests = {} }
   local function questName(q) return string.format(L["\"%s\""], QGet(Q, q, "name") or ("#" .. q)) end
-  if lvl < 0 then lvl = ctx.plevel end -- quest at the player's level
-  local lowLevel = lvl > 0 and lvl < ctx.plevel - ctx.range
-  local maxL = QGet(Q, id, "requiredMaxLevel")
-  if maxL and maxL > 0 and ctx.plevel > maxL then return nil end
-  if IsInLog(id) then return nil end
-
-  local sort = QGet(Q, id, "zoneOrSort") or 0
-  if EVENT_SORTS[sort] then return nil end
-
   local group, single = QuestPrereqs(id)
   for _, p in ipairs(group) do
     if not done(p) then
@@ -211,25 +227,6 @@ local function CheckAvailable(id, ctx)
       missing.quests[#missing.quests + 1] = single
     end
   end
-  local excl = QGet(Q, id, "exclusiveTo")
-  if type(excl) == "table" then
-    for _, x in ipairs(excl) do if IsCompleted(x) or IsInLog(x) then return nil end end
-  end
-  local nx = QGet(Q, id, "nextQuestInChain")
-  if nx and nx > 0 and (IsCompleted(nx) or IsInLog(nx)) then return nil end
-  local parent = QGet(Q, id, "parentQuest")
-  if parent and parent > 0 and not IsInLog(parent) then return nil end
-  local asw = QGet(Q, id, "availableStartingWith")
-  if asw and asw > 0 and not (IsInLog(asw) or done(asw)) then return nil end
-  local auc = QGet(Q, id, "availableUntilCompleted")
-  if auc and auc > 0 and IsCompleted(auc) then return nil end
-  local dis = QGet(Q, id, "disabledByQuest")
-  if dis and dis > 0 and IsInLog(dis) then return nil end
-  local spell = QGet(Q, id, "requiredSpell")
-  if spell and spell ~= 0 and IsSpellKnown then
-    local known = IsSpellKnown(math.abs(spell)) and true or false
-    if (spell > 0) ~= known then return nil end
-  end
   local skill = QGet(Q, id, "requiredSkill")
   if type(skill) == "table" and ctx.skillsKnown then
     local have = ctx.skills[skill[1]]
@@ -239,14 +236,10 @@ local function CheckAvailable(id, ctx)
     end
   end
   if ctx.skillsKnown then
-    -- Specialization: a profession id (the profession is required) or a specialization spell.
+    -- Specialization: a profession id: the profession is required.
     local spec = QGet(Q, id, "requiredSpecialization")
-    if spec and spec > 0 then
-      if ns.PROFESSIONS[spec] then
-        if not ctx.skills[spec] then missing.texts[#missing.texts + 1] = SkillName(spec) or L["profession"] end
-      elseif IsSpellKnown and not IsSpellKnown(spec) then
-        return nil
-      end
+    if spec and spec > 0 and ns.PROFESSIONS[spec] and not ctx.skills[spec] then
+      missing.texts[#missing.texts + 1] = SkillName(spec) or L["profession"]
     end
     -- Profession ranks: at least one of the listed professions (positive rank) must be known.
     local ranks = QGet(Q, id, "requiredRanks")
@@ -270,9 +263,6 @@ local function CheckAvailable(id, ctx)
     end
   end
 
-  local starters = QGet(Q, id, "startedBy")
-  if not AnyNonEmpty(starters) then return nil end
-
   -- The item that starts the quest (also given by an NPC in the data) is needed: listed with it missing.
   local startItems = StartedByItem(id)
   if startItems then
@@ -285,8 +275,26 @@ local function CheckAvailable(id, ctx)
     end
   end
 
+  return #missing.texts > 0 and missing or nil
+end
+
+local function CheckAvailable(id, ctx)
+  local Q = QDB.Quest
+  -- A prerequisite quest the player's race or class could never take (the quest of another race, flagged done
+  -- through the exclusive classic chain) does not count as done: what follows it cannot be taken either.
+  local function done(q) return (IsCompleted(q) or (ctx.done and ctx.done[q]) or false) and QuestAllowed(q, ctx.classBit, ctx.raceBit) end
+  if not Offered(id, ctx, done) then return nil end
   local name = QGet(Q, id, "name")
   if not name then return nil end
+  -- Only the required level decides whether the character can pick the quest up (a high quest
+  -- level alone does not hide it). Quests slightly too high are kept for the Roadbook (unlocked by
+  -- the expected level).
+  local req = QGet(Q, id, "requiredLevel") or 0
+  local lvl = QGet(Q, id, "questLevel") or 0
+  if lvl < 0 then lvl = ctx.plevel end -- quest at the player's level
+  local lowLevel = lvl > 0 and lvl < ctx.plevel - ctx.range
+  local sort = QGet(Q, id, "zoneOrSort") or 0
+  local starters = QGet(Q, id, "startedBy")
 
   local m = QuestMeta(id)
   local _, _, instance = IdKind(id)
@@ -306,7 +314,7 @@ local function CheckAvailable(id, ctx)
     isProf = m and IsProfMeta(m) or false,
     opensChain = m and #NextQuests(m) > 0 or false,
     repMissing = MissingReputation(QGet(Q, id, "requiredMinRep")),
-    missing = #missing.texts > 0 and missing or nil,
+    missing = MissingNeeds(id, ctx, done),
     doubts = QuestDoubts(id, ctx.faction),
     repeatable = HasBit(QGet(Q, id, "specialFlags") or 0, 1),
     lowLevel = lowLevel,
