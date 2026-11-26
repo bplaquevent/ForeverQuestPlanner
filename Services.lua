@@ -288,7 +288,7 @@ function Geo.FlightMasters()
   if Geo.fmNodes then return Geo.fmNodes end
   Geo.ScanServices()
   local out = {}
-  for id in pairs(OM.flights.nodes) do
+  for id in pairs(OM.FlightNodes()) do
     if Geo.NodeUsable(id) then
       local np = Geo.NodePoint(id)
       local npc, nd

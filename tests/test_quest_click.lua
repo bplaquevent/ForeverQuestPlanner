@@ -10,9 +10,12 @@ local env, ns = H.session(nil, { ["Geo.lua"] = function(ns)
   ns.Print = function(m) note("print", m) end
   ns.PointText = function() return "there" end
 end })
-ns.OM.api = { IsStitched = function() return game.stitched end, ShowWorld = function(u, v, z) note("center", u, v, z) end,
-  GetView = function() return 0, 0, 2 end }
-ns.OM.worldmap = { TrackPoint = function() note("pin") end, ClearPin = function() end, WaypointPoint = function() end }
+ns.OM.IsStitched = function() return game.stitched end
+ns.OM.ShowWorld = function(u, v, z) note("center", u, v, z) end
+ns.OM.GetView = function() return 0, 0, 2 end
+ns.OM.TrackPoint = function() note("pin") end
+ns.OM.ClearPin = function() end
+ns.OM.WaypointPoint = function() end
 local Geo = ns.Geo
 local shown = false
 local frame = { IsShown = function() return shown end, SetMapID = function(_, ui) note("mapid", ui) end, GetMapID = function() return 1 end }

@@ -277,46 +277,9 @@ local function InitQuestieDB()
   QDB.raceMasks = lib.Enum.raceMaskById
 end
 
--- OpenMap: its Forever data (flight network, boats, dungeon entrances, zone levels) and its
--- world map module (learned flight paths, level colours). These tables are OpenMap's own, not
--- its documented API: their shape is checked here so a change is reported instead of failing later.
--- Returns nil or an error message.
-local OM = {}
-local function InitOpenMap()
-  local om = rawget(_G, "OpenMap")
-  if type(om) ~= "table" then return L["OpenMap is not loaded."] end
-  local fl, pl, lv = om.MapFlights, om.MapPlaces, om.MapLevels
-  local okM, wm = pcall(function() return om:GetModule("worldmap") end)
-  local function bad(what) return L["OpenMap version not supported (data changed: "] .. what .. ")." end
-  if not (type(fl) == "table" and type(fl.nodes) == "table" and type(fl.paths) == "table") then return bad("MapFlights") end
-  local _, n = next(fl.nodes)
-  if not (type(n) == "table" and type(n[2]) == "number" and type(n[3]) == "number" and type(n[5]) == "number") then return bad("MapFlights.nodes") end
-  local e = fl.paths[1]
-  if not (type(e) == "table" and type(e[1]) == "number" and type(e[2]) == "number" and type(e[3]) == "number") then return bad("MapFlights.paths") end
-  if not (type(pl) == "table" and type(pl.transports) == "table" and type(pl.instances) == "table") then return bad("MapPlaces") end
-  local t = pl.transports[1]
-  if not (type(t) == "table" and type(t[1]) == "string" and type(t[2]) == "string" and type(t[4]) == "number") then return bad("MapPlaces.transports") end
-  local i = pl.instances[1]
-  if not (type(i) == "table" and type(i[4]) == "table" and type(i[4][1]) == "table") then return bad("MapPlaces.instances") end
-  if type(lv) ~= "table" then return bad("MapLevels") end
-  if not (okM and type(wm) == "table" and type(wm.LevelColor) == "function") then return bad("worldmap") end
-  -- Map pins and drawing (RoadbookMap.lua): its waypoint and the switch hiding the player's pins
-  -- (worldmap module), its stitched map's pin sets and lines (MapStitch), its public API (OpenMapAPI).
-  for _, name in ipairs({ "TrackPoint", "ClearPin", "WaypointPoint", "RefreshWaypoint", "PinsHidden", "SetPinsHidden" }) do
-    if type(wm[name]) ~= "function" then return bad("worldmap." .. name) end
-  end
-  local S, api = om.MapStitch, rawget(_G, "OpenMapAPI")
-  if type(S) ~= "table" then return bad("MapStitch") end
-  for _, name in ipairs({ "PinSet", "AddPin", "AddLine", "AddPath", "ClearPinSet", "FromYards", "IsBuilt" }) do
-    if type(S[name]) ~= "function" then return bad("MapStitch." .. name) end
-  end
-  if not (type(api) == "table" and api.major == 1 and (api.version or 0) >= 2) then return bad("OpenMapAPI") end
-  OM.flights, OM.places, OM.levels, OM.worldmap, OM.stitch, OM.api = fl, pl, lv, wm, S, api
-end
-
 -- Both dependencies; nil when ready, otherwise the error message.
 local function InitDeps()
-  return InitQuestieDB() or InitOpenMap()
+  return InitQuestieDB() or ns.OM.Init() -- OpenMapLink.lua, loaded next
 end
 
 local function AreaName(areaId)
@@ -1100,7 +1063,7 @@ ns.HasBit, ns.InitDeps, ns.IsClassMeta, ns.IsCompleted, ns.IsInLog, ns.IsProfMet
 ns.K, ns.L, ns.MoneyText, ns.NextQuests, ns.PlayerBits = K, L, MoneyText, NextQuests, PlayerBits
 ns.PlayerSkills, ns.Print, ns.QDB, ns.QGet, ns.QuestMeta, ns.RemainingObjectives = PlayerSkills, Print, QDB, QGet, QuestMeta, RemainingObjectives
 ns.ScheduleSnapshot, ns.Settings, ns.Snapshot, ns.State, ns.TrivialRange = ScheduleSnapshot, Settings, Snapshot, State, TrivialRange
-ns.OM, ns.LearnedData, ns.TurnInText = OM, LearnedData, TurnInText
+ns.LearnedData, ns.TurnInText = LearnedData, TurnInText
 ns.LearnedChar = LearnedChar
 ns.CheckDataVersion, ns.EraseData = CheckDataVersion, EraseData
 ns.CoinText = CoinText

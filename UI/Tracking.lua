@@ -84,7 +84,7 @@ end
 -- Pin placed by the addon (OpenMap's waypoint), remembered per character.
 -- The waypoint OpenMap follows now sits on this map point.
 function Geo.WaypointAt(ui, x, y)
-  local m, wx, wy = ns.OM.worldmap.WaypointPoint()
+  local m, wx, wy = ns.OM.WaypointPoint()
   return m == ui and wx and math.abs(wx - x) < 1e-3 and math.abs(wy - y) < 1e-3 or false
 end
 
@@ -108,7 +108,7 @@ end
 
 -- Clears the addon pin (OpenMap's waypoint, when it is still ours).
 local function ClearPin()
-  if ActivePin() then Guard(ns.OM.worldmap.ClearPin) end
+  if ActivePin() then Guard(ns.OM.ClearPin) end
   Settings().pin = nil
 end
 
@@ -150,7 +150,7 @@ local function PinPoint(p, title, label, questId)
   -- Recorded first: the waypoint event fired during TrackPoint reads this record (Geo.MapOnWaypoint).
   Settings().pin = { questId = questId, title = title, label = label, ui = ui, x = x, y = y,
     place = PointText(p), area = p.area, mx = p.mx, my = p.my }
-  local done = pcall(ns.OM.worldmap.TrackPoint, ui, x, y, title and label and (title .. " - " .. label) or title)
+  local done = Guard(ns.OM.TrackPoint, ui, x, y, title and label and (title .. " - " .. label) or title)
   if done then
     Print(L["Pin: "] .. (title or "?") .. (label and (" - " .. label) or "") .. " - " .. PointText(p))
     C_Timer.After(0.1, Refresh)

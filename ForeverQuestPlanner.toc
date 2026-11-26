@@ -16,6 +16,7 @@ Data\Supplements.lua
 Data\GameData.lua
 Solver.lua
 Core.lua
+OpenMapLink.lua
 QuestTags.lua
 Available.lua
 Geo.lua

@@ -1,7 +1,7 @@
 -- Errors of the addon's calls: the caller goes on, the error is told in the chat once (ns.Guard).
 local H = dofile("tests/harness.lua")
 local check, finish = H.checker()
-local env, ns, log = H.login()
+local env, ns, log = H.session() -- no login: its faked dependencies would fail and be told too
 local function lines(word)
   local n = 0
   for _, m in ipairs(log.chat) do if m:find(word, 1, true) then n = n + 1 end end
