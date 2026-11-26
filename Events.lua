@@ -27,8 +27,6 @@ f:RegisterEvent("QUEST_DATA_LOAD_RESULT") -- quest tags (QuestTags.lua)
 -- Service shortcuts (vendor, repair, class trainer): the Roadbook step is done when the NPC window opens.
 pcall(f.RegisterEvent, f, "MERCHANT_SHOW")
 pcall(f.RegisterEvent, f, "TRAINER_SHOW")
-pcall(f.RegisterEvent, f, "PLAYER_TARGET_CHANGED")
-pcall(f.RegisterEvent, f, "UPDATE_MOUSEOVER_UNIT")
 pcall(f.RegisterEvent, f, "BANKFRAME_OPENED")
 pcall(f.RegisterEvent, f, "MAIL_SHOW")
 pcall(f.RegisterEvent, f, "USER_WAYPOINT_UPDATED")
@@ -74,7 +72,7 @@ On({ "PLAYER_LOGIN" }, function()
     Print(Color("ff8000", L["This version cannot use the characters' saved data (settings, quest lists, Roadbooks): it has been erased, for every character."]))
   end
   if lostLearned then
-    Print(Color("ff8000", L["This version cannot use what the addon learned in game (zone passes, teleport arrivals, class trainers, hearthstone places, mount speeds): it has been erased."]))
+    Print(Color("ff8000", L["This version cannot use what the addon learned in game (zone passes, teleport arrivals, hearthstone places, mount speeds): it has been erased."]))
   end
   -- Options saved from the settings window or the tabs.
   local st = Settings()
@@ -191,12 +189,7 @@ On({ "USER_WAYPOINT_UPDATED" }, function()
   if WindowShown() then C_Timer.After(0.1, Refresh) end
 end)
 
-On({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }, function(event)
-  Guard(Geo.TrainerSeen, event == "PLAYER_TARGET_CHANGED" and "target" or "mouseover")
-end)
-
 On({ "TAXIMAP_OPENED", "MERCHANT_SHOW", "TRAINER_SHOW", "BANKFRAME_OPENED", "MAIL_SHOW" }, function(event, ...)
-  if event == "TRAINER_SHOW" then Guard(Geo.TrainerOpened) end
   Guard(CP.OnGameEvent, event, ...)
 end)
 
@@ -244,8 +237,8 @@ local function ResetPopup(text, learned)
     preferredIndex = 3,
   }
 end
-StaticPopupDialogs["FQP_RESET"] = ResetPopup(L["Erase the characters' saved data?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, and the captures. What the addon learned in game (zone passes, teleport arrivals, class trainers, hearthstone places, mount speeds) is kept. This cannot be undone. The interface is then reloaded."], false)
-StaticPopupDialogs["FQP_RESET_ALL"] = ResetPopup(L["Erase ALL the data saved by Forever Quest Planner?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, and the captures. What the addon learned in game (zone passes, teleport arrivals, class trainers, hearthstone places, mount speeds) is erased TOO. This cannot be undone. The interface is then reloaded."], true)
+StaticPopupDialogs["FQP_RESET"] = ResetPopup(L["Erase the characters' saved data?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, and the captures. What the addon learned in game (zone passes, teleport arrivals, hearthstone places, mount speeds) is kept. This cannot be undone. The interface is then reloaded."], false)
+StaticPopupDialogs["FQP_RESET_ALL"] = ResetPopup(L["Erase ALL the data saved by Forever Quest Planner?\n\nFor EVERY character: settings and window positions, quest lists and Roadbooks, and the captures. What the addon learned in game (zone passes, teleport arrivals, hearthstone places, mount speeds) is erased TOO. This cannot be undone. The interface is then reloaded."], true)
 
 SLASH_FOREVERQUESTPLANNER1 = "/fqp"
 SlashCmdList.FOREVERQUESTPLANNER = function(msg)

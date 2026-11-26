@@ -118,8 +118,7 @@ check("starting item looted: seen", ns.StartItemsChanged and ns.StartItemsChange
 -- services: nothing kept from a reading that failed
 local broken = true
 data.npc[30] = { npcFlags = ns.K.NPC_FLAG_VENDOR, name = "V", spawns = spawns(1, 50) }
-Geo.LearnedTrainers = function() if broken then error("read failed") end return {} end
-env.UnitClass = function() return "Chaman", "SHAMAN" end
+env.UnitClass = function() if broken then error("read failed") end return "Chaman", "SHAMAN" end
 check("services: the failure goes up", not pcall(Geo.ServiceNpcs))
 broken = false
 local svc = Geo.ServiceNpcs()
