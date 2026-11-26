@@ -10,7 +10,7 @@ local UnitTime, WorldPos, scan, LogQuests, AllIds, SkillName = ns.UnitTime, ns.W
 local LogEntry, Normalize, GeoReady = ns.LogEntry, ns.Normalize, ns.GeoReady
 local IdKind, LogKind, RequestQuestTags, QuestTagsSettled = ns.IdKind, ns.LogKind, ns.RequestQuestTags, ns.QuestTagsSettled
 local WithinReach, SetKinds = ns.WithinReach, ns.SetKinds
-local Guard = ns.Guard
+local Guard, Told = ns.Guard, ns.Told
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -20,11 +20,26 @@ local Guard = ns.Guard
 ---------------------------------------------------------------------------
 K.SKILL_TEXT_GAP = 30 -- characters: a number this close to a profession name is its level
 
+local WORD_BYTE = "[%a\128-\255]" -- a letter, accented ones included (bytes of UTF-8)
+-- Non-breaking spaces and typographic quotes, apostrophes and dashes: not letters.
+local UTF8_PUNCT = { "\194\160", "\194\171", "\194\187", "\226\128[\128-\191]" }
+
+-- First place where name stands as a word of its own in text ("mining" is not in "examining").
+local function FindWord(text, name)
+  local a, b = text:find(name, 1, true)
+  while a do
+    if not (text:sub(a - 1, a - 1):find(WORD_BYTE) or text:sub(b + 1, b + 1):find(WORD_BYTE)) then return a, b end
+    a, b = text:find(name, a + 1, true)
+  end
+  return nil
+end
+
 function Geo.SkillFromText(text)
   text = text:lower()
+  for _, punct in ipairs(UTF8_PUNCT) do text = text:gsub(punct, " ") end
   for skill, p in pairs(ns.PROFESSIONS) do
     for _, name in ipairs(p.en and { p.en, p.name:lower() } or {}) do
-      local a, b = text:find(name, 1, true)
+      local a, b = FindWord(text, name)
       if a then
         local around = text:sub(math.max(1, a - K.SKILL_TEXT_GAP), b + K.SKILL_TEXT_GAP)
         for n in around:gmatch("(%d+)") do
@@ -153,11 +168,41 @@ State.xpGoal = { kind = "time", value = 7200 }
 K.MAX_TAKE_CANDIDATES = 1500      -- safety: quests to pick up considered by the Roadbook, at most
 K.MAX_FOLLOW_DEPTH = 12  -- safety: maximum length of an evaluated quest chain
 K.SLICE_MS = 15          -- maximum computation time per frame (the computation is spread over several frames)
+-- Is the running code part of the spread computation: its coroutine, or the one of a protected call
+-- made by it (State.relayed, Geo.GuardInSteps)?
+local function InComputation()
+  local running = coroutine.running()
+  return running ~= nil and (running == State.co or running == State.relayed)
+end
+
 -- Spread computation: yields back to the game when the time slice is used up.
 function Geo.Yield()
-  if State.co and debugprofilestop and coroutine.running() == State.co then
+  if debugprofilestop and InComputation() then
     if debugprofilestop() - (State.sliceStart or 0) > K.SLICE_MS then coroutine.yield() end
   end
+end
+
+-- ns.Guard for a call that may pause the computation (Geo.Yield, Geo.AwaitTags): Lua 5.1 cannot yield
+-- across pcall, so fn runs in a coroutine of its own (coroutine.resume is protected too), whose
+-- pauses are passed on to the caller's. Returns as ns.Guard.
+function Geo.GuardInSteps(fn, ...)
+  local co = coroutine.create(fn)
+  local computing = InComputation()
+  local follow
+  local function resume(...)
+    local previous = State.relayed
+    if computing then State.relayed = co end
+    local function back(...)
+      State.relayed = previous
+      return follow(...)
+    end
+    return back(coroutine.resume(co, ...))
+  end
+  function follow(ok, ...)
+    if not ok or coroutine.status(co) == "dead" then return Told(ok, ...) end
+    return resume(coroutine.yield(...))
+  end
+  return resume(...)
 end
 
 -- Runs a computation (coroutine calling Geo.Yield) over several frames: it replaces the running one.
@@ -356,10 +401,13 @@ local function MakeStops(task, pos, plevel)
     while #todo > 0 do
       local bi, bp, bd, bspot
       local onlyExplore, sourceLeft = false, false
-      if escortFirst then
-        for _, r in ipairs(todo) do if r.tg.kind == "explore" then onlyExplore = true end end
-      end
       for _, r in ipairs(todo) do if r.tg.sourceItem then sourceLeft = true end end
+      if escortFirst then
+        -- An escort waiting for the source item comes once the item is obtained.
+        for _, r in ipairs(todo) do
+          if r.tg.kind == "explore" and not (sourceLeft and r.tg.needsSource) then onlyExplore = true end
+        end
+      end
       for i, r in ipairs(todo) do
         if not (onlyExplore and r.tg.kind ~= "explore") and not (sourceLeft and r.tg.needsSource) then
           local spot = Geo.BestSpot(r, from, speed)
@@ -595,7 +643,7 @@ function Geo.QuestTypes(id)
   if not next(has) then
     -- No objective known by QuestieDB (frequent for Forever quests): words of the English text.
     local text = ""
-    local ok, t = pcall(QDB.Quest.GetRaw, id, "objectivesText")
+    local ok, t = Guard(QDB.Quest.GetRaw, id, "objectivesText")
     if ok and type(t) == "table" then text = table.concat(t, " "):lower() end
     for kind, words in pairs(K.QUEST_TYPE_WORDS) do
       for _, w in ipairs(words) do

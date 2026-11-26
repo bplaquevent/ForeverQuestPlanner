@@ -102,7 +102,14 @@ On({ "PLAYER_LOGOUT" }, function() Snapshot() end)
 On({ "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "SPELLS_CHANGED" }, function(event)
   Geo.ForgetTeleportDests()
   Guard(CP.ScheduleRecallCheck, 3)
-  if event == "BAG_UPDATE_DELAYED" then Guard(CP.OnGameEvent, event) end -- source item looted
+  if event == "BAG_UPDATE_DELAYED" then
+    Guard(CP.OnGameEvent, event) -- source item looted
+    local ok, changed = Guard(ns.StartItemsChanged) -- item starting a quest looted or lost
+    if ok and changed then
+      MarkScanDirty()
+      if WindowShown() then C_Timer.After(0.5, Refresh) end
+    end
+  end
 end)
 
 On({ "HEARTHSTONE_BOUND" }, function(event)
