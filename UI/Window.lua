@@ -81,7 +81,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
   for _, c in ipairs(Geo.RoadbookCategories(shown)) do
     local label
     if c.kind == "zone" then label = Geo.WithLevel(c.name, c.name)
-    elseif K.KIND_TITLE[c.kind] then label = Geo.WithLevel(K.KIND_TITLE[c.kind] .. c.name, c.name)
+    elseif K.KIND_LABEL[c.kind] then label = Geo.WithLevel(ns.KindTitle({ c.kind }, c.name), c.name)
     else label = LABEL[c.kind] end
     -- "Remove all" on a category (not the turned in ones: nothing left to remove).
     local b3

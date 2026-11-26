@@ -347,7 +347,10 @@ end
 -- The scan's results are shown once the game's tags of their quests are loaded.
 local function Publish(results)
   local function finish()
-    for _, en in ipairs(results) do en.kind = IdKind(en.id) end
+    for _, en in ipairs(results) do
+      local kind, _, _, tagged = IdKind(en.id)
+      en.kind, en.tagged = kind, tagged
+    end
     scan.entries = results
     scan.running, scan.dirty = false, scan.changed
     Refresh()

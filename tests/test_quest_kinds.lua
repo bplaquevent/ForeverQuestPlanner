@@ -208,29 +208,37 @@ local function groups(entries, filter)
   ns.scan.entries = entries
   local g = Geo.AvailableGroups(filter, nil, true)
   local out = {}
-  for _, x in ipairs(g) do out[#out + 1] = x.name .. "=" .. x.kind .. ":" .. #x.list end
+  for _, x in ipairs(g) do out[#out + 1] = x.name .. "=" .. x.kind .. "[" .. table.concat(x.kinds or {}, "+") .. "]:" .. #x.list end
   return table.concat(out, " ")
 end
 env.GetZoneText = function() return "" end
 local list = {
-  { id = 1, name = "a", level = 1, instance = "La Mine", kind = "dungeon" },
-  { id = 2, name = "b", level = 1, instance = "Coeur", kind = "raid" },
-  { id = 3, name = "c", level = 1, instance = "Bassin", kind = "pvp" },
+  { id = 1, name = "a", level = 1, instance = "La Mine", kind = "dungeon", tagged = true },
+  { id = 2, name = "b", level = 1, instance = "Coeur", kind = "raid", tagged = true },
+  { id = 3, name = "c", level = 1, instance = "Bassin", kind = "pvp", tagged = true },
   { id = 4, name = "d", level = 1, instance = "Bassin", kind = "dungeon" }, -- battleground quest without tag
-  { id = 5, name = "e", level = 1, area = "Foret", kind = "pvp" },
+  { id = 5, name = "e", level = 1, area = "Foret", kind = "pvp", tagged = true },
   { id = 6, name = "f", level = 1, area = "Foret" },
-  { id = 7, name = "g", level = 1, area = "Sombrelances", kind = "pvp" },
+  { id = 7, name = "g", level = 1, area = "Sombrelances", kind = "pvp", tagged = true },
 }
 local all = groups(list, "all")
-check("all: " .. all, all == "Coeur=raid:1 La Mine=dungeon:1 Foret=zone:2 Bassin=pvp:2 Sombrelances=pvp:1")
+check("all: " .. all, all == "Coeur=raid[raid]:1 La Mine=dungeon[dungeon]:1 Foret=zone[]:2 Bassin=pvp[pvp]:2 Sombrelances=pvp[pvp]:1")
 local d = groups(list, "dungeon")
-check("dungeon filter includes raids, not PvP: " .. d, d == "Bassin=dungeon:1 Coeur=raid:1 La Mine=dungeon:1")
+check("dungeon filter includes raids, not PvP: " .. d, d == "Bassin=dungeon[dungeon]:1 Coeur=raid[raid]:1 La Mine=dungeon[dungeon]:1")
 local p = groups(list, "pvp")
-check("PvP filter: " .. p, p == "Bassin=pvp:1 Foret=pvp:1 Sombrelances=pvp:1")
+check("PvP filter: " .. p, p == "Bassin=pvp[pvp]:1 Foret=pvp[pvp]:1 Sombrelances=pvp[pvp]:1")
+local mixed = groups({
+  { id = 1, name = "a", level = 1, instance = "Lieu", kind = "pvp", tagged = true },
+  { id = 2, name = "b", level = 1, instance = "Lieu", kind = "raid", tagged = true },
+  { id = 3, name = "c", level = 1, instance = "Lieu", kind = "dungeon" }, -- no tag: deduced from the instance
+  { id = 4, name = "d", level = 1, area = "Plaine", kind = "pvp", tagged = true },
+  { id = 5, name = "e", level = 1, area = "Plaine", kind = "dungeon", tagged = true },
+}, "all")
+check("mixed groups name every kind, the first one places them: " .. mixed, mixed == "Lieu=raid[raid+pvp]:3 Plaine=pvp[pvp+dungeon]:2")
 
 -- 10. labels
 check("category of a kind", select(1, ns.QuestCategory("raid", "X", 1, 30)) == "raid" and select(2, ns.QuestCategory("pvp", nil, 1, 30)) == "JcJ")
-check("titles", K.KIND_TITLE.dungeon == "Donjon : " and K.KIND_TITLE.raid == "Raid : " and K.KIND_TITLE.pvp == "JcJ : ")
+check("titles", ns.KindTitle({ "dungeon" }, "X") == "Donjon : X" and ns.KindTitle({ "raid", "pvp" }, "X") == "Raid, JcJ : X")
 check("notes", K.KIND_NOTE.dungeon == "donjon : " and K.KIND_NOTE.raid == "raid : " and K.KIND_NOTE.pvp == "JcJ : ")
 Geo.IsFollowUp = function() return false end
 Geo.IsEliteQuest = function() return false end
@@ -267,9 +275,11 @@ local function visitTitle(...)
   return v[1] and v[1].task.title
 end
 check("visit PvP: " .. tostring(visitTitle(1)), visitTitle(1) == "JcJ : Lieu")
-check("visit raid wins", visitTitle(1, 2, 3) == "Raid : Lieu")
+check("visit: every kind, in order: " .. tostring(visitTitle(1, 2, 3)), visitTitle(1, 3, 2) == "Raid, JcJ, Donjon : Lieu")
 check("visit dungeon", visitTitle(3, 4) == "Donjon : Lieu" and visitTitle(4) == "Donjon : Lieu")
-check("visit PvP before dungeon", visitTitle(3, 1) == "JcJ : Lieu")
+check("visit PvP and tagged dungeon: both", visitTitle(3, 1) == "JcJ, Donjon : Lieu")
+check("visit: a dungeon only deduced from the instance is not added to a tagged kind", visitTitle(5, 1) == "JcJ : Lieu")
+check("visit: deduced dungeon alone", visitTitle(5) == "Donjon : Lieu")
 
 -- 12. follow-ups: gathered, then awaited inside a computation
 Geo.pre = { [10] = { 11, 12 }, [11] = { 13 }, [13] = { 10 }, [20] = { 21 } }

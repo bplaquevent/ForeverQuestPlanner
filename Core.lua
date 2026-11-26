@@ -102,9 +102,10 @@ local State = {} -- mutable state shared by the addon files (window, tabs, Roadb
 local K = {} -- tuning constants (avoids the 200 local variables limit)
 -- Transport mode names (internal ids -> displayed text).
 K.MODE_NAME = { flight = L["flight"], zeppelin = L["zeppelin"], boat = L["boat"], airship = L["airship"] }
--- Kinds of quests done in a group (QuestKind): their name, as a category title and as a note.
+-- Kinds of quests done in a group (QuestKind): the order they are listed in (the first one also colours
+-- and places a set mixing several), their name, and the note on one quest.
+K.KIND_ORDER = { "raid", "pvp", "dungeon" }
 K.KIND_LABEL = { dungeon = L["Dungeon"], raid = L["Raid"], pvp = L["PvP"] }
-K.KIND_TITLE = { dungeon = L["Dungeon: "], raid = L["Raid: "], pvp = L["PvP: "] }
 K.KIND_NOTE = { dungeon = L["dungeon: "], raid = L["raid: "], pvp = L["PvP: "] }
 K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above (or below) yours (+1 for quests already in the log)
 K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your level

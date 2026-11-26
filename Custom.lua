@@ -8,7 +8,7 @@ local RemainingTargets, Settings, QuestPrereqs, Color = ns.RemainingTargets, ns.
 local PlayerFaction, QuestDoubts, State, PlayerBits, QuestAllowed = ns.PlayerFaction, ns.QuestDoubts, ns.State, ns.PlayerBits, ns.QuestAllowed
 local Analyze, IsClassMeta, IsProfMeta, LogById, LogQuests = ns.Analyze, ns.IsClassMeta, ns.IsProfMeta, ns.LogById, ns.LogQuests
 local QuestCategory, QuestMeta = ns.QuestCategory, ns.QuestMeta
-local QuestKind = ns.QuestKind
+local KindTitle, QuestKind, SetKinds = ns.KindTitle, ns.QuestKind, ns.SetKinds
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.DUNGEON_WAVE_DEPTH = 20 -- safety: dungeon visits following one another
@@ -436,14 +436,17 @@ function Geo.FlightMasterStep(fm)
     task = { title = L["Activate the flight path of "] .. (AreaName(fm.p.area) or fm.name), npc = fm.name, xp = 0, fm = true } }
 end
 
--- Kind of an instance visit, from its quests (steps): raid before PvP; a dungeon otherwise.
-local function VisitKind(steps)
-  local found = {}
-  for _, s in ipairs(steps) do
-    local kind = s.task and s.task.id and QuestKind(s.task.id)
-    if kind then found[kind] = true end
+-- Kinds an instance visit shows, from its quests (steps); a dungeon when none has one.
+local function VisitKinds(steps)
+  local quests = {}
+  for _, st in ipairs(steps) do
+    if st.task and st.task.id then
+      local kind, _, tagged = QuestKind(st.task.id)
+      quests[#quests + 1] = { kind = kind, tagged = tagged }
+    end
   end
-  return (found.raid and "raid") or (found.pvp and "pvp") or "dungeon"
+  local kinds = SetKinds(quests)
+  return #kinds > 0 and kinds or { "dungeon" }
 end
 
 -- Dungeon steps: every step of the list inside the same dungeon is done during one visit (a step at
@@ -499,7 +502,7 @@ function Geo.GroupDungeons(tasks)
     task.order = order
   end
   for _, D in ipairs(dungeons) do
-    D.task.title = K.KIND_TITLE[VisitKind(D.task.members)] .. D.task.dungeon
+    D.task.title = KindTitle(VisitKinds(D.task.members), D.task.dungeon)
   end
   return dungeons
 end

@@ -99,26 +99,56 @@ end
 
 -- What a quest is, when it is done in a group: kind ("pvp", "raid", "dungeon", or nil) and the name of
 -- its place. The game's tag first; without it, an instance signalled by the game or QuestieDB is a
--- dungeon.
+-- dungeon. tagged: the kind is the game's tag, not deduced from the instance.
 local function LogKind(q) -- captured quest
   local instance = q.instanceName or (q.zone and DungeonNames()[q.zone] and q.zone) or nil
   local kind = q.gameKind or ((instance or q.isInstance) and "dungeon") or nil
-  return kind, kind and (instance or q.zone or q.mapZone) or nil
+  return kind, kind and (instance or q.zone or q.mapZone) or nil, q.gameKind ~= nil
 end
 
 local function IdKind(id) -- quest out of the log: its tag once loaded (QuestTags.lua), QuestieDB
   local sort = QGet(QDB.Quest, id, "zoneOrSort") or 0
   local d = sort > 0 and QDB.dungeonOf[sort] or nil
   local instance = d and AreaName(d) or nil
-  local kind = TagKind(GameTag(id)) or (instance and "dungeon") or nil
-  return kind, kind and (instance or (sort > 0 and AreaName(sort))) or nil, instance
+  local tagKind = TagKind(GameTag(id))
+  local kind = tagKind or (instance and "dungeon") or nil
+  return kind, kind and (instance or (sort > 0 and AreaName(sort))) or nil, instance, tagKind ~= nil
 end
 
 local function QuestKind(id)
   local q = LogEntry(id)
   if q then return LogKind(q) end
-  local kind, place = IdKind(id)
-  return kind, place
+  local kind, place, _, tagged = IdKind(id)
+  return kind, place, tagged
+end
+
+-- The kinds a set of quests shows (an instance visit, a group of available quests): all of them, in
+-- K.KIND_ORDER. quests: { kind, tagged } each. A dungeon only deduced from an instance counts when no
+-- quest of the set is tagged: a battleground quest without tag does not make the set a dungeon's.
+local function SetKinds(quests)
+  local tagged, any = {}, {}
+  for _, q in ipairs(quests) do
+    if q.kind then
+      any[q.kind] = true
+      if q.tagged then tagged[q.kind] = true end
+    end
+  end
+  local found, out = next(tagged) and tagged or any, {}
+  for _, kind in ipairs(K.KIND_ORDER) do
+    if found[kind] then out[#out + 1] = kind end
+  end
+  return out
+end
+
+-- The names of kinds ("Raid, PvP"), and a title: the names, then the place.
+local function KindNames(kinds)
+  local names = {}
+  for i, kind in ipairs(kinds) do names[i] = K.KIND_LABEL[kind] end
+  return table.concat(names, ", ")
+end
+
+local function KindTitle(kinds, place)
+  return string.format(L["%s: %s"], KindNames(kinds), place)
 end
 
 K.LATER_GAP = 3 -- a quest more than this many levels above yours is for later (professions apart)
@@ -231,3 +261,4 @@ end
 -- Shared with the next files.
 ns.Analyze, ns.GetItemInfoCompat, ns.IdKind, ns.LogKind = Analyze, GetItemInfoCompat, IdKind, LogKind
 ns.QuestCategory, ns.QuestKind, ns.RemainingObjectives = QuestCategory, QuestKind, RemainingObjectives
+ns.KindNames, ns.KindTitle, ns.SetKinds = KindNames, KindTitle, SetKinds
