@@ -972,8 +972,9 @@ local function QuestCategory(kind, place, level, plevel, isProf, isClass)
   return "zone", nil
 end
 
+-- Analysis of the last quest log capture, without capturing: the caller captures first (Snapshot)
+-- when it needs the log as it is now.
 local function Analyze()
-  Snapshot()
   local e = LogRecord()
   local result = { abandon = {}, turnIn = {}, groups = {}, later = {}, instances = {} }
   State.abandonIds = {} -- for the icon in front of the titles (Geo.ToAbandon)

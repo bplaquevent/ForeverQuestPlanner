@@ -634,10 +634,13 @@ function Geo.LogTag(id)
 end
 
 -- Quests of the log recommended for abandoning (ids), from the last Analyze(); computed again after
--- a quest event (Events.lua clears State.abandonIds).
+-- a quest event (Events.lua clears State.abandonIds), on a fresh capture of the log.
 function Geo.ToAbandon(questId)
   if not State.abandonIds then
-    pcall(ns.Analyze)
+    pcall(function()
+      ns.Snapshot()
+      ns.Analyze()
+    end)
     State.abandonIds = State.abandonIds or {} -- no new try on each line after an error
   end
   return State.abandonIds[questId] or false

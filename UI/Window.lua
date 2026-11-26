@@ -6,6 +6,7 @@ local PlayerPos = ns.PlayerPos
 local Analyze, CP, Color, CreateScrollPanel, CreateSearchBox = ns.Analyze, ns.CP, ns.Color, ns.CreateScrollPanel, ns.CreateSearchBox
 local Geo, GeoReady, ICON, K, L, MatchWords, Normalize = ns.Geo, ns.GeoReady, ns.ICON, ns.K, ns.L, ns.MatchWords, ns.Normalize
 local PinIcon, Plural, Print, RemainingObjectives = ns.PinIcon, ns.Plural, ns.Print, ns.RemainingObjectives
+local Snapshot = ns.Snapshot
 local RenderAvailable, RenderExport, RenderList, RenderNear = ns.RenderAvailable, ns.RenderExport, ns.RenderList, ns.RenderNear
 local RenderTodo, Settings, ShowMessage, State, StateIcons = ns.RenderTodo, ns.Settings, ns.ShowMessage, ns.State, ns.StateIcons
 local expandedCategories, panels, tabButtons = ns.expandedCategories, ns.panels, ns.tabButtons
@@ -103,6 +104,7 @@ local function RenderXP()
     return
   end
   if Geo.RenderBusy(panel) then pcall(CP.RefreshButton) return end
+  Snapshot() -- the quests of the list as the log has them now
   local query = State.xpQuery
   local searching = #query > 0
 
@@ -359,8 +361,8 @@ RefreshUnsafe = function()
     if panels.xp.UpdateMode then panels.xp.UpdateMode() end
     RenderXP()
   else
-    local a = Analyze()
-    RenderTodo(a)
+    Snapshot()
+    RenderTodo(Analyze())
   end
 end
 
