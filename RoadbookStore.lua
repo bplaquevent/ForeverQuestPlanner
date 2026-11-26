@@ -60,9 +60,22 @@ function Geo.SerializeStep(st)
   return rec
 end
 
+-- A saved value as text, the same for the same value.
+local function ValueText(v)
+  if type(v) ~= "table" then return type(v) .. ":" .. tostring(v) end
+  local keys = {}
+  for k in pairs(v) do keys[#keys + 1] = k end
+  table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+  local out = {}
+  for i, k in ipairs(keys) do out[i] = tostring(k) .. "=" .. ValueText(v[k]) end
+  return "{" .. table.concat(out, ",") .. "}"
+end
+
+-- Steps of one task before the save share it again: the same saved task. The steps done of a former
+-- plan, whose task of the same quest differs (XP, warnings), keep their own.
 function Geo.DeserializeStep(rec, tasks)
   local tr = rec.task or {}
-  local key = tostring(tr.id) .. "|" .. tostring(tr.title) .. "|" .. tostring((rec.kind == "travel" or rec.kind == "dungeon") and rec.at or "")
+  local key = ValueText(tr) .. "|" .. tostring((rec.kind == "travel" or rec.kind == "dungeon") and rec.at or "")
   local task = tasks[key]
   if not task then
     task = CopyFields(tr, TASK_FIELDS, { stops = {} })

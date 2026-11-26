@@ -118,7 +118,7 @@ function Geo.MapUV(p)
     if u then return u, v end
   end
   if p.c and p.x and p.y then
-    local ok, u, v = pcall(OM.FromYards, p.c, p.x, p.y)
+    local ok, u, v = Guard(OM.FromYards, p.c, p.x, p.y)
     if ok and u then return u, v end
   end
   return nil
@@ -254,7 +254,7 @@ function Geo.MapWalk(lines, u1, v1, p, q, u2, v2, color)
   local ok, _, way = false, nil, nil
   if p and p.c and p.x and q and q.c and q.x then ok, _, way = Guard(Geo.WalkWay, p, q) end
   for _, w in ipairs(ok and way or {}) do
-    local okW, u, v = pcall(OM.FromYards, w.c, w.x, w.y)
+    local okW, u, v = Guard(OM.FromYards, w.c, w.x, w.y)
     if okW and u then
       table.insert(pts, u)
       table.insert(pts, v)

@@ -3,6 +3,7 @@
 
 local ADDON_NAME, ns = ...
 local AreaName, Color, HasBit, K, L, OM, QDB, QGet = ns.AreaName, ns.Color, ns.HasBit, ns.K, ns.L, ns.OM, ns.QDB, ns.QGet
+local Settings = ns.Settings
 local Guard = ns.Guard
 local LearnedData, LearnedChar, PlayerFaction, NpcFriendly = ns.LearnedData, ns.LearnedChar, ns.PlayerFaction, ns.NpcFriendly
 local Print = ns.Print
@@ -231,6 +232,32 @@ local function StartPoints(id)
   return pts
 end
 
+-- Places of a searched quest giver found empty by the player ("Not here"), saved until the quest is
+-- picked up or leaves the list: { [quest id] = { { c, x, y } } }.
+function Geo.DismissPlace(id, p)
+  if not (p and p.c and p.x) then return end
+  local st = Settings()
+  st.dismissedPlaces = st.dismissedPlaces or {}
+  local list = st.dismissedPlaces[id] or {}
+  st.dismissedPlaces[id] = list
+  list[#list + 1] = { c = p.c, x = p.x, y = p.y }
+end
+
+function Geo.PlaceDismissed(id, p)
+  local all = Settings().dismissedPlaces
+  for _, d in ipairs(all and all[id] or {}) do
+    if d.c == p.c and math.abs(d.x - p.x) < K.START_MERGE and math.abs(d.y - p.y) < K.START_MERGE then return true end
+  end
+  return false
+end
+
+-- id: that quest's places; nil: every quest's.
+function Geo.ForgetDismissedPlaces(id)
+  local st = Settings()
+  if not id then st.dismissedPlaces = nil
+  elseif st.dismissedPlaces then st.dismissedPlaces[id] = nil end
+end
+
 -- Places where the quest giver may stand: one NPC (the only giver) whose spawns are in several places
 -- far apart (it moves between them). Each place is one step to check in the Roadbook. Several NPCs
 -- or objects can each start it: the nearest one is enough (nil then, as for a single place).
@@ -264,7 +291,13 @@ function Geo.StartPlaces(id, from)
   end
   if not places then return nil end
   local list = {}
-  for i, pl in ipairs(places) do list[i] = pl end
+  for _, pl in ipairs(places) do
+    if not Geo.PlaceDismissed(id, pl) then list[#list + 1] = pl end
+  end
+  if #list == 0 then -- every place found empty: all to check again
+    Geo.ForgetDismissedPlaces(id)
+    for i, pl in ipairs(places) do list[i] = pl end
+  end
   if from then
     local function d(p)
       local dx, dy = p.x - from.x, p.y - from.y
