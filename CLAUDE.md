@@ -3,8 +3,11 @@
 World of Warcraft addon for the **Forever** server (client 1.60.1, Interface 16001: Classic-era API, Lua 5.1).
 QuestieDB (quest data, NPC/object spawns, chains) and OpenMap (map, flight network) are required dependencies (`## Dependencies` in the `.toc`):
 call their data and functions directly, never copy them or write code paths that work without them.
-No way to run the game here: check with `tools/check.sh` (compiles every file, detects unknown globals and `ns.X` imported before its export).
-Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cases/*.lua>` on a problem captured by `/fqp dump`.
+No way to run the game here: check with `tools/check.sh` (compiles every file, detects unknown globals and `ns.X` imported before its export)
+and `tests/run.sh` (tests with the game faked by `tests/harness.lua`: a test replaces a name of `ns` between two files, never the code's text).
+A change of the game logic comes with its test in `tests/test_*.lua`.
+Roadbook solver: test bench `lua5.1 tools/bench.lua <SavedVariables or tools/cases/*.lua>` on a problem captured by `/fqp dump`;
+`tools/bench_compare.sh` checks that a change leaves the routes of the saved cases as they are.
 
 ## Files (load order = `ForeverQuestPlanner.toc`)
 
