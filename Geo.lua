@@ -6,6 +6,7 @@ local AreaName, Color, HasBit, K, L, OM, QDB, QGet = ns.AreaName, ns.Color, ns.H
 local Guard = ns.Guard
 local LearnedData, LearnedChar, PlayerFaction, NpcFriendly = ns.LearnedData, ns.LearnedChar, ns.PlayerFaction, ns.NpcFriendly
 local Print = ns.Print
+local GetObjectives = ns.GetObjectives
 
 ---------------------------------------------------------------------------
 -- Geography: QuestieDB positions converted to world coordinates (game map API)
@@ -837,7 +838,7 @@ end
 local function QuestTargets(id)
   local t = Geo.targets[id]
   if t then return t end
-  t = {}
+  t = { id = id }
   local calls = 0
   local function add(kind, name, points, rate, mob, mobIds)
     calls = calls + 1
@@ -975,18 +976,31 @@ function Geo.TargetObjective(id, tg, objs)
   return nil
 end
 
+-- Quantities the game asks for a quest out of the log (its data loaded: Geo.AwaitTags):
+-- { [target index] = quantity }, only the targets the game gives one for.
+local function GameCounts(t)
+  local objs, out = GetObjectives(t.id), {}
+  for i, j in pairs((Geo.MatchObjectives(objs, t))) do
+    local need = objs[j].need
+    if need and need > 0 then out[i] = need end
+  end
+  return out
+end
+
 -- Remaining objectives: matches the game's objectives (with progress) to QuestieDB targets.
+-- q: the quest in the log, nil for a quest to pick up (the game's quantities, else the default ones).
 local function RemainingTargets(q, t)
   local out = {}
   local objs = (q and q.objectives) or {}
   local map, used = Geo.MatchObjectives(objs, t)
+  local asked = q and {} or GameCounts(t)
   local allDone = true -- every objective listed by the game is done
   for _, o in ipairs(objs) do
     if not (o.finished or (o.need and o.have and o.need > 0 and o.have >= o.need)) then allDone = false end
   end
   for i, tg in ipairs(t) do
     local match = tg.sourceItem and -1 or map[i] -- source item: needed while it is not in the bags
-    local count = tg.defaultCount
+    local count = asked[i] or tg.defaultCount
     -- The game lists its objectives and none is this "talk" target: a hidden objective (QuestieDB lists
     -- the turn-in NPC of "On Patrol" after the 3 NPCs to meet; the game shows only those 3 and the quest
     -- completes once the player has spoken to the turn-in NPC). Planned once every listed objective is done.
