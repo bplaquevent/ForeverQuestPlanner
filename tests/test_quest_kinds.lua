@@ -147,7 +147,9 @@ for i = 1, 60 do answer(4000 + i) advance(0.5) end
 check("30 s of progress: still waiting", not gaveUp)
 ns.scan.running, ns.scan.dirty, ns.scan.entries = false, false, {}
 advance(1)
-check("scan over: wait ends", not gaveUp)
+local ended = tries
+advance(60)
+check("scan over: wait ends", not gaveUp and tries == ended)
 ns.scan.running = true
 retry(nil)
 advance(60)

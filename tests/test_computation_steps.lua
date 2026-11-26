@@ -52,19 +52,17 @@ check("and told in the chat", table.concat(log.chat, "\n"):find("quest data brok
 broken = false
 
 -- nested calls, values through the pauses, and no pause outside a computation
-if Geo.GuardInSteps then
-  local nested, okN, a, b = compute(function()
-    return select(2, Geo.GuardInSteps(function()
-      return Geo.GuardInSteps(function(x) Geo.Yield() return x, x + 1 end, 4)
-    end))
-  end)
-  local _, r1, r2, r3 = compute(function()
-    return Geo.GuardInSteps(function() local v = Geo.GuardInSteps(function() Geo.Yield() return 7 end) Geo.Yield() return v end)
-  end)
-  check("nested: pauses passed on", nested == 1 and okN and a == true and b == 4)
-  check("nested: results of both", r1 == true and r2 == true and r3 == true)
-  local out = { Geo.GuardInSteps(function() Geo.Yield() return 1, nil, 3 end) }
-  check("outside a computation: no pause, every result", out[1] == true and out[2] == 1 and out[3] == nil and out[4] == 3)
-end
+local nested, okN, a, b = compute(function()
+  return select(2, Geo.GuardInSteps(function()
+    return Geo.GuardInSteps(function(x) Geo.Yield() return x, x + 1 end, 4)
+  end))
+end)
+local _, r1, r2, r3 = compute(function()
+  return Geo.GuardInSteps(function() local _, v = Geo.GuardInSteps(function() Geo.Yield() return 7 end) Geo.Yield() return v end)
+end)
+check("nested: pauses passed on", nested == 1 and okN and a == true and b == 4)
+check("nested: results of both", r1 == true and r2 == true and r3 == 7)
+local out = { Geo.GuardInSteps(function() Geo.Yield() return 1, nil, 3 end) }
+check("outside a computation: no pause, every result", out[1] == true and out[2] == 1 and out[3] == nil and out[4] == 3)
 check("nothing left marked", State.relayed == nil)
 finish()
