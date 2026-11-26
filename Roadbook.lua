@@ -845,6 +845,15 @@ function CP.CheckArrival(s, msg)
   CP.AutoUpdate(msg)
 end
 
+-- The player stands at the place of the step (the NPC it is done with): a game event that does not
+-- say which NPC it comes from ends the step only there.
+K.AT_STEP_RADIUS = 100 -- yards
+function CP.AtStep(s)
+  local pos = PlayerPos()
+  local d = pos and s.p and Dist(pos, s.p)
+  return d ~= nil and d < K.AT_STEP_RADIUS
+end
+
 -- Transport step whose destination is reached at `pos`: bind point of a hearthstone step, arrival
 -- of a flight / zeppelin / boat.
 function CP.TransportReached(s, pos)
@@ -929,13 +938,13 @@ function CP.Reroute(st, pos, msg)
   local ti = fi
   while route[ti] and route[ti].kind == "travel" do ti = ti + 1 end
   local target = route[ti]
-  for _ = fi, ti - 1 do table.remove(route, fi) end
+  for _ = fi, ti - 1 do Geo.RouteRemove(fz, fi) end
   local legs = {}
   if target and target.kind ~= "hearth" and not target.glue then
     -- flight paths known now (some may have been activated on the way)
     legs = Geo.LegSteps(Geo.World(), pos, target.p, Geo.Net(TravelSpeed()), UnitLevel("player"), st.at)
   end
-  for k, leg in ipairs(legs) do table.insert(route, fi + k - 1, leg) end
+  for k, leg in ipairs(legs) do Geo.RouteInsert(fz, fi + k - 1, leg) end
   Geo.SaveRoute()
   local first = legs[1]
   msg = msg or L["Wrong destination: new route. "]
@@ -978,7 +987,7 @@ function CP.GiverFound(a1, a2)
       for k = #list, 1, -1 do
         local i = list[k]
         if i ~= best then
-          table.remove(route, i)
+          Geo.RouteRemove(fz, i)
         end
       end
       Geo.SaveRoute()
@@ -1077,8 +1086,8 @@ end
 
 local STEP_EVENTS = {}
 
-function STEP_EVENTS.bind(_, event)
-  if event == "HEARTHSTONE_BOUND" then CP.AutoUpdate(L["Hearthstone bound"]) end
+function STEP_EVENTS.bind(s, event)
+  if event == "HEARTHSTONE_BOUND" and CP.AtStep(s) then CP.AutoUpdate(L["Hearthstone bound"]) end
 end
 
 function STEP_EVENTS.hearth(s, event, a1)
@@ -1091,14 +1100,14 @@ end
 
 function STEP_EVENTS.travel(s, event)
   if event == "FQP_TAXI_TAKEOFF" then
-    CP.TakeOff(s)
+    if s.task.mode == "flight" then CP.TakeOff(s) end
   elseif s.task.mode ~= "flight" and (event == "ZONE_CHANGED_NEW_AREA" or event == "FQP_TRANSPORT_TICK") then
     CP.CheckArrival(s, L["Arrival of the "] .. (K.MODE_NAME[s.task.mode] or s.task.mode or L["transport"]))
   end
 end
 
-function STEP_EVENTS.fm(_, event)
-  if event == "TAXIMAP_OPENED" then CP.AutoUpdate(L["Flight master activated"]) end
+function STEP_EVENTS.fm(s, event)
+  if event == "TAXIMAP_OPENED" and (CP.StepDone(s) or CP.AtStep(s)) then CP.AutoUpdate(L["Flight master activated"]) end
 end
 
 function STEP_EVENTS.skill(s, event)

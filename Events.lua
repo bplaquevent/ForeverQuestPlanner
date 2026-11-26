@@ -106,9 +106,9 @@ On({ "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "SPEL
 end)
 
 On({ "HEARTHSTONE_BOUND" }, function(event)
-  -- New inn: position of the innkeeper targeted by the Roadbook, otherwise ours.
+  -- New inn: position of the innkeeper targeted by the Roadbook if it is that one, otherwise ours.
   local s = CP.focused
-  local planned = s and s.kind == "bind" and CP.IsStepFocused(s)
+  local planned = s and s.kind == "bind" and CP.IsStepFocused(s) and CP.AtStep(s)
   local p = planned and s.p or PlayerPos()
   Guard(Geo.RecordBind, p)
   if planned then

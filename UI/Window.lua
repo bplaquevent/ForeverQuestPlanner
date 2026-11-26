@@ -54,7 +54,7 @@ end
 
 -- Quests of the list under their categories (Geo.RoadbookCategories), with the search. One line each
 -- with its state; the ones not turned in can be removed (CP.SkipQuest: out of the list, the Roadbook
--- computed again). Returns the number of quests of the list.
+-- computed again). Returns the number of quests shown and the number of quests of the tab.
 function Geo.RoadbookQuestItems(items, fz, query)
   local quests = Geo.RoadbookQuests(fz)
   local notInLog = {}
@@ -74,7 +74,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
           tip = { L["Remove"], L["Removes the quest from the list (with the prerequisites added only for it); the steps to come of the Roadbook are computed again."] } } or nil }
     end
   end
-  if #shown == 0 then return #quests end
+  if #shown == 0 then return 0, #quests end
   local LABEL = { done = L["Turned in"], turnin = L["To turn in"], singles = L["Doable single quests"],
     later = L["Later - level too high"] }
   local following = CP.CurrentFocus() ~= nil
@@ -95,7 +95,7 @@ function Geo.RoadbookQuestItems(items, fz, query)
       open = not following, label = label .. " - " .. Plural(#c.quests, L["quest"]), b3 = b3 }
     for _, it in ipairs(c.quests) do items[#items + 1] = lines[it] end
   end
-  return #quests
+  return #shown, #quests
 end
 
 -- Roadbook tab: the quests of the list under a fixed header; the Roadbook's steps are in the panel
@@ -124,16 +124,15 @@ local function RenderXP()
     qItems[#qItems + 1] = { text = Color("ffd100", L["No Roadbook. Fill the list with the \"Add\" button (or \"Add all\" on a category) of the Around me, Quest log and Available tabs, and/or let \"Adapt\" fill it: for a play session (the most XP within that time) or a level (reached the fastest), the list is completed or trimmed. The Roadbook is computed at each change of the list: it does every quest of the list in the least time, and the Objective button follows it."]) }
   end
   local before = #qItems
-  local shown = Geo.RoadbookQuestItems(qItems, fz, query)
+  local shown, total = Geo.RoadbookQuestItems(qItems, fz, query)
   if #qItems == before and (searching or fz) then
     qItems[#qItems + 1] = { text = searching and L["No quest matches the search."]
       or L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] }
   end
   if fz and #fz.route <= 1 and not searching then qItems[#qItems + 1] = { text = L["No usable quest found around you."] } end
   -- Search active: "shown / total" so that a filtered list is not taken for a short one.
-  local count = Plural(shown or 0, L["quest"])
-  local total = #Geo.CustomList()
-  if searching and total > (shown or 0) then count = (shown or 0) .. " / " .. Plural(total, L["quest"]) end
+  local count = Plural(shown, L["quest"])
+  if searching and total > shown then count = shown .. " / " .. Plural(total, L["quest"]) end
   Geo.PaneHeader(qp, L["Quests"], Color("aaaaaa", L["Quests of the list: "] .. count))
   RenderList(qp, "xp", qItems, searching)
   Guard(CP.RefreshButton)

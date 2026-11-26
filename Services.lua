@@ -296,7 +296,10 @@ function Geo.FlightMasters()
         local d = Dist(fm.p, np)
         if d and d < K.FM_KNOWN_RADIUS and (not nd or d < nd) then npc, nd = fm, d end
       end
-      if not npc then np.zoneName = Geo.NodeName(id) end
+      if not npc then
+        np = Geo.MapPoint(np)
+        np.zoneName = np.zoneName or Geo.NodeName(id)
+      end
       out[#out + 1] = { id = npc and npc.id or ("node" .. id), node = id, name = npc and npc.name or Geo.NodeName(id),
         p = npc and npc.p or np }
     end
