@@ -3,7 +3,7 @@
 local ADDON_NAME, ns = ...
 local L = ns.L
 
--- Professions, by skill line id: name = shown to the player; en = name looked for in the quest texts;
+-- Professions, by skill line id: name = shown to the player; en = name looked for in the quest log's objectives;
 -- stems = words of a trainer's sub title (QuestieDB subName, English and French). An id with no name is
 -- only known as a profession.
 ns.PROFESSIONS = {

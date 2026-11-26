@@ -14,8 +14,9 @@ local Guard = ns.Guard
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
--- Herbalism"): QuestieDB's requiredSkill, else the quest texts (QuestieDB's English ones, the
--- log's localized objectives and description) naming a profession next to a number.
+-- Herbalism"): QuestieDB's requiredSkill, and the objective lines of the quest log naming a
+-- profession next to a number. The other quest texts are not read: their numbers next to such a word
+-- are quantities ("5 Mining Tools", "Ironforge wants 5 pieces").
 ---------------------------------------------------------------------------
 K.SKILL_TEXT_GAP = 30 -- characters: a number this close to a profession name is its level
 
@@ -43,27 +44,15 @@ function Geo.SkillNeed(id, q)
   if not known then return nil end
   local skill, need
   -- QuestieDB's requiredSkill is the level to pick the quest up: the turn-in may ask for more (the
-  -- profession introductions: "reach 20"), so the quest texts are read too and the highest level wins.
+  -- profession introductions: "reach 20"), so the log's objectives are read too and the highest level wins.
   local req = QGet(QDB.Quest, id, "requiredSkill")
   if type(req) == "table" and req[1] and (req[2] or 0) > 0 then skill, need = req[1], req[2] end
-  local parts = {}
-  local Q = QDB.Quest
-  local okR, raw
-  okR, raw = pcall(Q.GetRaw, id, "objectivesText")
-  for _, list in ipairs({ okR and raw or QGet(Q, id, "objectivesText"), q and q.objectivesText }) do
-    if type(list) == "table" then
-      for _, t in ipairs(list) do parts[#parts + 1] = tostring(t) end
-    elseif type(list) == "string" then
-      parts[#parts + 1] = list
-    end
-  end
   for _, o in ipairs(q and q.objectives or {}) do
-    if type(o.text) == "string" then parts[#parts + 1] = o.text end
-  end
-  if q and type(q.description) == "string" then parts[#parts + 1] = q.description end
-  for _, t in ipairs(parts) do
-    local s2, n2 = Geo.SkillFromText(t)
-    if s2 and (not skill or (s2 == skill and n2 > need)) then skill, need = s2, n2 end
+    if type(o.text) == "string" then
+      local counterless = o.text:gsub("%d+%s*/%s*%d+", "") -- "0/5" counts what is done, it is not a level
+      local s2, n2 = Geo.SkillFromText(counterless)
+      if s2 and (not skill or (s2 == skill and n2 > need)) then skill, need = s2, n2 end
+    end
   end
   if not skill then return nil end
   local have = skills[skill] or 0

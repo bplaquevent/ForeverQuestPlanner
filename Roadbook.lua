@@ -572,7 +572,8 @@ StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
     if data then CP.SkipQuest({ task = { id = data.id, title = data.title } }) end
   end,
   OnCancel = function(_, data) -- also Escape: the quest stays planned
-    if data then CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ") end
+    -- asked by the player: computed again, tracked or not
+    if data then CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ", nil, true) end
   end,
   timeout = 0,
   whileDead = true,
