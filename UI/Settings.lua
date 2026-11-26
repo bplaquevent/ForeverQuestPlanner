@@ -2,7 +2,7 @@
 -- The names shared between files are published in ns at the end of each file (load order: .toc).
 
 local ADDON_NAME, ns = ...
-local CP, Color, Geo, K, L, Refresh, Settings, scan, State = ns.CP, ns.Color, ns.Geo, ns.K, ns.L, ns.Refresh, ns.Settings, ns.scan, ns.State
+local CP, Color, Geo, K, L, Refresh, Settings, MarkScanDirty, State = ns.CP, ns.Color, ns.Geo, ns.K, ns.L, ns.Refresh, ns.Settings, ns.MarkScanDirty, ns.State
 
 ---------------------------------------------------------------------------
 -- Settings: Roadbook difficulty and estimate parameters
@@ -204,7 +204,7 @@ function Geo.CreateSettingsPanel(f)
   reset:SetScript("OnClick", function()
     Settings().params = nil
     Geo.ApplyParams()
-    scan.dirty = true
+    MarkScanDirty()
     panel.Update()
   end)
   local note = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")

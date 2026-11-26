@@ -190,6 +190,10 @@ local State = {} -- mutable state shared by the addon files (window, tabs, Roadb
 local K = {} -- tuning constants (avoids the 200 local variables limit)
 -- Transport mode names (internal ids -> displayed text).
 K.MODE_NAME = { flight = L["flight"], zeppelin = L["zeppelin"], boat = L["boat"], airship = L["airship"] }
+-- Kinds of quests done in a group (QuestKind): their name, as a category title and as a note.
+K.KIND_LABEL = { dungeon = L["Dungeon"], raid = L["Raid"], pvp = L["PvP"] }
+K.KIND_TITLE = { dungeon = L["Dungeon: "], raid = L["Raid: "], pvp = L["PvP: "] }
+K.KIND_NOTE = { dungeon = L["dungeon: "], raid = L["raid: "], pvp = L["PvP: "] }
 K.MAX_LEVEL_GAP = 2 -- difficulty: quest level at most this many levels above (or below) yours (+1 for quests already in the log)
 K.MAX_ELITE_GAP = -2 -- same for elite quests, usually too hard alone at your level
 -- Technical search bound: quests whose required level is up to this many levels above yours are
@@ -643,9 +647,27 @@ local function GetXP(questID)
   return DBXP(questID, UnitLevel("player"))
 end
 
--- Zone where the objectives take place, and what the game tag says: dungeon or raid, elite.
+-- The game's tag of a quest ({ tagID, tagName }), or nil: none, or the quest is out of the log and
+-- its data are not loaded (QuestTags.lua).
+local function GameTag(questID)
+  if not C_QuestLog.GetQuestTagInfo then return nil end
+  local ok, tag = pcall(C_QuestLog.GetQuestTagInfo, questID)
+  return ok and tag or nil
+end
+
+-- "pvp", "raid" or "dungeon" when the tag says so, otherwise nil.
+local function TagKind(tag)
+  if not (tag and Enum and Enum.QuestTag) then return nil end
+  if tag.tagID == Enum.QuestTag.PvP then return "pvp" end
+  if tag.tagID == Enum.QuestTag.Raid then return "raid" end
+  if tag.tagID == Enum.QuestTag.Dungeon then return "dungeon" end
+  return nil
+end
+
+-- Zone where the objectives take place, whether it is an instance (map type, QuestieDB), and what the
+-- game tag says: its name, elite, kind.
 local function GetQuestPlace(questID)
-  local mapZone, isInstance, instanceName, gameElite
+  local mapZone, isInstance, instanceName
   if GetQuestUiMapID and C_Map and C_Map.GetMapInfo then
     local ok, mapID = pcall(GetQuestUiMapID, questID)
     if ok and mapID and mapID > 0 then
@@ -656,17 +678,9 @@ local function GetQuestPlace(questID)
       end
     end
   end
-  local tagName
-  if C_QuestLog.GetQuestTagInfo then
-    local ok, tag = pcall(C_QuestLog.GetQuestTagInfo, questID)
-    if ok and tag then
-      tagName = tag.tagName
-      if Enum and Enum.QuestTag then
-        if tag.tagID == Enum.QuestTag.Dungeon or tag.tagID == Enum.QuestTag.Raid then isInstance = true end
-        if tag.tagID == Enum.QuestTag.Group then gameElite = true end -- shown as "Elite" by the game
-      end
-    end
-  end
+  local tag = GameTag(questID)
+  -- "Group" is shown as "Elite" by the game
+  local gameElite = tag and Enum and Enum.QuestTag and tag.tagID == Enum.QuestTag.Group or nil
   -- QuestieDB: quest zone and dungeon, if any
   local m = QuestMeta(questID)
   if m and m.sort > 0 then
@@ -678,7 +692,7 @@ local function GetQuestPlace(questID)
       mapZone = AreaName(m.sort)
     end
   end
-  return mapZone, isInstance, tagName, instanceName, gameElite
+  return mapZone, isInstance, tag and tag.tagName or nil, instanceName, gameElite, TagKind(tag)
 end
 
 -- The character's last quest log capture (Snapshot), or nil.
@@ -728,7 +742,7 @@ local function Snapshot()
       elseif not info.isHidden and info.questID and info.questID > 0 then
         local id = info.questID
         local desc, objText = GetQuestTexts(id)
-        local mapZone, isInstance, tagName, instanceName, gameElite = GetQuestPlace(id)
+        local mapZone, isInstance, tagName, instanceName, gameElite, gameKind = GetQuestPlace(id)
         quests[#quests + 1] = {
           id = id,
           title = info.title,
@@ -738,6 +752,7 @@ local function Snapshot()
           instanceName = instanceName,
           tag = tagName,
           gameElite = gameElite,
+          gameKind = gameKind,
           level = info.level,
           difficultyLevel = info.difficultyLevel,
           suggestedGroup = info.suggestedGroup,
@@ -870,7 +885,7 @@ local function RemainingObjectives(q)
 end
 
 ---------------------------------------------------------------------------
--- Quest log analysis: to turn in, to abandon, groups, dungeons, later
+-- Quest log analysis: to turn in, to abandon, groups, instances (dungeon, raid, PvP), later
 ---------------------------------------------------------------------------
 -- Localized names of the dungeons known by QuestieDB (to recognize quest log categories).
 local dungeonNameSet
@@ -884,14 +899,28 @@ local function DungeonNames()
   return dungeonNameSet
 end
 
-local function DungeonOf(q)
-  if q.instanceName then return q.instanceName end
-  if q.zone and DungeonNames()[q.zone] then return q.zone end
-  if q.isInstance then return q.zone or L["Dungeon"] end
-  for _, word in ipairs(q.tag and ns.DUNGEON_TAG_WORDS or {}) do
-    if q.tag:find(word) then return q.zone or L["Dungeon"] end
-  end
-  return nil
+-- What a quest is, when it is done in a group: kind ("pvp", "raid", "dungeon", or nil) and the name of
+-- its place. The game's tag first; without it, an instance signalled by the game or QuestieDB is a
+-- dungeon.
+local function LogKind(q) -- captured quest
+  local instance = q.instanceName or (q.zone and DungeonNames()[q.zone] and q.zone) or nil
+  local kind = q.gameKind or ((instance or q.isInstance) and "dungeon") or nil
+  return kind, kind and (instance or q.zone or q.mapZone) or nil
+end
+
+local function IdKind(id) -- quest out of the log: its tag once loaded (QuestTags.lua), QuestieDB
+  local sort = QGet(QDB.Quest, id, "zoneOrSort") or 0
+  local d = sort > 0 and QDB.dungeonOf[sort] or nil
+  local instance = d and AreaName(d) or nil
+  local kind = TagKind(GameTag(id)) or (instance and "dungeon") or nil
+  return kind, kind and (instance or (sort > 0 and AreaName(sort))) or nil, instance
+end
+
+local function QuestKind(id)
+  local q = LogEntry(id)
+  if q then return LogKind(q) end
+  local kind, place = IdKind(id)
+  return kind, place
 end
 
 local function FormatTime(sec)
@@ -935,8 +964,8 @@ K.LATER_GAP = 3 -- a quest more than this many levels above yours is for later (
 
 -- Category of a quest, the first that applies: "dungeon" (name), "later", "zone" Professions or
 -- Class; else "zone" with no name (the caller's zone of the quest). dungeon: its name, or nil.
-local function QuestCategory(dungeon, level, plevel, isProf, isClass)
-  if dungeon then return "dungeon", dungeon end
+local function QuestCategory(kind, place, level, plevel, isProf, isClass)
+  if kind then return kind, place or K.KIND_LABEL[kind] end
   if level > plevel + K.LATER_GAP and not isProf then return "later" end
   if isProf then return "zone", L["Professions"] end
   if isClass then return "zone", L["Class"] end
@@ -946,9 +975,9 @@ end
 local function Analyze()
   Snapshot()
   local e = LogRecord()
-  local result = { abandon = {}, turnIn = {}, groups = {}, later = {}, dungeons = {} }
+  local result = { abandon = {}, turnIn = {}, groups = {}, later = {}, instances = {} }
   State.abandonIds = {} -- for the icon in front of the titles (Geo.ToAbandon)
-  local byDungeon = {}
+  local byInstance = {}
   if not e then return result end
   result.count = #e.quests
 
@@ -998,13 +1027,14 @@ local function Analyze()
         result.abandon[#result.abandon + 1] = { quest = q, reason = q._abandon }
         State.abandonIds[q.id] = true
       end
-      local kind, name = QuestCategory(DungeonOf(q), level, plevel, isProf, isClass)
-      if kind == "dungeon" then
-        local g = byDungeon[name]
+      local questKind, place = LogKind(q)
+      local kind, name = QuestCategory(questKind, place, level, plevel, isProf, isClass)
+      if questKind then
+        local g = byInstance[kind .. ":" .. name]
         if not g then
-          g = { name = name, instance = true, quests = {} }
-          byDungeon[name] = g
-          result.dungeons[#result.dungeons + 1] = g
+          g = { kind = kind, name = name, quests = {} }
+          byInstance[kind .. ":" .. name] = g
+          result.instances[#result.instances + 1] = g
         end
         g.quests[#g.quests + 1] = q
       elseif kind == "later" then
@@ -1026,11 +1056,11 @@ local function Analyze()
     if #a.quests ~= #b.quests then return #a.quests > #b.quests end
     return a.name < b.name
   end)
-  table.sort(result.dungeons, function(a, b)
+  table.sort(result.instances, function(a, b)
     if #a.quests ~= #b.quests then return #a.quests > #b.quests end
     return a.name < b.name
   end)
-  for _, g in ipairs(result.dungeons) do
+  for _, g in ipairs(result.instances) do
     table.sort(g.quests, function(a, b) return (a.level or 0) < (b.level or 0) end)
   end
   return result
@@ -1051,6 +1081,7 @@ ns.AllPrereqs, ns.QuestPrereqs = AllPrereqs, QuestPrereqs
 ns.LogById, ns.LogEntry, ns.LogQuests, ns.LogRecord = LogById, LogEntry, LogQuests, LogRecord
 ns.AllIds, ns.NpcFriendly, ns.PlayerFaction, ns.QuestAllowed = AllIds, NpcFriendly, PlayerFaction, QuestAllowed
 ns.QuestCategory = QuestCategory
+ns.IdKind, ns.LogKind, ns.QuestKind = IdKind, LogKind, QuestKind
 ns.FormatNumber, ns.FormatTime = FormatNumber, FormatTime
 ns.IsQuestComplete = IsQuestComplete
 ns.SkillName = SkillName

@@ -8,6 +8,7 @@ local RemainingTargets, Settings, QuestPrereqs, Color = ns.RemainingTargets, ns.
 local PlayerFaction, QuestDoubts, State, PlayerBits, QuestAllowed = ns.PlayerFaction, ns.QuestDoubts, ns.State, ns.PlayerBits, ns.QuestAllowed
 local Analyze, IsClassMeta, IsProfMeta, LogById, LogQuests = ns.Analyze, ns.IsClassMeta, ns.IsProfMeta, ns.LogById, ns.LogQuests
 local QuestCategory, QuestMeta = ns.QuestCategory, ns.QuestMeta
+local QuestKind, RequestQuestTags = ns.QuestKind, ns.RequestQuestTags
 
 K.DUNGEON_TIME = 60       -- minutes spent inside a dungeon (setting)
 K.DUNGEON_WAVE_DEPTH = 20 -- safety: dungeon visits following one another
@@ -435,6 +436,16 @@ function Geo.FlightMasterStep(fm)
     task = { title = L["Activate the flight path of "] .. (AreaName(fm.p.area) or fm.name), npc = fm.name, xp = 0, fm = true } }
 end
 
+-- Kind of an instance visit, from its quests (steps): raid before PvP; a dungeon otherwise.
+local function VisitKind(steps)
+  local found = {}
+  for _, s in ipairs(steps) do
+    local kind = s.task and s.task.id and QuestKind(s.task.id)
+    if kind then found[kind] = true end
+  end
+  return (found.raid and "raid") or (found.pvp and "pvp") or "dungeon"
+end
+
 -- Dungeon steps: every step of the list inside the same dungeon is done during one visit (a step at
 -- the entrance). A quest whose dungeon part needs another quest done (and turned in outside) first
 -- goes to a later visit ("wave").
@@ -468,7 +479,7 @@ function Geo.GroupDungeons(tasks)
         local D = byKey[key]
         if not D then
           D = { kind = "dungeon", p = s.p, work = K.DUNGEON_TIME * 60, xp = 0,
-            task = { title = L["Dungeon: "] .. d, dungeon = d, members = {}, xp = 0, stops = {} } }
+            task = { dungeon = d, members = {}, xp = 0, stops = {} } }
           D.task.stops[1] = D
           byKey[key] = D
           dungeons[#dungeons + 1] = D
@@ -486,6 +497,9 @@ function Geo.GroupDungeons(tasks)
       end
     end
     task.order = order
+  end
+  for _, D in ipairs(dungeons) do
+    D.task.title = K.KIND_TITLE[VisitKind(D.task.members)] .. D.task.dungeon
   end
   return dungeons
 end
@@ -731,18 +745,18 @@ StaticPopupDialogs["FQP_TRIM_LIST"] = {
 -- The list's quests as the Roadbook tab shows them: facts and categories
 ---------------------------------------------------------------------------
 -- Category of a quest of the list, as in the Quest log tab (byLog: category of the quests of the log,
--- from Analyze): "done" (turned in), "turnin", "zone" (name), "dungeon" (name), "later" (level too high).
--- A quest not in the log: its dungeon, Professions / Class, the zone of its quest giver.
+-- from Analyze): "done" (turned in), "turnin", "zone" (name), "dungeon" / "raid" / "pvp" (place),
+-- "later" (level too high). A quest not in the log: its kind, Professions / Class, the zone of its
+-- quest giver.
 function Geo.ListCategory(it, byLog, plevel)
   if IsCompleted(it.id) then return "done" end
   local c = byLog[it.id]
   if c then return c.kind, c.name end
   local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
-  local dg = sort > 0 and QDB.dungeonOf[sort]
-  if dg then return "dungeon", AreaName(dg) or L["Dungeon"] end
   local m = QuestMeta(it.id)
   local level = it.level or Geo.QuestLevelOf(it.id) or 0
-  local kind, name = QuestCategory(nil, level, plevel, m and IsProfMeta(m), m and IsClassMeta(m))
+  local questKind, place = QuestKind(it.id)
+  local kind, name = QuestCategory(questKind, place, level, plevel, m and IsProfMeta(m), m and IsClassMeta(m))
   if kind == "later" or name then return kind, name end
   local zone = sort > 0 and AreaName(sort) or nil
   if not zone then
@@ -755,7 +769,7 @@ end
 -- The quests of the Roadbook (fz, or nil) and of the list: those of the route in its order, then the
 -- others of the list. Each: { id, title, level, order, unplanned, reason (why it cannot be planned),
 -- done, log (captured quest, or nil), reqLevel (when above yours), prereqOf (title of the quest it
--- was added for), dungeon (name), doubts, forPlayer }.
+-- was added for), kind (dungeon, raid, PvP) and kindPlace, doubts, forPlayer }.
 function Geo.RoadbookQuests(fz)
   local quests, seen = {}, {}
   local function add(id, title, level, unplanned)
@@ -776,6 +790,11 @@ function Geo.RoadbookQuests(fz)
   for _, u in ipairs((fz and fz.info.unplanned) or State.customUnplanned or {}) do why[u.id] = u.reason end
   for _, it in ipairs(list) do add(it.id, it.title, it.level, fz ~= nil) end
   local logById, plevel = LogById(), UnitLevel("player")
+  local notInLog = {}
+  for _, it in ipairs(quests) do
+    if not (logById[it.id] or IsCompleted(it.id)) then notInLog[#notInLog + 1] = it.id end
+  end
+  RequestQuestTags(notInLog) -- shown again once loaded (QuestTags.lua)
   for _, it in ipairs(quests) do
     it.reason = why[it.id]
     it.log = logById[it.id]
@@ -787,9 +806,7 @@ function Geo.RoadbookQuests(fz)
       local by = entry[en.pre]
       it.prereqOf = (by and by.title) or ("#" .. en.pre)
     end
-    local sort = QGet(QDB.Quest, it.id, "zoneOrSort") or 0
-    local dg = sort > 0 and QDB.dungeonOf[sort]
-    if dg then it.dungeon = AreaName(dg) or "?" end
+    it.kind, it.kindPlace = QuestKind(it.id)
     it.doubts = QuestDoubts(it.id, PlayerFaction())
     it.forPlayer = Geo.ForPlayer(it.id)
   end
@@ -809,8 +826,8 @@ function Geo.RoadbookCategories(quests)
   for _, g in ipairs(a.groups) do
     for _, q in ipairs(g.quests) do byLog[q.id] = { kind = "zone", name = g.name } end
   end
-  for _, g in ipairs(a.dungeons) do
-    for _, q in ipairs(g.quests) do byLog[q.id] = { kind = "dungeon", name = g.name } end
+  for _, g in ipairs(a.instances) do
+    for _, q in ipairs(g.quests) do byLog[q.id] = { kind = g.kind, name = g.name } end
   end
   for _, q in ipairs(a.later) do byLog[q.id] = { kind = "later" } end
   local cats, byKey = {}, {}
@@ -835,7 +852,7 @@ function Geo.RoadbookCategories(quests)
       c.quests = {}
     end
   end
-  local RANK = { done = 1, turnin = 2, zone = 3, dungeon = 4, singles = 5, later = 6 }
+  local RANK = { done = 1, turnin = 2, zone = 3, dungeon = 4, raid = 4, pvp = 4, singles = 5, later = 6 }
   table.sort(cats, function(x, y)
     if RANK[x.kind] ~= RANK[y.kind] then return RANK[x.kind] < RANK[y.kind] end
     if #x.quests ~= #y.quests then return #x.quests > #y.quests end

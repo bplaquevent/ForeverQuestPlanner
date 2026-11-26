@@ -5,6 +5,7 @@ local ADDON_NAME, ns = ...
 local CoinText = ns.CoinText
 local ChainInfo, ChainText, L, LogRecord, Snapshot = ns.ChainInfo, ns.ChainText, ns.L, ns.LogRecord, ns.Snapshot
 local TrivialRange, TurnInText, UpdateScrollBar, panels = ns.TrivialRange, ns.TurnInText, ns.UpdateScrollBar, ns.panels
+local K, LogKind = ns.K, ns.LogKind
 
 ---------------------------------------------------------------------------
 -- Text to export (Ctrl+C)
@@ -34,7 +35,8 @@ local function BuildText()
     if q.level then tags[#tags + 1] = L["level "] .. q.level end
     if q.xp and q.xp > 0 then tags[#tags + 1] = q.xp .. " XP" end
     if q.money and q.money > 0 then tags[#tags + 1] = CoinText(q.money) end
-    if q.instanceName then tags[#tags + 1] = L["dungeon: "] .. q.instanceName
+    local kind, place = LogKind(q)
+    if kind and place then tags[#tags + 1] = K.KIND_NOTE[kind] .. place
     elseif q.mapZone and q.mapZone ~= q.zone then tags[#tags + 1] = L["location: "] .. q.mapZone end
     if q.tag then tags[#tags + 1] = q.tag end
     if q.suggestedGroup and q.suggestedGroup > 1 then tags[#tags + 1] = L["group "] .. q.suggestedGroup end

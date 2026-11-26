@@ -7,11 +7,17 @@ local IsClassMeta, IsCompleted, IsInLog, IsProfMeta, K, L = ns.IsClassMeta, ns.I
 local NextQuests, PlayerBits, PlayerSkills, QDB, QGet = ns.NextQuests, ns.PlayerBits, ns.PlayerSkills, ns.QDB, ns.QGet
 local QuestMeta, QuestPrereqs, State, TrivialRange, AllIds = ns.QuestMeta, ns.QuestPrereqs, ns.State, ns.TrivialRange, ns.AllIds
 local PlayerFaction, QuestAllowed, Print, SkillName = ns.PlayerFaction, ns.QuestAllowed, ns.Print, ns.SkillName
+local IdKind, RequestQuestTags, TagProgress = ns.IdKind, ns.RequestQuestTags, ns.TagProgress
 
 ---------------------------------------------------------------------------
 -- Available quests (QuestieDB), scan spread over several frames
 ---------------------------------------------------------------------------
+-- dirty: to scan again; changed: marked dirty while the running scan was at work.
 local scan = { running = false, dirty = true, entries = nil }
+
+local function MarkScanDirty()
+  scan.dirty, scan.changed = true, true
+end
 
 -- Levels above yours scanned for the Roadbook: a few by default, up to the target level with a
 -- "reach level" goal (the Roadbook takes quests on as the expected level rises).
@@ -277,7 +283,7 @@ local function CheckAvailable(id, ctx)
   if not name then return nil end
 
   local m = QuestMeta(id)
-  local dungeonId = sort > 0 and QDB.dungeonOf[sort] or nil
+  local _, _, instance = IdKind(id)
   local starterText, starterZone = GiverText(starters)
   return {
     id = id,
@@ -286,13 +292,12 @@ local function CheckAvailable(id, ctx)
     reqLevel = req,
     future = req > ctx.plevel or nil,
     xp = DBXP(id, math.max(ctx.plevel, req)),
-    dungeon = dungeonId and AreaName(dungeonId) or nil,
-    area = (sort > 0 and not dungeonId) and AreaName(sort) or nil,
+    instance = instance, -- QuestieDB's; kind (dungeon, raid, PvP): set by the scan, tags loaded
+    area = (sort > 0 and not instance) and AreaName(sort) or nil,
     starter = starterText,
     starterZone = starterZone,
     isClass = m and IsClassMeta(m) or false,
     isProf = m and IsProfMeta(m) or false,
-    pvp = ns.SORT_PVP[sort] or nil,
     opensChain = m and #NextQuests(m) > 0 or false,
     repMissing = MissingReputation(QGet(Q, id, "requiredMinRep")),
     missing = #missing.texts > 0 and missing or nil,
@@ -307,11 +312,14 @@ local function Refresh() ns.Refresh() end -- the real one is in UI/Window.lua
 local StartScan
 
 -- Is the scan of the available quests still to wait for? Then it is started if needed and retry(attempt)
--- is called a little later; after K.SCAN_TRIES the wait is given up: a message, then giveUp().
+-- is called a little later; after K.SCAN_TRIES without a quest tag loaded, the wait is given up: a
+-- message, then giveUp().
 K.SCAN_TRIES, K.SCAN_WAIT = 40, 0.5
 local function WaitScan(attempt, retry, giveUp)
   if not (scan.running or scan.dirty or not scan.entries) then return false end
   if not scan.running then StartScan() end
+  local loaded = TagProgress()
+  if loaded ~= scan.waitLoaded then scan.waitLoaded, attempt = loaded, 0 end -- the loading goes on
   attempt = (attempt or 0) + 1
   if attempt > K.SCAN_TRIES then
     Print(L["Quest scan is taking too long: try again in a moment."])
@@ -320,6 +328,19 @@ local function WaitScan(attempt, retry, giveUp)
     C_Timer.After(K.SCAN_WAIT, function() retry(attempt) end)
   end
   return true
+end
+
+-- The scan's results are shown once the game's tags of their quests are loaded.
+local function Publish(results)
+  local function finish()
+    for _, en in ipairs(results) do en.kind = IdKind(en.id) end
+    scan.entries = results
+    scan.running, scan.dirty = false, scan.changed
+    Refresh()
+  end
+  local ids = {}
+  for _, en in ipairs(results) do ids[#ids + 1] = en.id end
+  if RequestQuestTags(ids, finish) then finish() end
 end
 
 function StartScan()
@@ -332,7 +353,7 @@ function StartScan()
 
   local ctx = BuildScanContext()
   local results, i = {}, 1
-  scan.running, scan.error = true, nil
+  scan.running, scan.error, scan.changed = true, nil, false
   local function step()
     local stop = math.min(i + 249, #ids)
     for k = i, stop do
@@ -343,7 +364,6 @@ function StartScan()
     if i <= #ids then
       C_Timer.After(0, step)
     else
-      scan.running, scan.dirty = false, false
       -- Quests with missing quest prerequisites are kept only if each prerequisite can be done
       -- now (in the log or available): "do this first" hints, not whole distant chains.
       local reachable = {}
@@ -382,8 +402,7 @@ function StartScan()
         end
         if not inChain then results[#results + 1] = en end
       end
-      scan.entries = results
-      Refresh()
+      Publish(results)
     end
   end
   step()
@@ -394,3 +413,4 @@ end
 ns.BuildScanContext, ns.CheckAvailable, ns.Refresh, ns.StartScan, ns.scan = BuildScanContext, CheckAvailable, Refresh, StartScan, scan
 ns.QuestDoubts = QuestDoubts
 ns.WaitScan = WaitScan
+ns.MarkScanDirty = MarkScanDirty

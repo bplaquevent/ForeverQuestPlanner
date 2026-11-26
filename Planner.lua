@@ -8,6 +8,8 @@ local QuestMeta, QuestTargets, AllPrereqs, RemainingTargets = ns.QuestMeta, ns.Q
 local Settings, StartPoints, State, TravelSpeed, TurnInText = ns.Settings, ns.StartPoints, ns.State, ns.TravelSpeed, ns.TurnInText
 local UnitTime, WorldPos, scan, LogQuests, AllIds, SkillName = ns.UnitTime, ns.WorldPos, ns.scan, ns.LogQuests, ns.AllIds, ns.SkillName
 local LogEntry, Normalize, GeoReady = ns.LogEntry, ns.Normalize, ns.GeoReady
+local IdKind, LogKind, RequestQuestTags, QuestTagsSettled = ns.IdKind, ns.LogKind, ns.RequestQuestTags, ns.QuestTagsSettled
+local IsCompleted, QuestAllowed = ns.IsCompleted, ns.QuestAllowed
 
 ---------------------------------------------------------------------------
 -- Profession level needed to turn a quest in (e.g. a profession introduction: "reach 20 in
@@ -435,9 +437,9 @@ function Geo.TakeTask(en, plevel, pos)
   local t = QuestTargets(en.id)
   if #t.finish == 0 then return nil end
   if (t.missing or 0) > 0 then return nil end -- an objective without a position: cannot be planned
-  -- Quest filed under a dungeon: only kept when it is just about talking or delivering (e.g. to an
-  -- NPC in a city); anything that happens inside the instance is rejected too.
-  if en.dungeon and Geo.DungeonCombat(en.id) then return nil end
+  -- Dungeon, raid or PvP quest: only kept when it is just about talking or delivering (e.g. to an
+  -- NPC in a city); anything that happens inside an instance is rejected too.
+  if Geo.LeftOut(en.id, (IdKind(en.id))) then return nil end
   if AllInstance(t.finish) or (#t.start > 0 and AllInstance(t.start)) then return nil end
   local remaining = RemainingTargets(nil, t)
   for _, r in ipairs(remaining) do if AllInstance(r.tg.points) then return nil end end
@@ -467,15 +469,54 @@ function Geo.PreIndex()
   return pre
 end
 
+-- Quests that follow a quest (chain data and prerequisites).
+local function NextIds(id)
+  local ids = {}
+  local m = QuestMeta(id)
+  if m then for _, b in ipairs(NextQuests(m)) do ids[#ids + 1] = b end end
+  for _, b in ipairs(Geo.PreIndex()[id] or {}) do ids[#ids + 1] = b end
+  return ids
+end
+
+-- Every quest Geo.Followers may examine after the tasks, to load their tags first: their follow-ups
+-- of any depth that the character may take at the levels scanned (ctx).
+function Geo.FollowUpIds(tasks, ctx)
+  local out, seen, todo = {}, {}, {}
+  for _, task in ipairs(tasks) do
+    if task.id then todo[#todo + 1] = { id = task.id, depth = 0 } end
+  end
+  local i = 1
+  while todo[i] do
+    local from = todo[i]
+    if from.depth < K.MAX_FOLLOW_DEPTH then
+      for _, b in ipairs(NextIds(from.id)) do
+        if not seen[b] and not IsCompleted(b) and QuestAllowed(b, ctx.classBit, ctx.raceBit)
+          and (QGet(QDB.Quest, b, "requiredLevel") or 0) <= ctx.plevel + ctx.lookahead then
+          seen[b] = true
+          out[#out + 1] = b
+          todo[#todo + 1] = { id = b, depth = from.depth + 1 }
+        end
+      end
+    end
+    i = i + 1
+    if i % 20 == 0 then Geo.Yield() end
+  end
+  return out
+end
+
+-- Waits, inside a computation spread over frames, for the game's tags of the quests ids.
+function Geo.AwaitTags(ids)
+  if RequestQuestTags(ids) then return end
+  if not (State.co and coroutine.running() == State.co) then return end
+  while not QuestTagsSettled(ids) do coroutine.yield() end
+end
+
 -- Follow-ups of a quest that become available once it is turned in.
 function Geo.Followers(task, ctx, plevel)
   if task.followers then return task.followers end
   task.followers = {}
   if not task.id or (task.depth or 0) >= K.MAX_FOLLOW_DEPTH or not task.stops then return task.followers end
-  local ids, seen = {}, {}
-  local m = QuestMeta(task.id)
-  if m then for _, b in ipairs(NextQuests(m)) do ids[#ids + 1] = b end end
-  for _, b in ipairs(Geo.PreIndex()[task.id] or {}) do ids[#ids + 1] = b end
+  local ids, seen = NextIds(task.id), {}
   local done = {}
   for k, v in pairs(task.done or {}) do done[k] = v end
   done[task.id] = true
@@ -602,9 +643,11 @@ function Geo.ToAbandon(questId)
   return State.abandonIds[questId] or false
 end
 
--- Dungeon / raid quest kept out of the Roadbook: anything but talking or delivering, even when its
--- targets are outside the instance (e.g. an elite in front of the entrance).
-function Geo.DungeonCombat(id)
+-- Quest of a kind done in a group (dungeon, raid, PvP; nil: none) kept out of the automatic choice:
+-- anything but talking or delivering, even when its targets are outside the instance (e.g. an elite
+-- in front of the entrance).
+function Geo.LeftOut(id, kind)
+  if not kind then return false end
   for _, t in ipairs(Geo.QuestTypes(id)) do
     if t ~= "talk" and t ~= "delivery" then return true end
   end
@@ -688,8 +731,8 @@ local function BuildTasks(pos, plevel)
     local ready = q.complete and not q.failed
     if Geo.SkillNeed(q.id, q) then
       skipped = skipped + 1 -- profession level too low to turn it in
-    elseif not ready and (q.isInstance or q.instanceName) and Geo.DungeonCombat(q.id) then
-      skipped = skipped + 1 -- dungeon / raid quest (game tag): only turned in when it is ready
+    elseif not ready and Geo.LeftOut(q.id, (LogKind(q))) then
+      skipped = skipped + 1 -- dungeon, raid or PvP quest: only turned in when it is ready
     elseif ready or (not q.failed and (xp > 0 or atMax) and not group and (q.level or 0) <= Geo.MaxQuestLevel(q.id, plevel) + 1) then
       local t = QuestTargets(q.id)
       local remaining, unmatched = {}, 0
@@ -754,6 +797,16 @@ local function CurrentZoneNames()
   return names
 end
 
+-- Kind of a group of available quests: "pvp", "raid", "dungeon", or nil. g.instance: an instance's.
+local function GroupKind(g)
+  local n = { pvp = 0, raid = 0, dungeon = 0 }
+  for _, e in ipairs(g.list) do
+    if e.kind then n[e.kind] = n[e.kind] + 1 end
+  end
+  if not g.instance and n.pvp < #g.list and n.raid + n.dungeon < #g.list then return nil end
+  return (n.pvp > 0 and "pvp") or (n.raid > 0 and "raid") or (n.dungeon > 0 and "dungeon") or nil
+end
+
 -- The available quests (scan.entries) a filter of the "Available" tab shows, grouped, the groups in
 -- their order. filter: "all", "zone", "dungeon", "pvp", "class", "custom" (the Roadbook list);
 -- matches(entry): the search, optional; showLow: low-level quests too. Returns the groups
@@ -771,7 +824,7 @@ function Geo.AvailableGroups(filter, matches, showLow)
   local groups, byKey, total = {}, {}, 0
   -- The groups apart from the places: id (never a place's name) -> title and place in the list.
   local special = { ["#class"] = { name = L["Class"], rank = 1 }, ["#prof"] = { name = L["Professions"], rank = 2 } }
-  local function Place(e) return e.dungeon or e.area or e.starterZone or L["Other"] end
+  local function Place(e) return e.instance or e.area or e.starterZone or L["Other"] end
   local function ClassOrPlace(e)
     return (e.isClass and "#class") or (e.isProf and "#prof") or Place(e)
   end
@@ -782,11 +835,11 @@ function Geo.AvailableGroups(filter, matches, showLow)
     if (e.lowLevel and not showLow) or e.future then return false end
     if filter == "zone" then
       return StartsHere(e) or (e.area and zoneNames[e.area]) or (e.starterZone and zoneNames[e.starterZone])
-        or (e.dungeon and zoneNames[e.dungeon]), Place(e)
+        or (e.instance and zoneNames[e.instance]), Place(e)
     elseif filter == "dungeon" then
-      return e.dungeon ~= nil and not e.pvp, e.dungeon -- battlegrounds have their own filter
+      return e.kind == "dungeon" or e.kind == "raid", Place(e) -- PvP has its own filter
     elseif filter == "pvp" then
-      return e.pvp, Place(e)
+      return e.kind == "pvp", Place(e)
     elseif filter == "class" then
       return e.isClass or e.isProf, e.isClass and "#class" or "#prof"
     end
@@ -800,21 +853,25 @@ function Geo.AvailableGroups(filter, matches, showLow)
       local g = byKey[key]
       if not g then
         local s = special[key]
-        local kind = e.dungeon and key == e.dungeon and "dungeon" or (s and "class") or "zone"
-        g = { name = s and s.name or key, rank = s and s.rank, kind = kind, list = {} }
+        g = { name = s and s.name or key, rank = s and s.rank, kind = s and "class" or "zone", list = {} }
         byKey[key] = g
         groups[#groups + 1] = g
       end
       g.list[#g.list + 1] = e
       total = total + 1
-      if e.pvp then g.pvp, g.kind = true, "pvp" end
+      if e.instance and key == e.instance then g.instance = true end
     end
+  end
+  -- A group of places takes a kind when it is an instance's, or when all its quests are of that kind
+  -- (a zone is not turned into a PvP one by a single quest).
+  for _, g in ipairs(groups) do
+    if not g.rank then g.kind = GroupKind(g) or g.kind end
   end
   -- Order of the groups: class, professions, dungeons, standard zones, PvP; then alphabetical.
   local function Rank(g)
     if g.rank then return g.rank end -- class, professions
-    if g.pvp then return 5 end
-    if g.kind == "dungeon" then return 3 end
+    if g.kind == "pvp" then return 5 end
+    if g.kind == "dungeon" or g.kind == "raid" then return 3 end
     return 4
   end
   table.sort(groups, function(a, b)

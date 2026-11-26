@@ -79,6 +79,7 @@ function Pb.Tasks(P, pos, plevel, live)
   local t0 = debugprofilestop()
   local tasks, skipped = BuildTasks(pos, plevel)
   local ctx = BuildScanContext()
+  Geo.AwaitTags(Geo.FollowUpIds(tasks, ctx)) -- the follow-ups' kinds decide which are kept
   local list = {}
   local function add(task, dep)
     if #list >= K.BENCH_MAX_TASKS then return end
@@ -101,6 +102,11 @@ function Geo.CustomPlanSteps(pos, plevel, near)
   local svc = Geo.ServiceStep()
   if #list == 0 and not svc then return nil, L["The list is empty: add quests with the \"Add\" button of the other tabs, or choose a session or a level."] end
   local logById = LogById()
+  local notInLog = {}
+  for _, it in ipairs(list) do
+    if not logById[it.id] then notInLog[#notInLog + 1] = it.id end
+  end
+  Geo.AwaitTags(notInLog) -- for the names of the instance visits
   local tasks, byId, unplanned = {}, {}, {}
   for _, it in ipairs(list) do
     local ok, task, why = pcall(Geo.CustomTask, it, pos, plevel, logById)
