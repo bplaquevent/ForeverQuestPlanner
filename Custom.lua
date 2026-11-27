@@ -234,6 +234,77 @@ function Geo.CustomRemove(id, quiet)
   return true, removed
 end
 
+-- A quest can be withdrawn: taken out of the list until the player says what to do with it (abandoned
+-- quest, Roadbook.lua), so that no computation meanwhile plans it. Geo.withdrawal, while a record is
+-- pending: { pending = { [record] = true }, order = ids as the list had them before every withdrawal,
+-- to put the quests back at their place whatever the order of the answers }.
+local function MergeOrder(order, list)
+  local function position(id)
+    for i, o in ipairs(order) do
+      if o == id then return i end
+    end
+  end
+  for i, e in ipairs(list) do
+    if not position(e.id) then
+      table.insert(order, i == 1 and 1 or position(list[i - 1].id) + 1, e.id)
+    end
+  end
+end
+
+-- Returns the record Geo.CustomRestore puts back, nil when the quest is not in the list. Its entries:
+-- the ones that left with it (prerequisites added only for it) or became another quest's prerequisite.
+function Geo.CustomWithdraw(id)
+  if not Geo.InCustom(id) then return nil end
+  local w = Geo.withdrawal or { pending = {}, order = {} }
+  Geo.withdrawal = w
+  local before = {}
+  for i, e in ipairs(Geo.CustomRec().list) do before[i] = { e = e, pre = e.pre } end
+  MergeOrder(w.order, Geo.CustomRec().list)
+  Geo.CustomRemove(id, true)
+  local record = {}
+  for _, b in ipairs(before) do
+    if not Geo.InCustom(b.e.id) or b.e.pre ~= b.pre then
+      record[#record + 1] = { e = b.e, old = b.pre, new = b.e.pre }
+    end
+  end
+  w.pending[record] = true
+  return record
+end
+
+-- The record is settled: its quest stays out of the list.
+function Geo.CustomForget(record)
+  local w = Geo.withdrawal
+  if not (w and record) then return end
+  w.pending[record] = nil
+  if not next(w.pending) then Geo.withdrawal = nil end
+end
+
+-- The quest back in the list, with what left or changed with it; the other changes made since stay.
+function Geo.CustomRestore(record)
+  local w = Geo.withdrawal
+  if not (w and w.pending[record]) then return end
+  local rank = {}
+  for i, id in ipairs(w.order) do rank[id] = i end
+  for _, r in ipairs(record) do
+    local list = {}
+    for i, e in ipairs(Geo.CustomRec().list) do list[i] = e end
+    local i = Geo.CustomIndex(r.e.id)
+    if i then
+      if list[i].pre == r.new then list[i].pre = r.old end
+    else
+      local at = #list + 1
+      for j, e in ipairs(list) do
+        if rank[e.id] and rank[e.id] > rank[r.e.id] then at = j break end
+      end
+      r.e.pre = r.old
+      table.insert(list, at, r.e)
+      Geo.CustomSetList(list, true)
+      Geo.Trace("list", "restored " .. tostring(r.e.id) .. " " .. tostring(r.e.title))
+    end
+  end
+  Geo.CustomForget(record)
+end
+
 function Geo.CustomRemoveList(list)
   local n, extra = 0, 0
   for _, q in ipairs(list) do

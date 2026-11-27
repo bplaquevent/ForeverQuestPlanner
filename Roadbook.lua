@@ -609,8 +609,9 @@ function CP.NearbyCheck()
 end
 
 -- Quest gone from the log (QUEST_REMOVED, a moment later): turned in, the focused step moves on (if
--- QUEST_TURNED_IN did not already do it); abandoned while the Roadbook plans it: remove it from the
--- list, or keep it and pick it up again (the steps to come are computed again either way).
+-- QUEST_TURNED_IN did not already do it); abandoned while the Roadbook plans it: out of the list at
+-- once, then a question: leave it so, or take it back and pick it up again (the steps to come are
+-- computed again either way). Unanswered at a reload: it stays out of the list.
 function CP.QuestRemoved(id)
   if IsInLog(id) then return end
   for key, qid in pairs(CP.aheadSeen) do -- picked up again later: its steps count again
@@ -636,8 +637,60 @@ function CP.QuestRemoved(id)
     for _, e in ipairs(Geo.CustomList()) do if e.id == id then title = e.title end end
   end
   title = title or tostring(id)
+  CP.Withdraw(id, title)
   local text = string.format(L["You abandoned \"%s\".\n\nRemove it from the list, or keep it and pick it up again? The steps to come of the Roadbook are computed again (the steps done stay)."], title)
   CP.Ask("FQP_QUEST_ABANDONED", text, { id = id, title = title })
+end
+
+-- Abandoned quests waiting for an answer, out of the list: quest id -> record of Geo.CustomWithdraw.
+CP.withdrawn = {}
+
+function CP.Withdraw(id, title)
+  local record = Geo.CustomWithdraw(id)
+  if not record then return end
+  CP.withdrawn[id] = record
+  Print(L["Quest abandoned, out of the Roadbook list until you answer: "] .. title)
+  Geo.SyncQuestLogButton()
+  Refresh()
+end
+
+-- The withdrawn quest back in the list. Returns false when it was not withdrawn.
+function CP.PutBack(id)
+  local record = id and CP.withdrawn[id]
+  if not record then return false end
+  CP.withdrawn[id] = nil
+  Geo.CustomRestore(record)
+  return true
+end
+
+-- Runs fn once no computation is under way (the one under way does not know what changed meanwhile).
+function CP.WhenIdle(fn)
+  if State.computing then
+    C_Timer.After(2, function() CP.WhenIdle(fn) end)
+    return
+  end
+  fn()
+end
+
+-- The answer about an abandoned quest: back in the list to pick it up again, or left out of it.
+function CP.AbandonAnswer(data, again)
+  if again then
+    CP.PutBack(data.id)
+    CP.WhenIdle(function()
+      -- asked by the player: computed again, tracked or not (no Roadbook left: through the list)
+      if not CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ", nil, true) then
+        Geo.CustomChanged()
+      end
+    end)
+    return
+  end
+  Geo.CustomForget(CP.withdrawn[data.id])
+  CP.withdrawn[data.id] = nil
+  CP.WhenIdle(function()
+    if Geo.CustomRemove(data.id) then return end -- already out of the list, as a rule
+    Print(L["Removed from the Roadbook list: "] .. data.title)
+    Geo.CustomChanged()
+  end)
 end
 
 -- Questions asked one window at a time for each kind: a second window of a kind would close the first
@@ -683,11 +736,10 @@ StaticPopupDialogs["FQP_QUEST_ABANDONED"] = {
   button1 = L["Remove from the list"],
   button2 = L["Pick it up again"],
   OnAccept = function(_, data)
-    if data then CP.SkipQuest({ task = { id = data.id, title = data.title } }) end
+    if data then CP.AbandonAnswer(data, false) end
   end,
   OnCancel = function(_, data) -- also Escape: the quest stays planned
-    -- asked by the player: computed again, tracked or not
-    if data then CP.Replan(L["Quest abandoned, to pick up again: "] .. data.title .. ". ", nil, true) end
+    if data then CP.AbandonAnswer(data, true) end
   end,
   OnHide = function() CP.Asked("FQP_QUEST_ABANDONED") end,
   timeout = 0,
@@ -762,6 +814,7 @@ function CP.DoEmpty()
   Geo.ForgetDismissedPlaces()
   Geo.SetPaused(false) -- back to the default: the tracking is automatic
   CP.asks = nil
+  CP.withdrawn, Geo.withdrawal = {}, nil
   State.customUnplanned = nil
   State.customToken = (State.customToken or 0) + 1 -- no pending recompute
   Print(L["Roadbook emptied."])
@@ -1303,6 +1356,10 @@ function STEP_EVENTS.obj(s, event, a1, a2)
 end
 
 function CP.OnGameEvent(event, a1, a2)
+  if event == "QUEST_ACCEPTED" then -- picked up again before the answer: back in the list
+    local back1, back2 = CP.PutBack(a1), CP.PutBack(a2)
+    if back1 or back2 then CP.WhenIdle(Geo.CustomChanged) end
+  end
   if event == "QUEST_ACCEPTED" then Guard(CP.AutoAddAccepted, a1, a2) end
   if event == "QUEST_LOG_UPDATE" and CP.checkpointButton then C_Timer.After(0.2, function() Guard(CP.RefreshButton) end) end
   -- Landing after a flight taken during a focus.
