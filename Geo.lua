@@ -198,25 +198,62 @@ local function EntityPoints(kind, id)
   return pts
 end
 
+-- Level of a monster (min/max average), or nil.
+function Geo.MobLevel(npcId)
+  local lo, hi = QGet(QDB.Npc, npcId, "minLevel"), QGet(QDB.Npc, npcId, "maxLevel")
+  if type(lo) ~= "number" or lo <= 0 then return nil end
+  return math.floor(((lo + (type(hi) == "number" and hi or lo)) / 2) + 0.5)
+end
+
+-- The sources (monsters or objects dropping an item) looked at for the quest questId, among ids
+-- (QuestieDB lists them by id: a common item has dozens, in any zone). When there are too many:
+-- those standing in the quest's zone first, then the monsters closest to the quest's level (objects
+-- have none), in QuestieDB's order when nothing tells them apart.
+function Geo.DropSources(kind, ids, questId)
+  if #ids <= K.MAX_DROP_SOURCES then return ids end
+  local entity = (kind == "npc") and QDB.Npc or QDB.Object
+  local function Parent(zone) return Geo.parent[zone] or zone end
+  local zone = QGet(QDB.Quest, questId, "zoneOrSort") -- negative: a category, not a zone
+  zone = type(zone) == "number" and zone > 0 and Parent(zone) or nil
+  local level = QGet(QDB.Quest, questId, "questLevel")
+  level = type(level) == "number" and level > 0 and level or nil
+  local ranked = {}
+  for i, id in ipairs(ids) do
+    local away = 1
+    local spawns = zone and QGet(entity, id, "spawns")
+    for z, list in pairs(type(spawns) == "table" and spawns or {}) do
+      if Parent(z) == zone and type(list) == "table" and #list > 0 then away = 0 break end
+    end
+    local mob = level and kind == "npc" and Geo.MobLevel(id)
+    ranked[i] = { id = id, i = i, away = away, gap = mob and math.abs(mob - level) or math.huge }
+  end
+  table.sort(ranked, function(a, b)
+    if a.away ~= b.away then return a.away < b.away end
+    if a.gap ~= b.gap then return a.gap < b.gap end
+    return a.i < b.i
+  end)
+  local out = {}
+  for i = 1, K.MAX_DROP_SOURCES do out[i] = ranked[i].id end
+  return out
+end
+
 -- Quest started by an item that an NPC or an object is listed with too (QuestieDB data conflict).
 local function ItemAndGiver(givers)
   return type(givers) == "table" and type(givers[3]) == "table" and #givers[3] > 0
     and (#(givers[1] or {}) > 0 or #(givers[2] or {}) > 0)
 end
 
-local function GiverPoints(givers)
+local function GiverPoints(givers, questId)
   local pts = {}
   if type(givers) ~= "table" then return pts end
   -- The item gives the quest: where it drops (monsters, objects), not the giver listed with it.
   if ItemAndGiver(givers) then
     for _, itemId in ipairs(givers[3]) do
-      local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
-      for i = 1, math.min(#npcs, K.MAX_DROP_SOURCES) do
-        for _, p in ipairs(EntityPoints("npc", npcs[i])) do pts[#pts + 1] = p end
+      for _, npc in ipairs(Geo.DropSources("npc", QGet(QDB.Item, itemId, "npcDrops") or {}, questId)) do
+        for _, p in ipairs(EntityPoints("npc", npc)) do pts[#pts + 1] = p end
       end
-      local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
-      for i = 1, math.min(#objs, K.MAX_DROP_SOURCES) do
-        for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
+      for _, obj in ipairs(Geo.DropSources("object", QGet(QDB.Item, itemId, "objectDrops") or {}, questId)) do
+        for _, p in ipairs(EntityPoints("object", obj)) do pts[#pts + 1] = p end
       end
     end
     if #pts > 0 then return pts end
@@ -233,7 +270,7 @@ end
 local function StartPoints(id)
   local pts = Geo.givers[id]
   if not pts then
-    pts = GiverPoints(QGet(QDB.Quest, id, "startedBy"))
+    pts = GiverPoints(QGet(QDB.Quest, id, "startedBy"), id)
     Geo.givers[id] = pts
   end
   return pts
@@ -870,12 +907,13 @@ local function AddCreditTarget(add, o)
   else add("kill", name, pts, nil, ids[1], #ids > 0 and ids or nil) end
 end
 
--- Target of an item to collect: where it drops (monsters, objects), with the average drop rate.
-function Geo.AddItemTarget(add, itemId)
+-- Target of an item to collect for a quest: where it drops (monsters, objects), with the average
+-- drop rate.
+function Geo.AddItemTarget(add, itemId, questId)
   -- Drop rate: average over the monsters, each weighted by its number of spawns (the ones met).
   local pts, rateSum, rateN = {}, 0, 0
-  local npcs = QGet(QDB.Item, itemId, "npcDrops") or {}
-  for i = 1, math.min(#npcs, K.MAX_DROP_SOURCES) do
+  local npcs = Geo.DropSources("npc", QGet(QDB.Item, itemId, "npcDrops") or {}, questId)
+  for i = 1, #npcs do
     local spawns = EntityPoints("npc", npcs[i])
     for _, p in ipairs(spawns) do pts[#pts + 1] = p end
     local r = DropRate(itemId, npcs[i])
@@ -884,8 +922,8 @@ function Geo.AddItemTarget(add, itemId)
       rateSum, rateN = rateSum + r * n, rateN + n
     end
   end
-  local objs = QGet(QDB.Item, itemId, "objectDrops") or {}
-  for i = 1, math.min(#objs, K.MAX_DROP_SOURCES) do
+  local objs = Geo.DropSources("object", QGet(QDB.Item, itemId, "objectDrops") or {}, questId)
+  for i = 1, #objs do
     for _, p in ipairs(EntityPoints("object", objs[i])) do pts[#pts + 1] = p end
   end
   local kind = (#npcs == 0 and #objs > 0) and "object" or "item"
@@ -902,7 +940,7 @@ function Geo.AddItemTarget(add, itemId)
     if #pts > 0 then kind = "buy" end
   end
   local ids = {}
-  for i = 1, math.min(#npcs, K.MAX_DROP_SOURCES) do ids[#ids + 1] = npcs[i] end
+  for i = 1, #npcs do ids[i] = npcs[i] end
   add(kind, QGet(QDB.Item, itemId, "name"), pts, rateN > 0 and rateSum / rateN or nil, npcs[1], #ids > 0 and ids or nil)
 end
 
@@ -918,9 +956,8 @@ local function QuestTargets(id)
       local tg = { kind = kind, name = name, points = points, rate = rate, mobIds = mobIds or (mob and { mob }) }
       -- Monster level (min/max average) for the XP earned by killing it.
       if mob then
-        local lo, hi = QGet(QDB.Npc, mob, "minLevel"), QGet(QDB.Npc, mob, "maxLevel")
-        if type(lo) == "number" and lo > 0 then
-          tg.mobLevel = math.floor(((lo + (type(hi) == "number" and hi or lo)) / 2) + 0.5)
+        tg.mobLevel = Geo.MobLevel(mob)
+        if tg.mobLevel then
           local rank = QGet(QDB.Npc, mob, "rank")
           tg.elite = K.ELITE_RANKS[rank] or false
         end
@@ -942,7 +979,7 @@ local function QuestTargets(id)
     for _, o in ipairs(obj[2] or {}) do
       add("object", QGet(QDB.Object, o[1], "name"), EntityPoints("object", o[1]))
     end
-    for _, o in ipairs(obj[3] or {}) do Geo.AddItemTarget(add, o[1]) end
+    for _, o in ipairs(obj[3] or {}) do Geo.AddItemTarget(add, o[1], id) end
     for _, o in ipairs(obj[5] or {}) do
       if type(o) == "table" and o[2] then AddCreditTarget(add, o) end
     end
@@ -974,7 +1011,7 @@ local function QuestTargets(id)
   local nPlaced, nCalls = #t, calls -- objectives (without the source items)
   for _, itemId in ipairs(srcIds) do
     local before = #t
-    Geo.AddItemTarget(add, itemId)
+    Geo.AddItemTarget(add, itemId, id)
     if #t > before then t[#t].sourceItem = itemId end
   end
   local hasSource = #t > nPlaced
@@ -995,7 +1032,7 @@ local function QuestTargets(id)
   end
   t.missing = nCalls - nPlaced -- objectives without a known position in QuestieDB (source items apart)
   t.start = StartPoints(id)
-  t.finish = GiverPoints(QGet(QDB.Quest, id, "finishedBy"))
+  t.finish = GiverPoints(QGet(QDB.Quest, id, "finishedBy"), id)
   Geo.targets[id] = t
   return t
 end
