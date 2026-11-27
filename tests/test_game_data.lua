@@ -76,6 +76,31 @@ Geo.dropDB = { tablePserver = true, GetItemDroprate = function(_, npc) return { 
 t = targets(6, { objectives = { [3] = { { 7 } } } })
 check("drop rate weighted by the spawns", t[1] and t[1].rate and math.abs(t[1].rate - 1090 / 101) < 0.001)
 
+-- an item dropped by too many monsters: the ones of the quest's zone first, then those closest to its
+-- level
+Geo.parent[13] = 12 -- a sub-zone of the quest's zone
+local drops = {}
+for i = 1, 6 do -- far away, listed first by QuestieDB
+  data.npc[100 + i] = { spawns = { [40] = { { 10, 10 } } }, minLevel = 20 + i }
+  drops[#drops + 1] = 100 + i
+end
+data.npc[107] = { spawns = { [40] = { { 10, 10 } } }, minLevel = 11 }
+data.npc[108] = { spawns = { [13] = { { 60, 60 } } }, minLevel = 17 }
+data.npc[109] = { spawns = { [12] = { { 70, 70 } } }, minLevel = 12 }
+for _, id in ipairs({ 107, 108, 109 }) do drops[#drops + 1] = id end
+data.item[8] = { name = "Eye", npcDrops = drops }
+Geo.areaToUi[40] = 40
+t = targets(9, { zoneOrSort = 12, questLevel = 11, objectives = { [3] = { { 8 } } } })
+local ids = t[1] and table.concat(t[1].mobIds, " ")
+check("too many sources: quest zone, then level: " .. tostring(ids), ids == "109 108 107 101 102 103")
+check("too many sources: level of the first one kept", t[1] and t[1].mobLevel == 12)
+check("few sources: QuestieDB's order", Geo.DropSources("npc", { 101, 109 }, 9)[1] == 101)
+data.quest[10] = { zoneOrSort = -81 }
+check("no zone nor level: QuestieDB's order", table.concat(Geo.DropSources("npc", drops, 10), " ") == "101 102 103 104 105 106")
+local many = {}
+for i = 1, 7 do data.object[i] = { spawns = { [i == 7 and 12 or 40] = { { 10, 10 } } } } many[i] = i end
+check("objects: the quest's zone first", Geo.DropSources("object", many, 9)[1] == 7)
+
 -- a place to reach inside a dungeon: its entrance
 t = targets(7, { triggerEnd = { "Reach the heart", { [500] = { { -1, -1 }, { -1, -1 } } } } })
 check("trigger in a dungeon: its entrance, once", t[1] and #t[1].points == 1 and t[1].points[1].instance ~= nil)
