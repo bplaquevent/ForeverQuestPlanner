@@ -346,6 +346,18 @@ do
   check("emptied: the pause lifted", not Geo.Paused() and t.ns.Settings().trackingPaused == nil)
   CP.Recompute("custom", true)
   check("the next Roadbook is followed", computed == 8 and focus ~= nil)
+
+  -- the "Tracking" box shows the setting, also while no step is followed yet (login, computation)
+  focus = nil
+  local function on() return Geo.TrackingOn and Geo.TrackingOn() end
+  check("box checked before a step is followed", on() == true)
+  if CP.ToggleTracking then CP.ToggleTracking() end
+  check("a click then pauses", Geo.Paused() and computed == 8)
+  check("paused: box unchecked", on() == false)
+  if CP.ToggleTracking then CP.ToggleTracking() end
+  check("a click turns it on again: computed and followed", not Geo.Paused() and computed == 9 and focus ~= nil)
+  CP.StepDone = function() return true end
+  check("finished Roadbook: box unchecked", on() == false)
 end
 
 -- 13. the login asks for the Roadbook to be resumed

@@ -181,6 +181,13 @@ function Geo.SetPaused(paused)
   Settings().trackingPaused = paused and true or nil
 end
 
+-- Is the tracking turned on (the "Tracking" box)? The player's setting, not whether a step is
+-- followed right now: none is yet during a computation or while the login waits. A finished Roadbook
+-- has nothing to follow.
+function Geo.TrackingOn()
+  return not Geo.Paused() and not Geo.IsFinished()
+end
+
 -- Every step of the Roadbook is done: it can only be extended (custom: quests added), generated again or emptied.
 function Geo.IsFinished()
   local fz = Geo.Frozen()

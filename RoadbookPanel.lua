@@ -417,7 +417,7 @@ local function Create()
   panel.auto = auto
   track:SetHitRectInsets(0, -((track.label:GetStringWidth() or 40) + 2), 0, 0)
   track:SetScript("OnClick", function()
-    if Geo.Tracking() then CP.Pause() else CP.TrackOn() end
+    CP.ToggleTracking()
     Geo.MapPanelSync()
   end)
   track:SetScript("OnEnter", function(self)
@@ -568,7 +568,7 @@ function Geo.MapPanelSync()
   local cur = CP.CurrentFocus()
   local rows, width = panel.rows, K.MAP_PANEL_W - 32
   local hideDone = Settings().stepsHideDone
-  local following = Geo.Tracking()
+  local following = Geo.TrackingOn()
   panel.hideDone:SetChecked(hideDone and true or false)
   local n, target, total = 0, nil, 0
   for i = 2, #route do
@@ -616,7 +616,7 @@ function Geo.MapPanelSync()
   UpdateScrollBar(panel.scroll)
   panel.track:SetChecked(following)
   panel.auto:SetChecked(Settings().autoAdd and true or false)
-  panel.track:SetEnabled(not State.computing and (following or not Geo.IsFinished()))
+  panel.track:SetEnabled(not State.computing and not Geo.IsFinished())
   panel.emptyB:SetEnabled(not State.computing)
   panel.recalc:SetEnabled(not State.computing and true or false)
   -- Scrolled to the objective when it changes (not at each refresh: the player may be scrolling).
