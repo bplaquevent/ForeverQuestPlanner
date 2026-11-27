@@ -102,11 +102,14 @@ check("no \"Remove all\" without a quest of the list", items[1].header and not i
 
 -- export: written again at any time, the keyboard taken only when the player opens the tab
 local focus, focused = 0, false
-local eb = { SetText = function() end, SetCursorPosition = function() end, HighlightText = function() end,
+local selected = false -- writing the text drops the selection
+local eb = { SetText = function() selected = false end, SetCursorPosition = function() end,
+  HighlightText = function() selected = true end,
   HasFocus = function() return focused end, SetFocus = function() focus, focused = focus + 1, true end }
 ns.panels.export = { scroll = { child = eb } }
 ns.RenderExport()
 check("export written again: the keyboard is not taken", focus == 0)
+check("export written again without the keyboard: still selected", selected)
 if ns.FocusExport then ns.FocusExport() end
 check("export opened: selected", focus == 1)
 
