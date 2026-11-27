@@ -512,8 +512,31 @@ function Geo.GroupDungeons(tasks)
   return dungeons
 end
 
--- Order constraints: pick-up before the rest of the quest, turn-in after; prerequisite turned in
--- before the pick-up of its follow-up.
+-- What the solver reads of a step's objective to know whether it keeps its place among the quest's
+-- objectives (S.FreeObjective).
+function Geo.StepObjective(st)
+  local tg = st.r and st.r.tg
+  return tg and { kind = tg.kind, fixed = st.afterSource or nil } or nil
+end
+
+-- Order rules of a quest's objectives (outside dungeons): talking, events, places, escorts keep their
+-- place among them; the others in any order (Solver.Ranks). before(a, b): a comes before b.
+local function ObjectiveOrder(task, before)
+  local objs = {}
+  for _, s in ipairs(task.stops) do
+    if s.kind == "obj" and not s.inside then
+      objs[#objs + 1] = { kind = s.kind, escort = s.escort, obj = Geo.StepObjective(s), ci = s } -- ci: its key in pred
+    end
+  end
+  local pred = {}
+  ns.Solver.RankPreds(objs, pred)
+  for _, o in ipairs(objs) do
+    for _, a in ipairs(pred[o.ci] or {}) do before(a, o.ci) end
+  end
+end
+
+-- Order constraints: pick-up before the rest of the quest, turn-in after, objectives kept at their place
+-- (ObjectiveOrder); prerequisite turned in before the pick-up of its follow-up.
 function Geo.CustomConstraints(tasks)
   local pred, succ = {}, {}
   local function before(a, b)
@@ -545,6 +568,7 @@ function Geo.CustomConstraints(tasks)
       end
       if not isTake[task.lastC] then before(x, task.lastC) end -- (pick-up and turn-in in one dungeon visit: none)
     end
+    ObjectiveOrder(task, before)
   end
   for _, b in ipairs(tasks) do
     for _, c in ipairs(b.takesC) do
