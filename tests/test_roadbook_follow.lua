@@ -248,6 +248,105 @@ do
   check("then it is asked", #popups == 2 and popups[2].data.id == 2)
 end
 
+-- 9b. abandoned quests leave the list until answered: no computation can plan them meanwhile
+do
+  local function setup(list, prereqsOf)
+    local t = session()
+    local Geo, CP = t.Geo, t.CP
+    for id, single in pairs(prereqsOf or {}) do t.data[id] = { group = single } end
+    t.ns.Settings().custom = { list = list }
+    Geo.Frozen = function() return { route = { {} } } end
+    Geo.HasRoadbook = function() return true end
+    Geo.CustomSetList = function(l) t.ns.Settings().custom.list = l end
+    t.replans, t.changes = {}, {}
+    CP.Replan = function() t.replans[#t.replans + 1] = t.ids() return true end
+    Geo.CustomChanged = function() t.changes[#t.changes + 1] = t.ids() end
+    CP.ScheduleRecallCheck = function() end
+    CP.AutoAddAccepted = function() end
+    CP.GiverFound = function() return false end
+    function t.ids()
+      local out = {}
+      for _, e in ipairs(t.ns.Settings().custom.list) do out[#out + 1] = e.id .. (e.pre and ("<" .. e.pre) or "") end
+      return table.concat(out, " ")
+    end
+    -- the answer to the window shown: "remove" or "again"; then the window closes
+    function t.answer(what)
+      local d = t.env.StaticPopupDialogs.FQP_QUEST_ABANDONED
+      local data = t.log.popups[#t.log.popups].data
+      if what == "remove" then d.OnAccept(nil, data) else d.OnCancel(nil, data) end
+      d.OnHide()
+      t.tick()
+    end
+    return t
+  end
+  local function abc() return { { id = 1 }, { id = 2 }, { id = 3 } } end
+
+  local t = setup(abc())
+  t.CP.QuestRemoved(1)
+  t.CP.QuestRemoved(2)
+  check("abandoned: out of the list at once, even before its question", t.ids() == "3")
+  check("nothing computed before an answer", #t.replans == 0 and #t.changes == 0)
+  t.answer("remove")
+  check("first removed: the computation does not have the other one", t.changes[1] == "3" and #t.changes == 1)
+  t.answer("again")
+  check("second picked up again: back in the list, then computed", t.ids() == "2 3" and t.replans[1] == "2 3")
+
+  for _, case in ipairs({ { 1, 2, "again", "again" }, { 2, 1, "again", "again" }, { 1, 3, "again", "again" } }) do
+    t = setup(abc())
+    t.CP.QuestRemoved(case[1])
+    t.CP.QuestRemoved(case[2])
+    t.answer(case[3])
+    t.answer(case[4])
+    check("both picked up again, abandoned " .. case[1] .. " then " .. case[2] .. ": order kept: " .. t.ids(),
+      t.ids() == "1 2 3")
+  end
+
+  -- prerequisite 5, added for 1, also needed by 2
+  local function shared() return { { id = 5, pre = 1 }, { id = 1 }, { id = 2 } } end
+  local needs = { [1] = { 5 }, [2] = { 5 } }
+  t = setup(shared(), needs)
+  t.CP.QuestRemoved(1)
+  check("prerequisite kept for the other quest", t.ids() == "5<2 2")
+  t.answer("again")
+  check("picked up again: its prerequisite its own again: " .. t.ids(), t.ids() == "5<1 1 2")
+  t = setup(shared(), needs)
+  t.CP.QuestRemoved(1)
+  t.CP.QuestRemoved(2)
+  check("both abandoned: the shared prerequisite leaves too", t.ids() == "")
+  t.answer("again")
+  t.answer("remove")
+  check("first picked up again: back with its prerequisite: " .. t.ids(), t.ids() == "5<1 1")
+
+  t = setup({ { id = 1 } })
+  t.CP.QuestRemoved(1)
+  t.Geo.HasRoadbook = function() return false end
+  t.CP.Replan = function() return false end
+  t.answer("again")
+  check("only quest, no Roadbook left: computed through the list", t.ids() == "1" and t.changes[1] == "1")
+
+  t = setup(abc())
+  t.CP.QuestRemoved(1)
+  t.State.computing = true -- started while the question was shown
+  t.env.StaticPopupDialogs.FQP_QUEST_ABANDONED.OnCancel(nil, t.log.popups[1].data)
+  check("answered during a computation: in the list at once", t.ids() == "1 2 3" and #t.replans == 0)
+  t.State.computing = nil
+  t.tick()
+  check("computed once it is over", #t.replans == 1)
+
+  t = setup(abc())
+  t.CP.QuestRemoved(1)
+  t.log.fire("QUEST_ACCEPTED", 1)
+  check("picked up again before the answer: back in the list", t.ids() == "1 2 3" and #t.changes == 1)
+
+  t = setup(abc())
+  t.CP.QuestRemoved(1)
+  t.Geo.MapOwner = function() return nil end
+  t.CP.TrackOff = function() end
+  t.CP.DoEmpty()
+  t.answer("again")
+  check("Roadbook emptied meanwhile: nothing comes back", t.ids() == "")
+end
+
 -- 10. a computation given up or the Roadbook emptied leaves nothing under way
 do
   local t = session()
