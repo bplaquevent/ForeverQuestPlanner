@@ -42,8 +42,9 @@ function Pb.Step(st, live)
   if st.r and st.r.tg then
     local tg = st.r.tg
     local kills = (tg.kind == "item" and st.r.count * Geo.KillsPerItem(tg)) or (tg.kind == "kill" and st.r.count) or nil
-    o = { kind = tg.kind, name = tg.name, count = st.r.count, kills = kills, mobLevel = tg.mobLevel,
-      elite = tg.elite or nil, rate = tg.rate, fixed = st.afterSource or nil }
+    o = Geo.StepObjective(st)
+    o.name, o.count, o.kills = tg.name, st.r.count, kills
+    o.mobLevel, o.elite, o.rate = tg.mobLevel, tg.elite or nil, tg.rate
   end
   local members
   if st.kind == "dungeon" and t.members then
@@ -180,15 +181,6 @@ function Pb.Custom(P, cp, live)
       end
       out.pred[ci[s]] = l
     end
-  end
-  -- Objectives of a quest (outside dungeons): talking, events, places, escorts keep their place among
-  -- them; the others in any order (Solver.Ranks).
-  for _, task in ipairs(cp.tasks) do
-    local objs = {}
-    for _, s in ipairs(task.stops or {}) do
-      if s.kind == "obj" and ci[s] then objs[#objs + 1] = out.steps[ci[s]] end
-    end
-    ns.Solver.RankPreds(objs, out.pred)
   end
   out.first = cp.service and ci[cp.service] or nil -- service shortcut: always the first step
   P.custom = out
