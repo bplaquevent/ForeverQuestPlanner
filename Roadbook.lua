@@ -720,6 +720,11 @@ function CP.Pause()
   CP.TrackOff()
 end
 
+-- Click on the "Tracking" box.
+function CP.ToggleTracking()
+  if Geo.TrackingOn() then CP.Pause() else CP.TrackOn() end
+end
+
 -- At login the followed step is lost: unless paused, the Roadbook is followed again, computed from
 -- where the character is now. Waits while that cannot be done (in flight, fight, dead, no position).
 K.RESUME_DELAY, K.RESUME_RETRY = 5, 10 -- seconds after the login, between two tries
