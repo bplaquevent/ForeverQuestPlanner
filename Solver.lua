@@ -177,12 +177,6 @@ function S.WalkWay(W, a, b)
   return best, way
 end
 
-function S.WalkTime(W, a, b, speed)
-  local d, way = S.WalkWay(W, a, b)
-  if not d then return nil end
-  return d * (way and W.k.PASS_PATH_FACTOR or W.k.PATH_FACTOR) / speed, way
-end
-
 -- Shape of the walk a -> b, independent of the speed and of the player level: its length (path factor
 -- included) and the highest zone minimum level crossed; nil length when there is no way on foot.
 local function WalkShape(W, a, b)
