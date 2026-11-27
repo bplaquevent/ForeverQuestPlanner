@@ -350,14 +350,17 @@ function Geo.SpotFactor(spot, kills)
   return f
 end
 
--- Best spot for an objective: travel from "from" + hunting time based on density.
-function Geo.BestSpot(r, from, speed)
+-- Best spot for an objective: travel from "from" (the solver's travel model: flights, boats and
+-- zeppelins included) + hunting time based on density. Returns the spot, the number of spots and
+-- the monsters to kill.
+function Geo.BestSpot(r, from, speed, plevel)
   local spots = Geo.Spots(r.tg)
   if not spots then return nil end
   local kills = (r.tg.kind == "item") and r.count * Geo.KillsPerItem(r.tg) or r.count
+  local W, net = Geo.World(), Geo.Net(speed)
   local best, bc
   for _, sp in ipairs(spots) do
-    local travel = Geo.WalkTime(from, sp.p, speed) or K.CROSS_CONTINENT
+    local travel = ns.Solver.Travel(W, net, plevel, from, sp.p)
     local cost = travel + kills * Geo.MobTime(r.tg) * Geo.SpotFactor(sp, kills)
     if not bc or cost < bc then best, bc = sp, cost end
   end
@@ -371,6 +374,7 @@ end
 K.ESCORT_SPEED = 2.5   -- walking speed of an escorted NPC (yd/s)
 K.ESCORT_MARGIN = 90   -- ambushes, waiting for the NPC to start
 local function MakeStops(task, pos, plevel)
+  plevel = plevel or UnitLevel("player")
   local speed = TravelSpeed()
   local t = task.targets
   local stops, from, mob = {}, pos, 0
@@ -399,7 +403,7 @@ local function MakeStops(task, pos, plevel)
     -- Source item (QuestieDB requiredSourceItems): the objectives that use it wait for it.
     local sourced = false
     while #todo > 0 do
-      local bi, bp, bd, bspot
+      local bi, bp, bd, bspot, bspots, bkills
       local onlyExplore, sourceLeft = false, false
       for _, r in ipairs(todo) do if r.tg.sourceItem then sourceLeft = true end end
       if escortFirst then
@@ -410,25 +414,22 @@ local function MakeStops(task, pos, plevel)
       end
       for i, r in ipairs(todo) do
         if not (onlyExplore and r.tg.kind ~= "explore") and not (sourceLeft and r.tg.needsSource) then
-          local spot = Geo.BestSpot(r, from, speed)
+          local spot, count, kills = Geo.BestSpot(r, from, speed, plevel)
           local p, d
           if spot then p, d = spot.p, Dist(from, spot.p) else p, d = Nearest(r.tg.points, from) end
-          if p and (not bi or (d or math.huge) < bd) then bi, bp, bd, bspot = i, p, d or math.huge, spot end
+          if p and (not bi or (d or math.huge) < bd) then
+            bi, bp, bd, bspot, bspots, bkills = i, p, d or math.huge, spot, count, kills
+          end
         end
       end
       if not bi then break end
       local r = table.remove(todo, bi)
-      local xp = Geo.ObjectiveXP(r, plevel or UnitLevel("player"))
+      local xp = Geo.ObjectiveXP(r, plevel)
       mob = mob + xp
       local work = r.count * UnitTime(r.tg)
-      local nSpots
-      if bspot then
-        local _, ns, kills = Geo.BestSpot(r, from, speed)
-        nSpots = ns
-        work = work * Geo.SpotFactor(bspot, kills)
-      end
+      if bspot then work = work * Geo.SpotFactor(bspot, bkills) end
       local st = { task = task, kind = "obj", p = bp, work = work, r = r, xp = xp,
-        spot = bspot, spots = nSpots }
+        spot = bspot, spots = bspots }
       if r.tg.sourceItem then sourced = true end
       -- After the source item: fixed place in the quest's order (not a free objective).
       if sourced and r.tg.needsSource then st.afterSource = true end

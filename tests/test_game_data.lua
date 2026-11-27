@@ -115,6 +115,26 @@ local ok, stops = pcall(ns.MakeStops, task, p, 10)
 check("escort waiting for its item: both planned, the item first: " .. tostring(not ok and stops or ""),
   ok and stops and #stops == 4 and stops[2].r == item and stops[3].r == escort)
 
+-- hunting spot: chosen on the solver's travel times. One spot across the continent but by zeppelin,
+-- one on another continent far from where the boat lands.
+do
+  local S = ns.Solver
+  local function at(c, x) return { c = c, x = x, y = 0 } end
+  local P = { world = { docks = { { name = "A", p = at(0, 100) }, { name = "B", p = at(0, 30000) },
+      { name = "C", p = at(1, 0) } }, links = { { 1, 2, "zeppelin" }, { 1, 3, "boat" } } },
+    k = { PATH_FACTOR = 1, PASS_PATH_FACTOR = 1, PASS_MIN = 300, DANGER_MARGIN = 5, DANGER_FACTOR = 3,
+      FLIGHT_SPEED = 30, FLIGHT_OVERHEAD = 10, TRANSPORT_TIME = 60, K_HUBS = 4, CROSS_CONTINENT = 480 } }
+  local W = S.World(P)
+  local oldWorld, oldNet = Geo.World, Geo.Net
+  Geo.World = function() return W end
+  Geo.Net = function(speed) return S.Network(W, {}, speed) end
+  local zeppelin, abroad = { p = at(0, 30100), n = 8 }, { p = at(1, 20000), n = 8 }
+  local r = { tg = { kind = "kill", spots = { abroad, zeppelin } }, count = 3 }
+  local spot, spots, kills = Geo.BestSpot(r, at(0, 0), 10, 10)
+  check("hunting spot: the fastest to reach, by transport", spot == zeppelin and spots == 2 and kills == 3)
+  Geo.World, Geo.Net = oldWorld, oldNet
+end
+
 -- maximum reputation
 local standing
 env.C_Reputation = { GetFactionDataByID = function() return standing and { name = "F", currentStanding = standing } end }

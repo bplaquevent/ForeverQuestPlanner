@@ -711,10 +711,6 @@ function Geo.WalkWay(a, b)
   return Solver.WalkWay(Geo.World(), a, b)
 end
 
-function Geo.WalkTime(a, b, speed)
-  return Solver.WalkTime(Geo.World(), a, b, speed)
-end
-
 -- Learning, every K.PASS_TICK seconds: a walk from a zone to another (not flying, not on a boat:
 -- the move matches the player's own speed) records the pass between the two readings.
 function Geo.PassTick()
